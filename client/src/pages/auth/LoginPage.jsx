@@ -12,83 +12,38 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     setLoading(true);
-    try {
-      await signIn(email, password);
-      toast.success('Welcome back!');
-    } catch (err) {
-      toast.error(err.message || 'Login failed');
-    } finally {
-      setLoading(false);
-    }
+    try { await signIn(email, password); toast.success('Welcome back!'); }
+    catch (err) { toast.error(err.message || 'Login failed'); }
+    finally { setLoading(false); }
   }
 
+  const inp = { width: '100%', padding: '10px 12px', borderRadius: 'var(--r-btn)', fontSize: 13, outline: 'none', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-0)' };
+
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: 'var(--bg-primary)' }}>
-      <div
-        className="w-full max-w-sm rounded-xl p-8 animate-fade-in"
-        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-      >
-        <div className="text-center mb-8">
-          <h1 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Chat Manager</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Sign in to your account</p>
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-0)' }}>
+      <div style={{ width: 360, background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 32 }} className="animate-in">
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, var(--indigo), #a855f7)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="white" stroke="none"><path d="M5 6c0 5 7 9 7 13 0-4 7-8 7-13a4 4 0 0 0-7-2.5A4 4 0 0 0 5 6z"/></svg>
+          </div>
+          <h1 style={{ fontSize: 20, fontWeight: 700 }}>Chat Manager</h1>
+          <p style={{ fontSize: 13, color: 'var(--fg-2)', marginTop: 4 }}>Sign in to your account</p>
         </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
-              style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
-              onFocus={(e) => e.target.style.borderColor = 'var(--accent)'}
-              onBlur={(e) => e.target.style.borderColor = 'var(--border)'}
-              placeholder="you@example.com"
-            />
+            <label className="label" style={{ display: 'block', marginBottom: 6 }}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} required style={inp} placeholder="you@example.com" />
           </div>
-
           <div>
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2.5 rounded-lg text-sm outline-none transition-colors"
-              style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
-              onFocus={(e) => e.target.style.borderColor = 'var(--accent)'}
-              onBlur={(e) => e.target.style.borderColor = 'var(--border)'}
-              placeholder="••••••••"
-            />
+            <label className="label" style={{ display: 'block', marginBottom: 6 }}>Password</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} required style={inp} placeholder="••••••••" />
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors mt-2"
-            style={{
-              background: loading ? 'var(--border)' : 'var(--accent)',
-              cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-            onMouseEnter={(e) => { if (!loading) e.target.style.background = 'var(--accent-hover)'; }}
-            onMouseLeave={(e) => { if (!loading) e.target.style.background = 'var(--accent)'; }}
-          >
+          <button type="submit" disabled={loading} className="btn primary" style={{ width: '100%', height: 38, justifyContent: 'center', marginTop: 8 }}>
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
         </form>
-
-        <p className="text-center text-xs mt-6" style={{ color: 'var(--text-muted)' }}>
-          First time? <Link to="/setup" className="underline" style={{ color: 'var(--accent)' }}>Set up your organisation</Link>
+        <p style={{ textAlign: 'center', fontSize: 12, color: 'var(--fg-3)', marginTop: 24 }}>
+          First time? <Link to="/setup" style={{ color: 'var(--indigo-bright)', textDecoration: 'none' }}>Set up your organisation</Link>
         </p>
       </div>
     </div>

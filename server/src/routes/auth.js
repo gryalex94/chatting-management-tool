@@ -244,4 +244,70 @@ router.post('/accept-invite', async (req, res) => {
   }
 });
 
+// POST /api/auth/create-member - Directly create a team member (admin+)
+router.post('/create-member', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'No token' });
+
+    const token = authHeader.split(' ')[1];
+    const { data: { user: authUser } } = await supabaseAdmin.auth.getUser(token);
+    if (!authUser) return res.status(401).json({ error: 'Invalid token' });
+
+    const { data: creator } = await supabaseAdmin
+      .from('users')
+      .select('*')
+      .eq('auth_id', authUser.id)
+      .single();
+
+    if (!creator) return res.status(403).json({ error: 'User not found' });
+
+    const canCreate = ['owner', 'admin', 'head_manager'].includes(creator.role);
+    if (!canCreate) return res.status(403).json({ error: 'Insufficient permissions' });
+
+    const { email, password, name, role } = req.body;
+    if (!email || !password || !name || !role) {
+      return res.status(400).json({ error: 'Email, password, name, and role are required' });
+    }
+
+    // Head managers can only create chatters/VAs
+    if (creator.role === 'head_manager' && !['chatter', 'va'].includes(role)) {
+      return res.status(403).json({ error: 'Head managers can only create chatters and VAs' });
+    }
+
+    // Create Supabase auth user
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+    if (authError) return res.status(400).json({ error: authError.message });
+
+    // Create user profile
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users')
+      .insert({
+        auth_id: authData.user.id,
+        email,
+        name,
+        role,
+        organisation_id: creator.organisation_id,
+        invited_by: creator.id,
+      })
+      .select()
+      .single();
+
+    if (userError) return res.status(500).json({ error: userError.message });
+
+    res.status(201).json({
+      message: 'Member created',
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    });
+  } catch (err) {
+    console.error('Create member error:', err);
+    res.status(500).json({ error: 'Failed to create member' });
+  }
+});
+
 module.exports = router;

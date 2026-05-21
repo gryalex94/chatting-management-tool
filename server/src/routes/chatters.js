@@ -16,6 +16,7 @@ router.get('/', async (req, res) => {
         )
       `)
       .eq('organisation_id', req.user.organisationId)
+      .eq('is_active', true)
       .order('name');
 
     if (error) return res.status(500).json({ error: error.message });

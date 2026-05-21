@@ -26,9 +26,12 @@ router.get('/active', async (req, res) => {
       .select('*')
       .eq('organisation_id', req.user.organisationId)
       .eq('status', 'active')
-      .single();
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-    if (error) return res.json(null); // No active cycle
+    if (error || !data || data.length === 0) return res.json(null);
+    res.json(data[0]);
+    return; // No active cycle
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch active cycle' });
@@ -38,6 +41,18 @@ router.get('/active', async (req, res) => {
 // POST /api/cycles/start - Start a new weekly cycle
 router.post('/start', requireMinRole('admin'), async (req, res) => {
   try {
+    // Check if there's already an active cycle
+    const { data: existing } = await supabaseAdmin
+      .from('cycles')
+      .select('id')
+      .eq('organisation_id', req.user.organisationId)
+      .eq('status', 'active')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: 'A cycle is already active. Close it first.' });
+    }
+
     const today = new Date();
     const endDate = new Date(today);
     endDate.setDate(endDate.getDate() + 7);
@@ -78,11 +93,20 @@ router.post('/:id/close', requireMinRole('admin'), async (req, res) => {
 
     if (cycleError) return res.status(500).json({ error: cycleError.message });
 
-    // 2. Move completed tasks to confirmed
+    // 2. Move completed tasks to confirmed (including orphaned tasks without cycle_id)
     await supabaseAdmin
       .from('tasks')
       .update({ status: 'confirmed' })
-      .eq('cycle_id', cycleId)
+      .eq('organisation_id', req.user.organisationId)
+      .in('cycle_id', [cycleId])
+      .eq('status', 'completed');
+
+    // Also confirm orphaned completed tasks
+    await supabaseAdmin
+      .from('tasks')
+      .update({ status: 'confirmed', cycle_id: cycleId })
+      .eq('organisation_id', req.user.organisationId)
+      .is('cycle_id', null)
       .eq('status', 'completed');
 
     // 3. Roll over unfinished tasks

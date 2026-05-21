@@ -1,6 +1,7 @@
 const XLSX = require('xlsx');
 const { supabaseAdmin } = require('../utils/supabase');
 const { parseDollar, parsePercent, parseDateRange, parseDays, safeInt, safeFloat } = require('../utils/parsers');
+const { buildLookupMaps } = require('../utils/autoMatch');
 
 async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
   const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
@@ -14,6 +15,10 @@ async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
 
   console.log(`Parsing ${rows.length} rows from Creator Statistics...`);
 
+  const { creatorMap } = await buildLookupMaps(rows, orgId, {
+    creatorField: 'Creator',
+  });
+
   const records = rows.map(row => {
     const reportDate = parseDateRange(row['Date/Time Europe/Amsterdam']);
 
@@ -21,6 +26,7 @@ async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
       import_id: importId,
       report_date: reportDate,
       creator_name: row['Creator'] || '',
+      creator_id: creatorMap[(row['Creator'] || '').trim()] || null,
       // Revenue
       subscription_net: parseDollar(row['Subscription Net']),
       new_subscriptions_net: parseDollar(row['New subscriptions Net']),

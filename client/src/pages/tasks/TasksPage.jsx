@@ -1,225 +1,201 @@
-import { useState, useEffect } from 'react';
-import api from '../../services/api';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { Clock, Play, Pause, Check, Plus, AlertCircle } from 'lucide-react';
+import api from '../../services/api';
+import { Avatar, Chip, PriorityDot } from '../../components/shared';
+import { fmtTimer } from '../../utils/helpers';
+import { Plus, Play, Pause, Check, Eye, Flame, Search, SlidersHorizontal, LayoutGrid, List } from 'lucide-react';
 import toast from 'react-hot-toast';
+import CreateTaskModal from '../../components/shared/CreateTaskModal';
 
-const statusLabels = {
-  pool: 'Available',
-  claimed: 'Claimed',
-  in_progress: 'In Progress',
-  completed: 'Completed',
-  pending_review: 'Pending Review',
-  confirmed: 'Confirmed',
-  rolled_over: 'Rolled Over',
-};
+const LANES = [
+  { id:'pool',        label:'Pool',        tone:'warn',   fg:'#fbbf24' },
+  { id:'claimed',     label:'Claimed',     tone:'indigo', fg:'#818cf8' },
+  { id:'in_progress', label:'In progress', tone:'info',   fg:'#60a5fa' },
+  { id:'completed',   label:'Done',        tone:'good',   fg:'#4ade80' },
+];
 
-const priorityColors = {
-  1: 'var(--danger)',
-  2: '#f97316',
-  3: 'var(--warning)',
-  4: 'var(--info)',
-  5: '#8b5cf6',
-  6: 'var(--text-secondary)',
-  7: 'var(--text-muted)',
-};
+function TaskCard({ task, onClaim, onTimer }) {
+  const chName = task.chatter?.name;
+  const claimedBy = task.claimed_user?.name;
 
-export default function TasksPage() {
-  const { user } = useAuth();
-  const [tasks, setTasks] = useState([]);
-  const [filter, setFilter] = useState('active');
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => { loadTasks(); }, [filter]);
-
-  async function loadTasks() {
-    setLoading(true);
-    try {
-      const params = {};
-      if (filter === 'active') {
-        // Don't filter by status — get all non-historical
-      } else if (filter !== 'all') {
-        params.status = filter;
-      }
-      const { data } = await api.get('/api/tasks', { params });
-      const filtered = filter === 'active'
-        ? data.filter(t => !['confirmed', 'rolled_over'].includes(t.status))
-        : data;
-      setTasks(filtered);
-    } catch (err) {
-      console.error('Load tasks error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function claimTask(taskId) {
-    try {
-      await api.post(`/api/tasks/${taskId}/claim`);
-      toast.success('Task claimed!');
-      loadTasks();
-    } catch (err) {
-      toast.error('Failed to claim task');
-    }
-  }
-
-  async function timerAction(taskId, action) {
-    try {
-      await api.post(`/api/tasks/${taskId}/timer`, { action });
-      toast.success(`Timer ${action}ed`);
-      loadTasks();
-    } catch (err) {
-      toast.error(`Failed to ${action} timer`);
-    }
-  }
-
-  const filters = [
-    { key: 'active', label: 'Active' },
-    { key: 'pool', label: 'Pool' },
-    { key: 'in_progress', label: 'In Progress' },
-    { key: 'completed', label: 'Completed' },
-    { key: 'all', label: 'All' },
-  ];
+  let action;
+  if (task.status==='pool') action=<button className="btn primary sm" style={{width:'100%',justifyContent:'center',height:26,fontSize:11}} onClick={()=>onClaim(task.id)}>Claim</button>;
+  else if (task.status==='claimed') action=<button className="btn primary sm" style={{width:'100%',justifyContent:'center',height:26,fontSize:11}} onClick={()=>onTimer(task.id,'start')}><Play size={10}/> Start</button>;
+  else if (task.status==='in_progress') action=(
+    <div style={{display:'flex',gap:4,width:'100%'}}>
+      <button className="btn sm" style={{flex:1,justifyContent:'center',height:26,fontSize:10.5}} onClick={()=>onTimer(task.id,'pause')}><Pause size={10}/></button>
+      <button className="btn primary sm" style={{flex:1,justifyContent:'center',height:26,fontSize:10.5}} onClick={()=>onTimer(task.id,'complete')}><Check size={10}/> Done</button>
+    </div>
+  );
+  else action=<div style={{textAlign:'center',fontSize:10.5,color:'var(--fg-3)',padding:'5px 0',borderTop:'1px dashed var(--border)'}}>completed</div>;
 
   return (
-    <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Tasks</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{tasks.length} tasks</p>
+    <div style={{
+      background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:9,
+      padding:10, display:'flex', flexDirection:'column', gap:8,
+      transition:'border-color .12s',
+    }}
+    onMouseEnter={e=>e.currentTarget.style.borderColor='var(--border-strong)'}
+    onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
+      <div style={{display:'flex',gap:8,alignItems:'flex-start'}}>
+        <PriorityDot p={task.priority}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:11.5,fontWeight:600,lineHeight:1.3,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+            {task.title}
+          </div>
         </div>
-        <button
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
-          style={{ background: 'var(--accent)' }}
-        >
-          <Plus size={16} />
-          New Task
-        </button>
+        {task.rollover_counter>0&&<Chip tone="bad" style={{height:16,fontSize:9.5,padding:'0 5px',flexShrink:0}}>×{task.rollover_counter}</Chip>}
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 mb-6">
-        {filters.map(f => (
-          <button
-            key={f.key}
-            onClick={() => setFilter(f.key)}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-            style={{
-              background: filter === f.key ? 'var(--accent)' : 'var(--bg-card)',
-              color: filter === f.key ? '#fff' : 'var(--text-secondary)',
-              border: `1px solid ${filter === f.key ? 'var(--accent)' : 'var(--border)'}`,
-            }}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div style={{display:'flex',gap:6,fontSize:10.5,color:'var(--fg-3)',alignItems:'center'}}>
+        {chName&&<><Avatar name={chName} size={16}/><span style={{color:'var(--fg-1)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{chName}</span></>}
+        <div style={{flex:1}}/>
+        {task.requires_screenshots&&<Eye size={10}/>}
       </div>
 
-      {/* Task list */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      ) : tasks.length === 0 ? (
-        <div className="text-center py-16" style={{ color: 'var(--text-muted)' }}>
-          <ListIcon className="mx-auto mb-3" size={32} />
-          <p className="text-sm">No tasks found</p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {tasks.map((task, i) => (
-            <div
-              key={task.id}
-              className="rounded-xl p-4 transition-all duration-200 animate-fade-in"
-              style={{
-                background: 'var(--bg-card)',
-                border: '1px solid var(--border)',
-                animationDelay: `${i * 30}ms`,
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--border-light)'}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ background: priorityColors[task.priority] }}
-                    />
-                    <h3 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
-                      {task.title}
-                    </h3>
-                    {task.rollover_counter > 0 && (
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ background: 'var(--danger)', color: '#fff' }}>
-                        ×{task.rollover_counter}
-                      </span>
-                    )}
-                  </div>
-                  {task.description && (
-                    <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-                      {task.description.substring(0, 120)}{task.description.length > 120 ? '...' : ''}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {task.chatter && <span>👤 {task.chatter.name}</span>}
-                    {task.creator && <span>📄 {task.creator.name}</span>}
-                    <span
-                      className="px-2 py-0.5 rounded-full"
-                      style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
-                    >
-                      {statusLabels[task.status] || task.status}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex items-center gap-2">
-                  {task.status === 'pool' && (
-                    <button
-                      onClick={() => claimTask(task.id)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-medium text-white"
-                      style={{ background: 'var(--accent)' }}
-                    >
-                      Claim
-                    </button>
-                  )}
-                  {task.status === 'claimed' && (
-                    <button
-                      onClick={() => timerAction(task.id, 'start')}
-                      className="p-2 rounded-lg transition-colors"
-                      style={{ background: 'var(--success)', color: '#fff' }}
-                    >
-                      <Play size={14} />
-                    </button>
-                  )}
-                  {task.status === 'in_progress' && (
-                    <>
-                      <button
-                        onClick={() => timerAction(task.id, 'pause')}
-                        className="p-2 rounded-lg"
-                        style={{ background: 'var(--warning)', color: '#fff' }}
-                      >
-                        <Pause size={14} />
-                      </button>
-                      <button
-                        onClick={() => timerAction(task.id, 'complete')}
-                        className="p-2 rounded-lg"
-                        style={{ background: 'var(--success)', color: '#fff' }}
-                      >
-                        <Check size={14} />
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+      {claimedBy&&task.status!=='pool'&&task.status!=='completed'&&(
+        <div style={{fontSize:10,color:'var(--fg-3)'}}>by <span style={{color:'var(--indigo-bright)'}}>{claimedBy}</span></div>
       )}
+
+      {action}
     </div>
   );
 }
 
-function ListIcon({ className, size }) {
-  return <AlertCircle className={className} size={size} style={{ color: 'var(--text-muted)' }} />;
+function Lane({ lane, tasks, onClaim, onTimer }) {
+  return (
+    <div style={{flex:1,minWidth:0,background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:10,display:'flex',flexDirection:'column'}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 10px',borderBottom:'1px solid var(--border-soft)'}}>
+        <span style={{width:6,height:6,borderRadius:'50%',background:lane.fg}}/>
+        <span style={{fontSize:11,fontWeight:600,color:lane.fg,letterSpacing:'.02em'}}>{lane.label}</span>
+        <span style={{fontSize:10,color:'var(--fg-3)'}}>· {tasks.length}</span>
+      </div>
+      <div style={{padding:8,display:'flex',flexDirection:'column',gap:8,flex:1,minHeight:130}}>
+        {tasks.length===0?<div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',color:'var(--fg-3)',fontSize:10.5}}>—</div>
+        :tasks.map(t=><TaskCard key={t.id} task={t} onClaim={onClaim} onTimer={onTimer}/>)}
+      </div>
+    </div>
+  );
+}
+
+function CreatorRow({ name, tasks, rolledCount, onClaim, onTimer, onNewTask }) {
+  const byLane = {};
+  LANES.forEach(l=>{byLane[l.id]=tasks.filter(t=>t.status===l.id);});
+  const openCount=tasks.filter(t=>['pool','claimed'].includes(t.status)).length;
+  const runCount=tasks.filter(t=>t.status==='in_progress').length;
+  const doneCount=tasks.filter(t=>t.status==='completed').length;
+
+  return (
+    <div style={{marginBottom:20}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+        <Avatar name={name||'Org'} size={28}/>
+        <div>
+          <span style={{fontSize:14,fontWeight:600}}>{name||'Org-wide'}</span>
+          <span style={{fontSize:11.5,color:'var(--fg-3)',marginLeft:8}}>
+            {tasks.length} tasks this cycle · {openCount} open · {runCount} running · {doneCount} done
+          </span>
+        </div>
+        <div style={{flex:1}}/>
+        {rolledCount>0&&<Chip tone="bad"><Flame size={10}/> {rolledCount} rolled</Chip>}
+        <button className="btn sm" onClick={onNewTask}><Plus size={12}/> Task for {(name||'Org').split(' ')[0]}</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(4, 1fr)',gap:10}}>
+        {LANES.map(l=><Lane key={l.id} lane={l} tasks={byLane[l.id]||[]} onClaim={onClaim} onTimer={onTimer}/>)}
+      </div>
+    </div>
+  );
+}
+
+export default function TasksPage() {
+  const { user } = useAuth();
+  const [tasks, setTasks] = useState([]);
+  const [creators, setCreators] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [showNewTask, setShowNewTask] = useState(false);
+
+  const load = useCallback(async()=>{
+    try {
+      const [t,cr]=await Promise.all([api.get('/api/tasks'),api.get('/api/creators')]);
+      setTasks(t.data); setCreators(cr.data);
+    } catch(e){console.error(e);}
+    finally{setLoading(false);}
+  },[]);
+
+  useEffect(()=>{load();},[load]);
+
+  async function onClaim(id){try{await api.post(`/api/tasks/${id}/claim`);toast.success('Claimed');load();}catch{toast.error('Failed');}}
+  async function onTimer(id,action){try{await api.post(`/api/tasks/${id}/timer`,{action});toast.success(action==='complete'?'Done!':'Timer '+action);load();}catch{toast.error('Failed');}}
+
+  // Filter
+  const active = tasks.filter(t=>!['confirmed','rolled_over'].includes(t.status));
+  let filtered = active;
+  if (statusFilter==='history') {
+    filtered = tasks.filter(t=>t.status==='confirmed');
+  } else if (statusFilter!=='all') {
+    const map = {pool:['pool'],claimed:['claimed'],inprog:['in_progress'],done:['completed']};
+    filtered = active.filter(t=>(map[statusFilter]||[]).includes(t.status));
+  }
+  if (search) filtered = filtered.filter(t=>t.title?.toLowerCase().includes(search.toLowerCase()));
+
+  // Group by creator
+  const grouped = {};
+  filtered.forEach(t=>{const k=t.creator?.name||'Org-wide';if(!grouped[k])grouped[k]=[];grouped[k].push(t);});
+
+  // Stats
+  const poolCount = active.filter(t=>t.status==='pool').length;
+  const claimedCount = active.filter(t=>t.status==='claimed').length;
+  const progCount = active.filter(t=>t.status==='in_progress').length;
+  const doneCount = active.filter(t=>t.status==='completed').length;
+  const rolledCount = active.filter(t=>t.rollover_counter>0).length;
+
+  if(loading) return <div style={{display:'flex',justifyContent:'center',paddingTop:80}}><div style={{width:24,height:24,border:'2px solid var(--indigo)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+
+  return (
+    <div className="animate-in">
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
+        <div>
+          <h1 style={{fontSize:22,fontWeight:700}}>Tasks</h1>
+          <p style={{fontSize:13,color:'var(--fg-2)',marginTop:4}}>
+            Grouped by creator. {active.length} tasks this cycle · {poolCount+claimedCount} open · {progCount} running · {doneCount} done.
+          </p>
+        </div>
+        <div style={{display:'flex',gap:8}}>
+          <button className="btn primary" onClick={() => setShowNewTask(true)}><Plus size={14}/> New task</button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{display:'flex',gap:6,marginBottom:18,alignItems:'center',flexWrap:'wrap'}}>
+        {[['all',`All ${active.length}`],['pool',`Pool ${poolCount}`],['claimed',`Claimed ${claimedCount}`],['inprog',`In progress ${progCount}`],['done',`Done ${doneCount}`],['history',`History ${tasks.filter(t=>t.status==='confirmed').length}`]].map(([k,l])=>(
+          <button key={k} className={`btn sm ${statusFilter===k?'primary':''}`} onClick={()=>setStatusFilter(k)}>{l}</button>
+        ))}
+        {rolledCount>0&&<button className={`btn sm ${statusFilter==='rolled'?'primary':''}`} onClick={()=>setStatusFilter('all')}>
+          <Flame size={10}/> Rollover {rolledCount}
+        </button>}
+        <div style={{flex:1}}/>
+        <div style={{display:'flex',alignItems:'center',gap:6,background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:'var(--r-btn)',padding:'0 8px',height:30}}>
+          <Search size={13} style={{color:'var(--fg-3)'}}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tasks..."
+            style={{background:'transparent',border:'none',outline:'none',color:'var(--fg-0)',fontSize:12,width:140}}/>
+        </div>
+      </div>
+
+      {/* Creator rows */}
+      {Object.keys(grouped).length===0?(
+        <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',padding:60,textAlign:'center'}}>
+          <p style={{color:'var(--fg-3)',fontSize:14}}>No tasks found</p>
+          <p style={{color:'var(--fg-3)',fontSize:12,marginTop:8}}>Create a task or upload daily reports to generate auto-tasks.</p>
+        </div>
+      ):(
+        Object.entries(grouped).map(([name,ts])=>{
+          const rolled = ts.filter(t=>t.rollover_counter>0).length;
+          return <CreatorRow key={name} name={name} tasks={ts} rolledCount={rolled} onClaim={onClaim} onTimer={onTimer} onNewTask={()=>toast('Create task modal — coming soon')}/>;
+        })
+      )}
+
+      {showNewTask && <CreateTaskModal onClose={() => setShowNewTask(false)} onCreated={load} />}
+    </div>
+  );
 }

@@ -1,21 +1,25 @@
 const XLSX = require('xlsx');
 const { supabaseAdmin } = require('../utils/supabase');
 const { parseReplayTime, parseTextDate, parseSentTo, stripHtml, parseDollar } = require('../utils/parsers');
+const { buildLookupMaps } = require('../utils/autoMatch');
 
 async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
-  // Read the Excel file
   const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-  const sheetName = workbook.SheetNames[0]; // "Message Dashboard"
+  const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet);
 
-  if (!rows.length) {
-    throw new Error('Spreadsheet is empty');
-  }
+  if (!rows.length) throw new Error('Spreadsheet is empty');
 
   console.log(`Parsing ${rows.length} rows from Message Dashboard...`);
 
-  // Process in batches of 500
+  console.log('Building lookup maps...');
+  const { creatorMap, chatterMap } = await buildLookupMaps(rows, orgId, {
+    creatorField: 'Creator',
+    chatterField: 'Sender',
+  });
+  console.log(`Matched ${Object.keys(creatorMap).length} creators, ${Object.keys(chatterMap).length} chatters`);
+
   const BATCH_SIZE = 500;
   let totalInserted = 0;
 
@@ -26,17 +30,14 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
       const sentTo = parseSentTo(row['Sent to']);
       const sentDate = parseTextDate(row['Sent date']);
       const sentTime = row['Sent time'] || null;
-
-      // Build full datetime
       let sentDatetime = null;
-      if (sentDate && sentTime) {
-        sentDatetime = `${sentDate}T${sentTime}`;
-      }
+      if (sentDate && sentTime) sentDatetime = `${sentDate}T${sentTime}`;
 
       return {
         import_id: importId,
         sender_name: row['Sender'] || '',
         creator_name: row['Creator'] || '',
+        creator_id: creatorMap[(row['Creator'] || '').trim()] || null,
         fan_message: row['Fans Message'] || null,
         creator_message: row['Creator Message'] || null,
         fan_message_text: stripHtml(row['Fans Message']),
@@ -57,7 +58,6 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
       };
     });
 
-    // Insert batch
     const { error } = await supabaseAdmin.from('messages').insert(records);
     if (error) {
       console.error(`Batch insert error at row ${i}:`, error.message);
@@ -68,16 +68,12 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
     console.log(`Inserted ${totalInserted}/${rows.length} messages...`);
   }
 
-  // Update subscriber records
   await updateSubscribers(importId, orgId);
-
   console.log(`Message Dashboard parsing complete: ${totalInserted} records`);
   return { rowCount: totalInserted };
 }
 
-// Update subscriber table with spend data from imported messages
 async function updateSubscribers(importId, orgId) {
-  // Get all messages with purchases from this import
   const { data: purchases } = await supabaseAdmin
     .from('messages')
     .select('sent_to_username, sent_to_nickname, price, sent_date')
@@ -87,7 +83,6 @@ async function updateSubscribers(importId, orgId) {
 
   if (!purchases || !purchases.length) return;
 
-  // Group by subscriber
   const subMap = {};
   for (const p of purchases) {
     if (!p.sent_to_username) continue;
@@ -102,7 +97,6 @@ async function updateSubscribers(importId, orgId) {
     subMap[p.sent_to_username].total_spend += parseFloat(p.price) || 0;
   }
 
-  // Upsert subscribers
   for (const sub of Object.values(subMap)) {
     const { data: existing } = await supabaseAdmin
       .from('subscribers')

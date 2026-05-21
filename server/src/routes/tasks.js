@@ -49,13 +49,14 @@ router.post('/', requireMinRole('manager'), async (req, res) => {
     // Get active cycle if not specified
     let activeCycleId = cycle_id;
     if (!activeCycleId) {
-      const { data: activeCycle } = await supabaseAdmin
+      const { data: activeCycles } = await supabaseAdmin
         .from('cycles')
         .select('id')
         .eq('organisation_id', req.user.organisationId)
         .eq('status', 'active')
-        .single();
-      activeCycleId = activeCycle?.id;
+        .order('created_at', { ascending: false })
+        .limit(1);
+      activeCycleId = activeCycles?.[0]?.id;
     }
 
     const { data, error } = await supabaseAdmin
@@ -81,6 +82,78 @@ router.post('/', requireMinRole('manager'), async (req, res) => {
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to create task' });
+  }
+});
+// GET /api/tasks/templates - List task templates
+router.get('/templates', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('task_templates')
+      .select('*')
+      .or(`organisation_id.eq.${req.user.organisationId},organisation_id.is.null`)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// POST /api/tasks/templates - Create template
+router.post('/templates', requireMinRole('admin'), async (req, res) => {
+  try {
+    const { label, icon, title, description, priority, sort_order } = req.body;
+    if (!label || !title) return res.status(400).json({ error: 'Label and title required' });
+
+    const { data, error } = await supabaseAdmin
+      .from('task_templates')
+      .insert({
+        label, icon: icon || '📝', title, description,
+        priority: priority || 3,
+        sort_order: sort_order || 0,
+        organisation_id: req.user.organisationId,
+        created_by: req.user.id,
+      })
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.status(201).json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create template' });
+  }
+});
+
+// PUT /api/tasks/templates/:id - Update template
+router.put('/templates/:id', requireMinRole('admin'), async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('task_templates')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update template' });
+  }
+});
+
+// DELETE /api/tasks/templates/:id - Deactivate template
+router.delete('/templates/:id', requireMinRole('admin'), async (req, res) => {
+  try {
+    await supabaseAdmin
+      .from('task_templates')
+      .update({ is_active: false })
+      .eq('id', req.params.id);
+
+    res.json({ message: 'Template removed' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to remove template' });
   }
 });
 
@@ -132,6 +205,25 @@ router.post('/:id/timer', async (req, res) => {
 
     const update = { status: statusMap[action] };
     if (action === 'complete') {
+      // Check if screenshots required
+      const { data: task } = await supabaseAdmin
+        .from('tasks')
+        .select('requires_screenshots')
+        .eq('id', req.params.id)
+        .single();
+
+      if (task?.requires_screenshots) {
+        const { data: attachments } = await supabaseAdmin
+          .from('task_attachments')
+          .select('id')
+          .eq('task_id', req.params.id)
+          .limit(1);
+
+        if (!attachments || attachments.length === 0) {
+          return res.status(400).json({ error: 'Screenshots required before completing this task. Upload at least one good or bad case.' });
+        }
+      }
+
       update.completed_at = new Date().toISOString();
     }
 
@@ -192,5 +284,7 @@ router.get('/:id/timer-logs', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch timer logs' });
   }
 });
+
+
 
 module.exports = router;
