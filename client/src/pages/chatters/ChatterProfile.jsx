@@ -132,12 +132,30 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
           {issues.length > 0 && (
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
               <div className="label" style={{ fontSize:10 }}>{issues.length} issue{issues.length === 1 ? '' : 's'} flagged</div>
-              {issues.slice(0, 6).map((iss, i) => (
-                <div key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', padding:'7px 10px', background:'var(--bg-2)', borderRadius:'var(--r-tile)' }}>
-                  <span style={{ width:6, height:6, borderRadius:'50%', background:sevColor(iss.severity), marginTop:5, flexShrink:0 }}/>
-                  <div style={{ fontSize:11.5, color:'var(--fg-1)', lineHeight:1.45 }}>{iss.title || iss.issue || iss.area || iss.type || 'Issue'}</div>
-                </div>
-              ))}
+              {issues.map((iss, i) => {
+                const who = iss.fan_username || iss.fan || null;
+                return (
+                  <div key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', padding:'8px 10px', background:'var(--bg-2)', borderRadius:'var(--r-tile)' }}>
+                    <span style={{ width:6, height:6, borderRadius:'50%', background:sevColor(iss.severity), marginTop:5, flexShrink:0 }}/>
+                    <div style={{ minWidth:0, flex:1 }}>
+                      <div style={{ fontSize:11.5, color:'var(--fg-1)', lineHeight:1.45 }}>{iss.detail || iss.title || iss.issue || 'Issue'}</div>
+                      {(who || iss.sent_at || iss.area) && (
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:4, fontSize:10.5, color:'var(--fg-3)' }}>
+                          {iss.area && <span style={{ textTransform:'capitalize' }}>{iss.area}</span>}
+                          {who && <span style={{ color:'var(--indigo-bright)', fontWeight:600 }}>@{who}</span>}
+                          {iss.spend != null && <span>${iss.spend} spent</span>}
+                          {iss.sent_at && <span>🕐 {fmtSentAt(iss.sent_at)}</span>}
+                        </div>
+                      )}
+                      {iss.message && (
+                        <div style={{ fontSize:11, color:'var(--fg-2)', fontStyle:'italic', marginTop:4, paddingLeft:8, borderLeft:'2px solid var(--border)', lineHeight:1.4 }}>
+                          “{iss.message}”
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
