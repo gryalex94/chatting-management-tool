@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '../services/supabase';
-import api from '../services/api';
+import api, { setApiToken } from '../services/api';
+import { setInflowwOffset } from '../utils/displaySettings';
 
 const AuthContext = createContext(null);
 
@@ -8,27 +9,71 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const signingOut = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session) fetchProfile(session.user.id);
-      else setLoading(false);
+    // Safety timeout — never stay loading forever
+    const timeout = setTimeout(() => setLoading(false), 6000);
+
+    supabase.auth.getSession().then(({ data: { session: s } }) => {
+      if (s?.access_token) {
+        setSession(s);
+        setApiToken(s.access_token);
+        fetchProfile(s.user.id, timeout);
+      } else {
+        setLoading(false);
+        clearTimeout(timeout);
+      }
+    }).catch(() => {
+      setLoading(false);
+      clearTimeout(timeout);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_e, session) => {
-      setSession(session);
-      if (session) await fetchProfile(session.user.id);
-      else { setUser(null); setLoading(false); }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (signingOut.current) return; // prevent loop during signOut
+
+      setSession(s);
+      if (s?.access_token) {
+        setApiToken(s.access_token);
+        fetchProfile(s.user.id);
+      } else {
+        setApiToken(null);
+        setUser(null);
+        setLoading(false);
+      }
     });
-    return () => subscription.unsubscribe();
+
+    return () => { subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
-  async function fetchProfile(authId) {
+  async function fetchProfile(authId, timeout) {
     try {
       const { data } = await api.post('/api/auth/login', { authId });
       setUser(data.user);
-    } catch { setUser(null); }
-    finally { setLoading(false); }
+      // load org display preferences (Infloww time offset) for timestamp formatting
+      api.get('/api/organisations/config')
+        .then(r => setInflowwOffset(r.data?.config?.infloww_offset_hours))
+        .catch(() => { /* config optional */ });
+    } catch (err) {
+      console.error('Auth profile fetch failed:', err?.response?.status);
+      setUser(null);
+      // If 401, token is bad — sign out cleanly
+      if (err?.response?.status === 401) {
+        await cleanSignOut();
+      }
+    } finally {
+      setLoading(false);
+      if (timeout) clearTimeout(timeout);
+    }
+  }
+
+  async function cleanSignOut() {
+    signingOut.current = true;
+    setApiToken(null);
+    setUser(null);
+    setSession(null);
+    try { await supabase.auth.signOut(); } catch {}
+    signingOut.current = false;
   }
 
   async function signIn(email, password) {
@@ -38,8 +83,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
-    setUser(null); setSession(null);
+    await cleanSignOut();
   }
 
   return (

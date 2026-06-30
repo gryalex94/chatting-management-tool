@@ -5,6 +5,7 @@ const { requireMinRole } = require('../middleware/auth');
 const { parseMessageDashboard } = require('../parsers/messageDashboard');
 const { parseEmployeeReport } = require('../parsers/employeeReport');
 const { parseCreatorStats } = require('../parsers/creatorStats');
+const { importSubscriberSpend } = require('../parsers/subscriberSpend');
 
 // Configure multer for file uploads (store in memory)
 const upload = multer({
@@ -60,13 +61,20 @@ router.post('/message-dashboard', requireMinRole('manager'), upload.single('file
         req.file.buffer,
         req.file.originalname,
         importRecord.id,
-        req.user.organisationId
+        req.user.organisationId,
+        report_date
       );
 
       await supabaseAdmin
         .from('data_imports')
         .update({ status: 'completed', row_count: result.rowCount })
         .eq('id', importRecord.id);
+
+      // Auto-populate chatter metrics from messages (new per-creator engine)
+      const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
+      computeChatterDailyMetrics(req.user.organisationId).catch(err =>
+        console.error('Auto-populate metrics failed:', err)
+      );
     } catch (parseErr) {
       console.error('Parse error:', parseErr);
       await supabaseAdmin
@@ -78,7 +86,8 @@ router.post('/message-dashboard', requireMinRole('manager'), upload.single('file
     console.error('Upload error:', err);
     res.status(500).json({ error: 'Upload failed' });
   }
-});
+
+  });
 
 // POST /api/uploads/employee-report - Upload employee report
 router.post('/employee-report', requireMinRole('manager'), upload.single('file'), async (req, res) => {
@@ -120,6 +129,12 @@ router.post('/employee-report', requireMinRole('manager'), upload.single('file')
         .from('data_imports')
         .update({ status: 'completed', row_count: result.rowCount })
         .eq('id', importRecord.id);
+
+      // Auto-compute metrics from messages (per-creator, fixed reply times, AFK)
+      const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
+      computeChatterDailyMetrics(req.user.organisationId).catch(err =>
+        console.error('Auto-compute metrics failed:', err)
+      );
     } catch (parseErr) {
       console.error('Parse error:', parseErr);
       await supabaseAdmin
@@ -214,6 +229,47 @@ router.get('/history', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+// POST /api/uploads/subscriber-spend - Import sales history into subscribers ONLY
+// (does not create chatters or store messages — safe for historical files with ex-staff)
+router.post('/subscriber-spend', requireMinRole('manager'), upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const importRec = await supabaseAdmin
+      .from('data_imports')
+      .insert({
+        organisation_id: req.user.organisationId,
+        report_type: 'subscriber_spend',
+        file_name: req.file.originalname,
+        uploaded_by: req.user.id,
+        status: 'processing',
+      })
+      .select().single();
+
+    res.status(202).json({ message: 'Sales file received, importing spend', importId: importRec.data?.id });
+
+    try {
+      const result = await importSubscriberSpend(req.file.buffer, req.file.originalname, req.user.organisationId);
+      if (importRec.data) {
+        await supabaseAdmin.from('data_imports')
+          .update({ status: 'completed', row_count: result.newSales })
+          .eq('id', importRec.data.id);
+      }
+      console.log(`[Upload] subscriber-spend done:`, result);
+    } catch (parseErr) {
+      console.error('Spend import error:', parseErr);
+      if (importRec.data) {
+        await supabaseAdmin.from('data_imports')
+          .update({ status: 'failed', error_message: parseErr.message })
+          .eq('id', importRec.data.id);
+      }
+    }
+  } catch (err) {
+    console.error('Spend upload error:', err);
+    res.status(500).json({ error: 'Upload failed' });
   }
 });
 

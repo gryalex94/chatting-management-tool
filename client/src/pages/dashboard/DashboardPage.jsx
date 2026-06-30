@@ -1,219 +1,320 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
-import { Avatar, Chip, PriorityDot, StatusDot } from '../../components/shared';
-import { STATUS_META } from '../../utils/helpers';
-import { ClipboardList, Play, Pause, Check, Plus, ArrowUp, ArrowDown, ArrowRight, Eye, Flame, Clock, AlertTriangle, Users } from 'lucide-react';
+import { Avatar, Chip } from '../../components/shared';
+import { TIER } from '../../utils/taskMeta';
 import toast from 'react-hot-toast';
-import { useNavigate } from 'react-router-dom';
-import CreateTaskModal from '../../components/shared/CreateTaskModal';
 
+const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
+const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
-function StatCard({ label, value, sub, icon: Icon, tone = 'indigo', delta }) {
-  const bgs = { indigo:'var(--indigo-soft)', good:'rgba(34,197,94,0.12)', warn:'rgba(245,158,11,0.12)', bad:'rgba(239,68,68,0.13)', info:'rgba(59,130,246,0.12)', purple:'rgba(139,92,246,0.12)' };
-  const fgs = { indigo:'var(--indigo-bright)', good:'#4ade80', warn:'#fbbf24', bad:'#f87171', info:'#60a5fa', purple:'#a78bfa' };
+function Delta({ v, lowerBetter, money: m, suffix = '' }) {
+  if (v == null || v === 0) return <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>·</span>;
+  const good = lowerBetter ? v < 0 : v > 0;
+  const val = m ? `$${Math.abs(Math.round(v)).toLocaleString()}` : `${Math.abs(Math.round(v * 10) / 10)}${suffix}`;
+  return <span style={{ color: good ? '#4ade80' : '#f87171', fontSize: 10, fontWeight: 700 }}>{v > 0 ? '▲' : '▼'}{val}</span>;
+}
+
+function Cell({ val, delta, money: m, suffix = '', lowerBetter }) {
   return (
-    <div style={{ flex:1, padding:16, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-card)' }}>
-      <div style={{ display:'flex', justifyContent:'space-between' }}>
-        <span className="label">{label}</span>
-        <span style={{ width:28, height:28, borderRadius:8, background:bgs[tone], color:fgs[tone], display:'flex', alignItems:'center', justifyContent:'center' }}><Icon size={15}/></span>
-      </div>
-      <div style={{ display:'flex', alignItems:'baseline', gap:8, marginTop:10 }}>
-        <span className="mono" style={{ fontSize:28, fontWeight:600, letterSpacing:'-0.02em' }}>{value}</span>
-        {delta!=null&&<span style={{ display:'flex', alignItems:'center', gap:2, color:delta>=0?'#4ade80':'#f87171', fontSize:12, fontWeight:600 }}>{delta>=0?<ArrowUp size={12}/>:<ArrowDown size={12}/>}{Math.abs(delta)}%</span>}
-      </div>
-      <div style={{ color:'var(--fg-3)', fontSize:11.5, marginTop:4 }}>{sub}</div>
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 13 }}>{m ? money(val) : `${val}${suffix}`}</div>
+      <Delta v={delta} money={m} suffix={suffix} lowerBetter={lowerBetter} />
     </div>
   );
 }
 
-function PanelHeader({ title, sub, right }) {
+function Donut({ counts }) {
+  const total = counts.open + counts.taken + counts.completed;
+  const pct = total ? counts.completed / total : 0;
+  const r = 30, circ = 2 * Math.PI * r;
   return (
-    <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-      <div><div style={{ fontWeight:600, fontSize:13.5 }}>{title}</div>{sub&&<div style={{ color:'var(--fg-3)', fontSize:11.5, marginTop:2 }}>{sub}</div>}</div>
-      <div style={{ flex:1 }}/>{right}
+    <svg viewBox="0 0 80 80" width={78} height={78}>
+      <circle cx={40} cy={40} r={r} fill="none" stroke="var(--bg-3)" strokeWidth={9} />
+      <circle cx={40} cy={40} r={r} fill="none" stroke="#4ade80" strokeWidth={9} strokeLinecap="round"
+        strokeDasharray={`${circ * pct} ${circ}`} transform="rotate(-90 40 40)" />
+      <text x={40} y={45} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--fg-0)">{Math.round(pct * 100)}%</text>
+    </svg>
+  );
+}
+
+function Sparkline({ data, w = 74, h = 24, color = 'var(--indigo-bright)' }) {
+  const vals = (data || []);
+  const nums = vals.filter(v => v != null);
+  if (nums.length < 2) return <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>—</span>;
+  const max = Math.max(...nums, 1), min = Math.min(...nums, 0), range = (max - min) || 1, n = vals.length;
+  const x = i => (i / (n - 1)) * w, y = v => h - 2 - ((v - min) / range) * (h - 4);
+  const segs = []; let cur = [];
+  vals.forEach((v, i) => { if (v != null) cur.push(`${x(i)},${y(v)}`); else { if (cur.length) segs.push(cur); cur = []; } });
+  if (cur.length) segs.push(cur);
+  return (
+    <svg width={w} height={h} style={{ display: 'block' }}>
+      {segs.map((s, si) => s.length > 1 && <polyline key={si} points={s.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />)}
+      {vals.map((v, i) => v != null ? <circle key={i} cx={x(i)} cy={y(v)} r={i === n - 1 ? 2.4 : 1.4} fill={color} /> : null)}
+    </svg>
+  );
+}
+
+const WL = { overloaded: { l: 'Overloaded', c: '#f87171' }, healthy: { l: 'Healthy', c: '#4ade80' }, light: { l: 'Light', c: '#60a5fa' } };
+function WorkloadChip({ s }) {
+  const m = WL[s] || { l: s, c: 'var(--fg-3)' };
+  return <span style={{ fontSize: 10, fontWeight: 700, color: m.c, background: `${m.c}1e`, borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap' }}>{m.l}</span>;
+}
+
+/* ─── Generic sortable, sticky-header, expandable table ─── */
+function DataTable({ rows, columns, getKey, renderExpand, maxHeight = 380 }) {
+  const [sort, setSort] = useState(null);
+  const [exp, setExp] = useState(null);
+  let data = rows;
+  if (sort) {
+    const col = columns.find(c => c.key === sort.key);
+    data = [...rows].sort((a, b) => {
+      const av = col.sortVal(a) ?? -Infinity, bv = col.sortVal(b) ?? -Infinity;
+      return sort.dir === 'asc' ? (av < bv ? -1 : av > bv ? 1 : 0) : (av > bv ? -1 : av < bv ? 1 : 0);
+    });
+  }
+  const toggleSort = key => setSort(s => (s && s.key === key) ? (s.dir === 'desc' ? { key, dir: 'asc' } : null) : { key, dir: 'desc' });
+  const th = { position: 'sticky', top: 0, background: 'var(--bg-2)', zIndex: 2, padding: '8px 11px', fontSize: 10.5, fontWeight: 700, color: 'var(--fg-3)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: 0.3 };
+  return (
+    <div style={{ overflow: 'auto', maxHeight, border: '1px solid var(--border)', borderRadius: 'var(--r-panel)' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr>
+            <th style={{ ...th, width: 26 }} />
+            {columns.map(c => (
+              <th key={c.key} onClick={() => c.sortVal && toggleSort(c.key)} style={{ ...th, textAlign: c.align || 'left', cursor: c.sortVal ? 'pointer' : 'default' }}>
+                {c.label}{sort?.key === c.key ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : ''}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map(row => {
+            const k = getKey(row), isExp = exp === k;
+            return (
+              <Fragment key={k}>
+                <tr style={{ borderBottom: '1px solid var(--border-soft)', background: isExp ? 'var(--bg-1)' : 'transparent' }}>
+                  <td onClick={() => setExp(isExp ? null : k)} style={{ padding: '9px 8px', cursor: 'pointer', color: 'var(--fg-3)', fontSize: 11, textAlign: 'center' }}>{isExp ? '▾' : '▸'}</td>
+                  {columns.map(c => (
+                    <td key={c.key} onClick={c.onClick ? () => c.onClick(row) : undefined} style={{ padding: '6px 11px', textAlign: c.align || 'left', whiteSpace: 'nowrap', cursor: c.onClick ? 'pointer' : 'default' }}>
+                      {c.render(row)}
+                    </td>
+                  ))}
+                </tr>
+                {isExp && <tr><td colSpan={columns.length + 1} style={{ padding: 0, background: 'var(--bg-1)', borderBottom: '1px solid var(--border)' }}>{renderExpand(row)}</td></tr>}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
 
-function TaskRow({ task, onClaim, onTimer }) {
-  let action;
-  if (task.status==='pool') action=<button className="btn primary sm" onClick={()=>onClaim(task.id)}>Claim</button>;
-  else if (task.status==='claimed') action=<button className="btn primary sm" onClick={()=>onTimer(task.id,'start')}><Play size={11}/> Start</button>;
-  else if (task.status==='in_progress') action=(<div style={{display:'flex',gap:4}}><button className="btn sm" onClick={()=>onTimer(task.id,'pause')}><Pause size={11}/> Pause</button><button className="btn primary sm" onClick={()=>onTimer(task.id,'complete')}><Check size={11}/> Complete</button></div>);
-  else if (task.status==='completed') action=<Chip tone="good"><Check size={11}/> Done</Chip>;
-  else action=<Chip>{task.status}</Chip>;
-
+function TaskList({ tasks }) {
+  if (!tasks?.length) return <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No open tasks.</div>;
   return (
-    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', borderBottom:'1px solid var(--border-soft)', transition:'background .14s', cursor:'pointer' }}
-      onMouseEnter={e=>e.currentTarget.style.background='var(--bg-3)'}
-      onMouseLeave={e=>e.currentTarget.style.background=''}>
-      <PriorityDot p={task.priority}/>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:320 }}>{task.title}</span>
-          {task.rollover_counter>0&&<Chip tone="bad" style={{height:18,fontSize:10}}><Flame size={10}/> x{task.rollover_counter}</Chip>}
-          {task.requires_screenshots&&<Eye size={11} style={{color:'var(--fg-3)'}}/>}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {tasks.slice(0, 8).map((t, i) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5 }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: (TIER[t.priority] || {}).c || 'var(--fg-4)', flexShrink: 0 }} />
+          <span style={{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
         </div>
-        <div style={{ display:'flex', gap:6, marginTop:4, fontSize:11.5, color:'var(--fg-3)' }}>
-          {task.creator?.name&&<span>{task.creator.name}</span>}
-          {task.chatter?.name&&<><span>·</span><span>{task.chatter.name}</span></>}
-          {task.claimed_user?.name&&<><span>·</span><span style={{color:'var(--indigo-bright)'}}>{task.claimed_user.name}</span></>}
-        </div>
-      </div>
-      <div style={{ minWidth:100, display:'flex', justifyContent:'flex-end' }}>{action}</div>
+      ))}
+      {tasks.length > 8 && <div style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>+{tasks.length - 8} more</div>}
     </div>
   );
 }
 
-function CreatorHeader({ name, count }) {
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 16px', background:'var(--bg-2)', borderBottom:'1px solid var(--border-soft)', borderTop:'1px solid var(--border-soft)' }}>
-      <Avatar name={name||'Org'} size={22}/>
-      <span style={{ fontSize:11.5, fontWeight:600, letterSpacing:'.02em' }}>{name||'Org-wide'}</span>
-      <div style={{flex:1}}/>
-      <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>{count} task{count!==1?'s':''}</span>
-    </div>
-  );
-}
-
-function AnomalyItem({ flag }) {
-  const tone=flag.severity==='high'?'bad':flag.severity==='medium'?'warn':'info';
-  const dot=flag.severity==='high'?'var(--bad)':flag.severity==='medium'?'var(--warn)':'var(--info)';
-  return (
-    <div style={{ display:'flex', alignItems:'center', gap:12, padding:'11px 16px', borderBottom:'1px solid var(--border-soft)' }}>
-      <span style={{ width:8,height:8,borderRadius:'50%',background:dot,boxShadow:`0 0 0 4px ${dot}33`,flexShrink:0 }}/>
-      <div style={{ flex:1, minWidth:0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <span style={{ fontSize:12.5, fontWeight:500 }}>{flag.flag_type?.replace(/_/g,' ')}</span>
-          <Chip tone={tone} style={{height:18,fontSize:10}}>{flag.severity}</Chip>
-        </div>
-        <div style={{ fontSize:11.5, color:'var(--fg-3)', marginTop:3 }}>
-          {flag.chatter?.name&&<span style={{color:'var(--fg-1)'}}>{flag.chatter.name}</span>}
-          {flag.creator?.name&&<span> — {flag.creator.name}</span>}
-        </div>
-      </div>
-      <button className="btn sm ghost"><ArrowRight size={12}/></button>
-    </div>
-  );
-}
+const expandWrap = { display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 16, padding: '12px 16px' };
+const expandLabel = { fontSize: 10, fontWeight: 700, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 };
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState([]);
-  const [chatters, setChatters] = useState([]);
-  const [creators, setCreators] = useState([]);
-  const [anomalies, setAnomalies] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState('all');
-  const [showNewTask, setShowNewTask] = useState(false);
-
   const navigate = useNavigate();
-  const load = useCallback(async () => {
-    try {
-      const [t,ch,cr,an] = await Promise.all([
-        api.get('/api/tasks'), api.get('/api/chatters'),
-        api.get('/api/creators'), api.get('/api/metrics/anomalies',{params:{resolved:'false'}}),
-      ]);
-      setTasks(t.data); setChatters(ch.data); setCreators(cr.data); setAnomalies(an.data);
-    } catch(err) { console.error(err); }
-    finally { setLoading(false); }
+  const [date, setDate] = useState(yesterday());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+
+  const load = useCallback(async (d) => {
+    setLoading(true);
+    try { const res = await api.get('/api/daily-check/overview', { params: { date: d } }); setData(res.data); }
+    catch { /* ignore */ } finally { setLoading(false); }
   }, []);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load(date); }, [load]);
 
-  useEffect(() => { load(); }, [load]);
+  const generate = async () => {
+    setGenerating(true);
+    try {
+      const { data: rb } = await api.post('/api/review-tasks/rebuild', { report_date: date });
+      await load(date);
+      const arch = (rb?.ranked?.archived || 0) + (rb?.capped?.archived || 0);
+      toast.success(`Report built${arch ? ` · archived ${arch} low-value tasks` : ''}`);
+    }
+    catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
+    finally { setGenerating(false); }
+  };
 
-  async function handleClaim(id) { try { await api.post(`/api/tasks/${id}/claim`); toast.success('Claimed'); load(); } catch { toast.error('Failed'); } }
-  async function handleTimer(id, action) { try { await api.post(`/api/tasks/${id}/timer`,{action}); toast.success(action==='complete'?'Done!':'Timer '+action); load(); } catch { toast.error('Failed'); } }
+  const hr = new Date().getHours();
+  const greet = hr < 12 ? 'Morning' : hr < 18 ? 'Afternoon' : 'Evening';
+  const tc = data?.task_counts || { open: 0, taken: 0, completed: 0, dismissed: 0 };
+  const tt = data?.team_totals;
+  const hasData = data && ((data.chatters || []).some(c => c.has_data) || (data.pages || []).length > 0);
 
-  const pool=tasks.filter(t=>t.status==='pool');
-  const prog=tasks.filter(t=>['claimed','in_progress'].includes(t.status));
-  const done=tasks.filter(t=>t.status==='completed');
-  const active=tasks.filter(t=>!['confirmed','rolled_over'].includes(t.status));
-  const shown=filter==='all'?active:filter==='pool'?pool:filter==='inprog'?prog:done;
+  // ─── column definitions ───
+  const chatterCols = [
+    { key: 'name', label: 'Chatter', sortVal: r => r.name?.toLowerCase(), onClick: r => navigate(`/chatters/${r.chatter_id}`),
+      render: r => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Avatar name={r.name} size={24} />
+          <span style={{ fontWeight: 600, fontSize: 12.5, color: r.has_data ? 'var(--fg-0)' : 'var(--fg-3)' }}>{r.name}</span>
+          {!r.has_data && <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>day off</span>}
+        </div>
+      ) },
+    { key: 'sales', label: 'Sales', align: 'right', sortVal: r => r.metrics?.sales ?? -1, render: r => r.has_data ? <Cell val={r.metrics.sales} delta={r.vs_prev?.sales} money /> : <span style={dash}>—</span> },
+    { key: 'ppvs', label: 'PPVs', align: 'right', sortVal: r => r.metrics?.ppvs ?? -1, render: r => r.has_data ? <Cell val={r.metrics.ppvs} delta={r.vs_prev?.ppvs} /> : <span style={dash}>—</span> },
+    { key: 'unlock', label: 'Unlock', align: 'right', sortVal: r => r.metrics?.unlock ?? -1, render: r => r.has_data ? <Cell val={r.metrics.unlock} delta={r.vs_prev?.unlock} suffix="%" /> : <span style={dash}>—</span> },
+    { key: 'golden', label: 'Golden', align: 'right', sortVal: r => r.metrics?.golden ?? -1, render: r => r.has_data ? <Cell val={r.metrics.golden} delta={r.vs_prev?.golden} suffix="%" /> : <span style={dash}>—</span> },
+    { key: 'messages', label: 'Msgs', align: 'right', sortVal: r => r.metrics?.messages ?? -1, render: r => r.has_data ? <Cell val={r.metrics.messages} delta={r.vs_prev?.messages} /> : <span style={dash}>—</span> },
+    { key: 'reply', label: 'Reply', align: 'right', sortVal: r => r.metrics?.reply ?? 1e9, render: r => r.has_data ? <Cell val={r.metrics.reply} delta={r.vs_prev?.reply} suffix="s" lowerBetter /> : <span style={dash}>—</span> },
+    { key: 'workload', label: 'Load', align: 'center', sortVal: r => ({ overloaded: 3, healthy: 2, light: 1 }[r.metrics?.workload] || 0), render: r => r.has_data && r.metrics?.workload ? <WorkloadChip s={r.metrics.workload} /> : <span style={dash}>—</span> },
+    { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} /> },
+    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: r => r.task_count > 0 ? <Chip tone={r.concern >= 12 ? 'bad' : r.concern >= 5 ? 'warn' : 'info'} style={{ fontSize: 10 }}>{r.task_count}</Chip> : <span style={dash}>·</span> },
+  ];
+  const renderChatterExpand = r => (
+    <div style={expandWrap}>
+      <div>
+        <div style={expandLabel}>Sales by page today</div>
+        {r.breakdown?.length ? r.breakdown.map(b => (
+          <div key={b.creator_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}><span>{b.name}</span><b className="mono">{money(b.sales)}</b></div>
+        )) : <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No sales recorded.</div>}
+      </div>
+      <div><div style={expandLabel}>Open tasks ({r.task_count})</div><TaskList tasks={r.tasks} /></div>
+    </div>
+  );
 
-  const grouped={};
-  shown.forEach(t=>{const k=t.creator?.name||'Org-wide';if(!grouped[k])grouped[k]=[];grouped[k].push(t);});
-
-  const myTasks=tasks.filter(t=>(t.claimed_by===user?.id||t.assigned_to===user?.id)&&!['confirmed','rolled_over'].includes(t.status));
-
-  const hr=new Date().getHours();
-  const greet=hr<12?'Morning':hr<18?'Afternoon':'Evening';
-
-  if (loading) return <div style={{display:'flex',justifyContent:'center',paddingTop:80}}><div style={{width:24,height:24,border:'2px solid var(--indigo)',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .6s linear infinite'}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
+  const pageCols = [
+    { key: 'name', label: 'Page', sortVal: r => r.name?.toLowerCase(),
+      render: r => <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Avatar name={r.name} size={24} /><span style={{ fontWeight: 600, fontSize: 12.5 }}>{r.name}</span></div> },
+    { key: 'daily', label: 'Daily rev', align: 'right', sortVal: r => r.metrics?.revenue_net ?? -1,
+      render: r => <Cell val={r.metrics?.revenue_net} delta={(r.metrics?.revenue_net != null && r.metrics?.revenue_baseline_net != null) ? r.metrics.revenue_net - r.metrics.revenue_baseline_net : null} money /> },
+    { key: 'wk', label: '7-day rev', align: 'right', sortVal: r => r.metrics?.revenue_7d ?? -1,
+      render: r => <Cell val={r.metrics?.revenue_7d} delta={(r.metrics?.revenue_7d != null && r.metrics?.revenue_7d_prior != null) ? r.metrics.revenue_7d - r.metrics.revenue_7d_prior : null} money /> },
+    { key: 'ratio', label: 'Ratio', align: 'right', sortVal: r => r.metrics?.ratio ?? -1,
+      render: r => <span style={{ fontWeight: 700, fontSize: 13, color: r.metrics?.ratio == null ? 'var(--fg-4)' : r.metrics.ratio >= 5 ? '#4ade80' : r.metrics.ratio >= 3 ? '#fbbf24' : '#f87171' }}>{r.metrics?.ratio != null ? Number(r.metrics.ratio).toFixed(1) : '—'}</span> },
+    { key: 'ltv', label: 'LTV', align: 'right', sortVal: r => r.metrics?.ltv_7day ?? -1, render: r => <span style={{ fontSize: 13, color: 'var(--fg-2)' }}>{r.metrics?.ltv_7day != null ? money(r.metrics.ltv_7day) : '—'}</span> },
+    { key: 'worked', label: 'Worked by', sortVal: r => r.chatters?.length || 0, render: r => r.chatters?.length
+      ? <div style={{ display: 'flex', alignItems: 'center' }}>{r.chatters.slice(0, 4).map((c, i) => <span key={c.chatter_id} title={`${c.name} · ${money(c.sales)}`} style={{ marginLeft: i ? -6 : 0, border: '1.5px solid var(--bg-1)', borderRadius: '50%', display: 'inline-flex' }}><Avatar name={c.name} size={20} /></span>)}{r.chatters.length > 4 && <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 4 }}>+{r.chatters.length - 4}</span>}</div>
+      : <span style={dash}>—</span> },
+    { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} color="#4ade80" /> },
+    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: r => r.task_count > 0 ? <Chip tone={r.concern >= 12 ? 'bad' : r.concern >= 5 ? 'warn' : 'info'} style={{ fontSize: 10 }}>{r.task_count}</Chip> : <span style={dash}>·</span> },
+  ];
+  const renderPageExpand = r => (
+    <div style={expandWrap}>
+      <div>
+        <div style={expandLabel}>Chatters on this page today</div>
+        {r.chatters?.length ? r.chatters.map(c => (
+          <div key={c.chatter_id} onClick={() => navigate(`/chatters/${c.chatter_id}`)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', cursor: 'pointer' }}><span style={{ color: 'var(--indigo-bright)' }}>{c.name}</span><b className="mono">{money(c.sales)}</b></div>
+        )) : <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No chatter sales recorded.</div>}
+      </div>
+      <div><div style={expandLabel}>Open tasks ({r.task_count})</div><TaskList tasks={r.tasks} /></div>
+    </div>
+  );
 
   return (
     <div className="animate-in">
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div>
-          <h1 style={{fontSize:22,fontWeight:700}}>{greet}, {user?.name?.split(' ')[0]}. {pool.length>0&&<span style={{color:'var(--indigo-bright)'}}>{pool.length} things need you today.</span>}</h1>
-          <p style={{fontSize:13,color:'var(--fg-2)',marginTop:4}}>Active cycle</p>
+          <h1 style={{ fontSize: 21, fontWeight: 700 }}>{greet}, {user?.name?.split(' ')[0]}.</h1>
+          <p style={{ fontSize: 12.5, color: 'var(--fg-2)', marginTop: 3 }}>Team overview for {date}. <b style={{ cursor: 'pointer', color: 'var(--indigo-bright)' }} onClick={() => navigate('/tasks')}>Tasks →</b></p>
         </div>
-        <div style={{display:'flex',gap:8}}>
-          <button className="btn"><Clock size={14}/> Daily reports</button>
-          <button className="btn primary" onClick={() => setShowNewTask(true)}><Plus size={14}/> New task</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input type="date" value={date} onChange={e => { setDate(e.target.value); load(e.target.value); }} style={inputStyle} />
+          <button onClick={generate} disabled={generating} style={{ ...primary, opacity: generating ? 0.6 : 1 }}>{generating ? 'Building…' : 'Build report & tasks'}</button>
         </div>
       </div>
 
-      <div style={{display:'flex',gap:12,marginBottom:20}}>
-        <StatCard label="POOL" value={pool.length} sub={`${tasks.filter(t=>t.rollover_counter>0).length} rolled over`} icon={ClipboardList} tone="indigo"/>
-        <StatCard label="IN PROGRESS" value={prog.length} sub="managers active" icon={Play} tone="info"/>
-        <StatCard label="COMPLETED" value={done.length} sub="this cycle" icon={Check} tone="good"/>
-        <StatCard label="ANOMALIES" value={anomalies.length} sub={anomalies.length>0?'awaiting action':'all clear'} icon={AlertTriangle} tone={anomalies.length>0?'bad':'good'}/>
-        <StatCard label="CREATORS" value={creators.length} sub={`${chatters.length} chatters`} icon={Users} tone="purple"/>
-      </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-        <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',overflow:'hidden'}}>
-          <PanelHeader title="All tasks" sub={`${pool.length} pool · ${prog.length} active · ${done.length} done`}
-            right={<div style={{display:'flex',gap:4}}>
-              {[['all','All'],['pool','Pool'],['inprog','In progress']].map(([k,l])=><button key={k} className={`btn sm ${filter===k?'primary':''}`} onClick={()=>setFilter(k)}>{l}</button>)}
-              <button className="btn primary sm" onClick={() => setShowNewTask(true)}><Plus size={12}/> New task</button>
-            </div>}/>
-          <div style={{maxHeight:520,overflow:'auto'}}>
-            {Object.keys(grouped).length===0?<div style={{padding:40,textAlign:'center',color:'var(--fg-3)',fontSize:13}}>No tasks yet. Create one or upload reports.</div>
-            :Object.entries(grouped).map(([name,ts])=><div key={name}><CreatorHeader name={name} count={ts.length}/>{ts.map(t=><TaskRow key={t.id} task={t} onClaim={handleClaim} onTimer={handleTimer}/>)}</div>)}
-          </div>
-        </div>
-
-        <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',overflow:'hidden'}}>
-            <PanelHeader title="My tasks" sub="Yours + auto-assigned" right={<button className="btn sm" onClick={() => setShowNewTask(true)}><Plus size={12}/> Add</button>}/>
-            <div style={{maxHeight:300,overflow:'auto'}}>
-              {myTasks.length===0?<div style={{padding:24,textAlign:'center',color:'var(--fg-3)',fontSize:12}}>Claim tasks from the pool</div>
-              :myTasks.map(t=><TaskRow key={t.id} task={t} onClaim={handleClaim} onTimer={handleTimer}/>)}
-            </div>
-          </div>
-
-          <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',overflow:'hidden'}}>
-            <PanelHeader title="Anomalies" sub={`${anomalies.length} active`} right={anomalies.length>0&&<Chip tone="bad">{anomalies.filter(a=>a.severity==='high').length} high</Chip>}/>
-            <div style={{maxHeight:260,overflow:'auto'}}>
-              {anomalies.length===0?<div style={{padding:24,textAlign:'center',color:'var(--fg-3)',fontSize:12}}>All clear</div>
-              :anomalies.map(a=><AnomalyItem key={a.id} flag={a}/>)}
-            </div>
-          </div>
-
-          <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',overflow:'hidden'}}>
-            <PanelHeader title="Chatters" sub={`${chatters.length} total`}/>
-            <div style={{padding:12,display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-              {chatters.slice(0,8).map(ch=>(
-                <div key={ch.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:10,cursor:'pointer',transition:'border-color .12s'}}
-                  onMouseEnter={e=>e.currentTarget.style.borderColor='var(--border-strong)'}
-                  onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}
-                  onClick={()=>navigate(`/chatters/${ch.id}`)}>
-                  <Avatar name={ch.name} size={24}/>
-                  <div style={{minWidth:0,flex:1}}>
-                    <div style={{display:'flex',alignItems:'center',gap:4}}>
-                      <StatusDot status={ch.status}/>
-                      <span style={{fontSize:11.5,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{ch.name}</span>
-                    </div>
-                  </div>
+      {loading ? <div style={{ paddingTop: 60, textAlign: 'center', color: 'var(--fg-3)' }}>Loading…</div>
+        : !hasData ? (
+          <div style={{ ...panel, padding: '44px 24px', textAlign: 'center', marginTop: 24 }}>
+            <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Nothing to show for {date} yet</div>
+            <p style={{ fontSize: 13, color: 'var(--fg-2)', marginBottom: 18 }}>Run the daily workflow and the team overview appears here:</p>
+            <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {[
+                ['1', <>Upload the <b>Message Dashboard</b> and <b>Creator Statistics</b> spreadsheets from Infloww.</>, '/reports', 'Go to Reports →'],
+                ['2', <>In <b>Daily Check</b>, press <b>Run daily review</b> — the AI analyses every chatter. <span style={{ color: 'var(--fg-3)' }}>(Run the <b>creator review</b> once a week.)</span></>, '/daily', 'Go to Daily Check →'],
+                ['3', <>Come back here and press <b>Build report & tasks</b> to build & rank the tasks and see the full overview.</>, null, null],
+              ].map(([n, text, link, cta]) => (
+                <div key={n} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5 }}>
+                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--indigo-soft)', color: 'var(--indigo-bright)', fontWeight: 700, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>{n}</span>
+                  <span style={{ color: 'var(--fg-1)', flex: 1, lineHeight: 1.5 }}>{text}{link && <> <b onClick={() => navigate(link)} style={{ cursor: 'pointer', color: 'var(--indigo-bright)' }}>{cta}</b></>}</span>
                 </div>
               ))}
             </div>
+            <button onClick={generate} disabled={generating} style={{ ...primary, padding: '10px 18px', fontSize: 13, marginTop: 22 }}>{generating ? 'Building…' : 'Build report & tasks'}</button>
           </div>
-        </div>
-      </div>
-      {showNewTask && <CreateTaskModal onClose={() => setShowNewTask(false)} onCreated={load} />}
+        ) : (
+          <>
+            {/* donut + AI review */}
+            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ ...panel, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 14, minWidth: 230 }}>
+                <Donut counts={tc} />
+                <div style={{ fontSize: 11.5, lineHeight: 1.7 }}>
+                  <div><b style={{ color: '#4ade80' }}>{tc.completed}</b> done</div>
+                  <div><b style={{ color: '#60a5fa' }}>{tc.taken}</b> in progress</div>
+                  <div><b style={{ color: 'var(--fg-1)' }}>{tc.open}</b> to do</div>
+                  <div style={{ color: 'var(--fg-3)' }}>{tc.dismissed} dismissed</div>
+                </div>
+              </div>
+              <div style={{ ...panel, padding: '12px 14px', flex: 1, minWidth: 260 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#a78bfa', marginBottom: 5 }}>Today's review · AI</div>
+                {data.day_review
+                  ? <p style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.55, margin: 0 }}>{data.day_review}</p>
+                  : <p style={{ fontSize: 12, color: 'var(--fg-3)', margin: 0 }}>Press <b>Build report & tasks</b> for the AI summary + task queue.</p>}
+              </div>
+            </div>
+
+            {/* team totals strip */}
+            {tt && (
+              <div style={{ ...panel, display: 'flex', gap: 0, marginBottom: 16, overflow: 'hidden' }}>
+                {[
+                  { l: 'Team sales today', v: money(tt.sales), d: tt.sales_vs_prev_pct, suffix: '%' },
+                  { l: 'PPVs sent', v: tt.ppvs?.toLocaleString() },
+                  { l: 'Messages', v: tt.messages?.toLocaleString() },
+                  { l: 'Avg unlock', v: `${tt.unlock_avg}%` },
+                  { l: 'Working today', v: `${tt.working}/${tt.total}` },
+                ].map((s, i) => (
+                  <div key={i} style={{ flex: 1, padding: '12px 16px', borderLeft: i ? '1px solid var(--border)' : 'none' }}>
+                    <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginBottom: 3 }}>{s.l}</div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                      <span style={{ fontSize: 18, fontWeight: 700 }}>{s.v}</span>
+                      {s.d != null && <Delta v={s.d} suffix={s.suffix} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* chatters table */}
+            <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 2px 8px' }}>Chatters <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· sorted by concern · click a header to re-sort, ▸ to expand</span></div>
+            <div style={{ marginBottom: 22 }}>
+              <DataTable rows={data.chatters || []} columns={chatterCols} getKey={r => r.chatter_id} renderExpand={renderChatterExpand} />
+            </div>
+
+            {/* pages table */}
+            <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 2px 8px' }}>Pages <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· sorted by biggest money drop</span></div>
+            <DataTable rows={data.pages || []} columns={pageCols} getKey={r => r.creator_id} renderExpand={renderPageExpand} />
+          </>
+        )}
     </div>
   );
 }
+
+const inputStyle = { background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-0)', borderRadius: 'var(--r-btn)', padding: '7px 10px', fontSize: 12.5, fontFamily: 'var(--ff-sans)' };
+const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '8px 14px', fontSize: 12.5, fontWeight: 700 };
+const panel = { background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)' };
+const dash = { color: 'var(--fg-4)', fontSize: 12 };

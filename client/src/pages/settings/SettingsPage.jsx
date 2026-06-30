@@ -4,6 +4,8 @@ import api from '../../services/api';
 import { Avatar, Chip, StatusDot } from '../../components/shared';
 import { STATUS_META } from '../../utils/helpers';
 import { Plus, Copy, Trash2, Clock, Users, Sparkles } from 'lucide-react';
+import { setInflowwOffset, getInflowwOffset } from '../../utils/displaySettings';
+import { fmtSentAt } from '../../utils/taskMeta';
 import toast from 'react-hot-toast';
 
 function Section({ title, sub, right, children }) {
@@ -40,20 +42,35 @@ const [templateForm, setTemplateForm] = useState({ label:'', icon:'📝', title:
 const [editingTemplateId, setEditingTemplateId] = useState(null);
 const [emojiOpen, setEmojiOpen] = useState(false);
   const [tab, setTab] = useState('creators');
+  const [tzOffset, setTzOffset] = useState(getInflowwOffset());
+  const [savingTz, setSavingTz] = useState(false);
 
   const load = useCallback(async()=>{
     try {
-      const [m,cr,ch,sh,tp]=await Promise.all([
+      const [m,cr,ch,sh,tp,cfg]=await Promise.all([
         api.get('/api/organisations/members'), api.get('/api/creators'),
         api.get('/api/chatters'), api.get('/api/shifts'),
         api.get('/api/tasks/templates').catch(()=>({data:[]})),
+        api.get('/api/organisations/config').catch(()=>({data:{config:{}}})),
       ]);
       setMembers(m.data); setCreators(cr.data); setChatters(ch.data); setShifts(sh.data); setTemplates(tp.data);
+      const off = Number(cfg.data?.config?.infloww_offset_hours) || 0;
+      setTzOffset(off); setInflowwOffset(off);
     } catch(e){console.error(e);}
     finally{setLoading(false);}
   },[]);
 
   useEffect(()=>{load();},[load]);
+
+  async function saveTzOffset(val) {
+    setSavingTz(true);
+    try {
+      await api.put('/api/organisations/config', { key:'infloww_offset_hours', value:String(val) });
+      setInflowwOffset(val);
+      toast.success('Time alignment saved');
+    } catch { toast.error('Failed to save'); }
+    finally { setSavingTz(false); }
+  }
 
   async function addCreator(e) {
     e.preventDefault(); if(!creatorName.trim()) return;
@@ -103,6 +120,23 @@ const [emojiOpen, setEmojiOpen] = useState(false);
         <div style={{flex:1,padding:16,background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:'var(--r-card)'}}>
           <span className="label">Stats</span>
           <div style={{fontSize:13,marginTop:6,color:'var(--fg-2)'}}>{members.length} members · {creators.length} creators · {chatters.length} chatters</div>
+        </div>
+      </div>
+
+      {/* Infloww time alignment */}
+      <div style={{padding:16,background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:'var(--r-card)',marginBottom:20}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}><Clock size={13} style={{color:'var(--fg-3)'}}/><span className="label">Infloww time alignment</span></div>
+        <p style={{fontSize:11.5,color:'var(--fg-3)',marginTop:4,marginBottom:10}}>
+          If task timestamps don't match your Infloww chat screen, set the hour offset to align them (e.g. <b>+1</b> during summer time). Applies everywhere times are shown.
+        </p>
+        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+          <div style={{display:'flex',alignItems:'center',gap:6}}>
+            <input type="number" min={-14} max={14} step={1} value={tzOffset} disabled={!isAdmin}
+              onChange={e=>setTzOffset(Number(e.target.value)||0)} style={{...inp,width:80}}/>
+            <span style={{fontSize:12.5,color:'var(--fg-2)'}}>hours</span>
+          </div>
+          <span style={{fontSize:11.5,color:'var(--fg-3)'}}>preview: <b style={{color:'var(--indigo-bright)'}}>{fmtSentAt('2026-06-28T04:20:00+00:00', tzOffset)}</b></span>
+          {isAdmin&&<button className="btn sm primary" disabled={savingTz||tzOffset===getInflowwOffset()} onClick={()=>saveTzOffset(tzOffset)}>{savingTz?'Saving…':'Save'}</button>}
         </div>
       </div>
 

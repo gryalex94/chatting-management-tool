@@ -1,13 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import api from '../../services/api';
-import { Upload, FileSpreadsheet, Check, X, Loader2, Clock } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, X, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const reportTypes = [
   { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: '💬' },
-  { key: 'employee-report', label: 'Employee Report', desc: 'Chatter performance stats', icon: '📊' },
-  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Creator-level metrics', icon: '👤' },
+  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Creator-level revenue & ratios', icon: '👤' },
 ];
 
 export default function UploadsPage() {
@@ -108,7 +107,7 @@ export default function UploadsPage() {
       <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>Import daily spreadsheets for analysis</p>
 
       {/* Step 1: Select report type */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
         {reportTypes.map(rt => (
           <button
             key={rt.key}

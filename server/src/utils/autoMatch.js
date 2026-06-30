@@ -1,21 +1,27 @@
 const { supabaseAdmin } = require('./supabase');
 
-// Find or create a creator by name, returns the ID
+// Find or create a creator (page) by name, returns the ID.
+// Every real page is its own active row keeping its own stats — grouping pages
+// into a team (merged_into) never renames or deactivates them — so a plain exact
+// match on the active page is always correct. (Older builds also matched inside
+// concatenated "A + B" names; that collapsed several pages onto one id and made
+// same-day stats overwrite each other, so it was removed.)
 async function findOrCreateCreator(name, orgId) {
   if (!name || !name.trim()) return null;
   const trimmed = name.trim();
 
-  // Try to find existing
-  const { data: existing } = await supabaseAdmin
+  // Exact match against an active page.
+  const { data: exact } = await supabaseAdmin
     .from('creators')
     .select('id')
     .eq('organisation_id', orgId)
     .ilike('name', trimmed)
+    .neq('is_active', false)
     .limit(1);
 
-  if (existing && existing.length > 0) return existing[0].id;
+  if (exact && exact.length > 0) return exact[0].id;
 
-  // Create new
+  // No match — create new
   const { data: created, error } = await supabaseAdmin
     .from('creators')
     .insert({ name: trimmed, organisation_id: orgId })
@@ -27,7 +33,17 @@ async function findOrCreateCreator(name, orgId) {
     return null;
   }
 
-  console.log(`Auto-created creator: ${trimmed}`);
+  // Auto-create default shifts for the new creator
+  const defaults = [
+    { name: 'US Prime Shift', start_time: '02:00:00', end_time: '10:00:00' },
+    { name: 'Middle Shift', start_time: '10:00:00', end_time: '18:00:00' },
+    { name: 'EU Prime Shift', start_time: '18:00:00', end_time: '02:00:00' },
+  ];
+  await supabaseAdmin.from('shifts').insert(
+    defaults.map(s => ({ ...s, creator_id: created.id, organisation_id: orgId, is_default: true, shift_type: 'regular' }))
+  );
+
+  console.log(`Auto-created creator: ${trimmed} (with default shifts)`);
   return created.id;
 }
 
@@ -68,7 +84,7 @@ async function findOrCreateChatter(name, orgId, email) {
 // Build lookup maps for all unique names in a dataset
 async function buildLookupMaps(rows, orgId, { creatorField, chatterField, chatterEmailField }) {
   const creatorNames = new Set();
-  const chatterNames = new Map(); // name -> email
+  const chatterNames = new Map();
 
   rows.forEach(row => {
     if (creatorField && row[creatorField]) creatorNames.add(row[creatorField].trim());

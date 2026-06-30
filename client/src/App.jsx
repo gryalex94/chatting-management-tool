@@ -6,6 +6,7 @@ import Layout from './components/layout/Layout';
 import LoginPage from './pages/auth/LoginPage';
 import SetupPage from './pages/auth/SetupPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
+import DailyCheckPage from './pages/dailycheck/DailyCheckPage';
 import PulsePage from './pages/pulse/PulsePage';
 import CreatorsPage from './pages/creators/CreatorsPage';
 import ReportsPage from './pages/reports/ReportsPage';
@@ -40,6 +41,7 @@ function AppRoutes() {
       <Route path="/setup" element={<SetupPage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
+        <Route path="daily" element={<DailyCheckPage />} />
         <Route path="pulse" element={<PulsePage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="creators" element={<CreatorsPage />} />

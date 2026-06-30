@@ -2,12 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import api from '../../services/api';
 import { Chip } from '../../components/shared';
-import { Upload, FileSpreadsheet, Check, X, Loader2, MessageSquare, BarChart3, Users } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, X, Loader2, MessageSquare, Users } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const REPORTS = [
   { key:'message-dashboard', label:'Message Dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare, color:'var(--indigo)' },
-  { key:'employee-report',   label:'Employee Report',   desc:'Per-chatter shift attendance + productivity', icon:BarChart3, color:'var(--good)' },
   { key:'creator-stats',     label:'Creator Statistics', desc:'Per-creator revenue, subs, fan tiers',       icon:Users, color:'var(--warn)' },
 ];
 
@@ -89,7 +88,6 @@ export default function ReportsPage() {
   const todayImports = imports.filter(i=>i.report_date===date);
   const getUploaded = key => todayImports.find(i=>
     (key==='message-dashboard'&&i.report_type==='message_dashboard')||
-    (key==='employee-report'&&i.report_type==='employee_report')||
     (key==='creator-stats'&&i.report_type==='creator_statistics')
   );
 

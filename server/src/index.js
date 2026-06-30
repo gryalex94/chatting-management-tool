@@ -3,6 +3,9 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 require('dotenv').config();
+const aiRoutes = require('./routes/ai');
+const dailyCheckRoutes = require('./routes/dailyCheck');
+
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -14,6 +17,7 @@ app.use(helmet());
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 
 // CORS - allow frontend to talk to backend
 app.use(cors({
@@ -63,9 +67,9 @@ app.use('/api/uploads', authMiddleware, uploadRoutes);
 
 const metricsRoutes = require('./src/routes/metrics');
 app.use('/api/metrics', authMiddleware, metricsRoutes);
-
-const aiRoutes = require('./src/routes/ai');
 app.use('/api/ai', authMiddleware, aiRoutes);
+app.use('/api/daily-check', authMiddleware, dailyCheckRoutes);
+
 
 // ---------------------
 // ERROR HANDLING

@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
+const { computeMetricsForOrg } = require('../utils/computeMetrics');
 
 // GET /api/metrics/chatter/:id - Get metrics for a specific chatter
 router.get('/chatter/:id', async (req, res) => {
@@ -48,24 +49,44 @@ router.get('/anomalies', async (req, res) => {
   }
 });
 
-// GET /api/metrics/employee-stats - Get employee daily stats
+// GET /api/metrics/employee-stats - Per-chatter daily stats, computed from the
+// Message Dashboard (chatter_daily_metrics). Returns the same field shape the
+// profile expects, so the Employee Report upload is no longer needed.
 router.get('/employee-stats', async (req, res) => {
   try {
     const { date, chatter_id } = req.query;
 
+    // select('*') so this keeps working before migration 014 adds ppvs_sent /
+    // ppvs_unlocked / fans_who_spent — those just come back undefined until then.
     let query = supabaseAdmin
-      .from('employee_daily_stats')
-      .select('*')
+      .from('chatter_daily_metrics')
+      .select('*, creators(name)')
       .eq('organisation_id', req.user.organisationId)
       .order('report_date', { ascending: false });
 
     if (date) query = query.eq('report_date', date);
     if (chatter_id) query = query.eq('chatter_id', chatter_id);
-    if (!date && !chatter_id) query = query.limit(200);
+    if (!date && !chatter_id) query = query.limit(500);
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
-    res.json(data);
+
+    // Shape it like the old employee_daily_stats rows (the UI sums the raw counts
+    // and derives golden ratio / unlock / Fan CVR itself).
+    const rows = (data || []).map(r => ({
+      report_date: r.report_date,
+      chatter_id: r.chatter_id,
+      creator_name: r.creators?.name || 'Unknown',
+      sales: r.sales_today,
+      messages_sent: r.messages_sent,
+      fans_chatted: r.fans_chatted,
+      ppvs_sent: r.ppvs_sent,
+      ppvs_unlocked: r.ppvs_unlocked,
+      fans_who_spent: r.fans_who_spent,
+      golden_ratio: r.golden_ratio,
+      unlock_rate: r.unlock_rate,
+    }));
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch employee stats' });
   }
@@ -116,6 +137,30 @@ router.get('/selling-patterns', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch selling patterns' });
+  }
+});
+
+// POST /api/metrics/compute - Trigger Tier 1 computation
+router.post('/compute', async (req, res) => {
+  try {
+    const { date } = req.body; // optional: compute for specific date only
+    const result = await computeMetricsForOrg(req.user.organisationId, date || null);
+    res.json(result);
+  } catch (err) {
+    console.error('Compute metrics error:', err);
+    res.status(500).json({ error: 'Failed to compute metrics' });
+  }
+});
+
+// POST /api/metrics/populate - Populate metrics from employee stats
+router.post('/populate', async (req, res) => {
+  try {
+    const { populateMetricsFromEmployeeStats } = require('../utils/computeMetrics');
+    const result = await populateMetricsFromEmployeeStats(req.user.organisationId);
+    res.json(result);
+  } catch (err) {
+    console.error('Populate error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

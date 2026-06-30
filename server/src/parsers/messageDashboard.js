@@ -3,13 +3,19 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { parseReplayTime, parseTextDate, parseSentTo, stripHtml, parseDollar } = require('../utils/parsers');
 const { buildLookupMaps } = require('../utils/autoMatch');
 
-async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
+async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, reportDate) {
   const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet);
 
   if (!rows.length) throw new Error('Spreadsheet is empty');
+
+  // Validate file type
+  const headers = Object.keys(rows[0]).map(h => h.toLowerCase());
+  if (!headers.some(h => h.includes('sender')) || !headers.some(h => h.includes('replay time'))) {
+    throw new Error('Wrong file type — this endpoint expects a Message Dashboard report (should have Sender, Replay time columns)');
+  }
 
   console.log(`Parsing ${rows.length} rows from Message Dashboard...`);
 
@@ -19,6 +25,27 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
     chatterField: 'Sender',
   });
   console.log(`Matched ${Object.keys(creatorMap).length} creators, ${Object.keys(chatterMap).length} chatters`);
+
+  // Prevent duplicate stacking on re-upload: clear any existing messages for this
+  // org on the dates present in this file, then insert fresh. Re-uploading the
+  // same day now REPLACES rather than piling up triplicate rows.
+  const fileDates = [...new Set(rows.map(r => parseTextDate(r['Sent date'])).filter(Boolean))];
+
+  // Safety: the date you picked must match the date(s) inside the file, so a file
+  // can never be filed under the wrong day.
+  if (reportDate && fileDates.length && !fileDates.includes(reportDate)) {
+    throw new Error(`Date mismatch — you picked ${reportDate}, but this file's messages are dated ${fileDates.slice(0, 3).join(', ')}${fileDates.length > 3 ? '…' : ''}. Pick the matching date, or upload the file for ${reportDate}.`);
+  }
+
+  if (fileDates.length) {
+    const { error: delErr } = await supabaseAdmin
+      .from('messages')
+      .delete()
+      .eq('organisation_id', orgId)
+      .in('sent_date', fileDates);
+    if (delErr) console.error('[MessageDashboard] pre-clear error:', delErr.message);
+    else console.log(`[MessageDashboard] Cleared existing messages for ${fileDates.length} date(s) before re-insert`);
+  }
 
   const BATCH_SIZE = 500;
   let totalInserted = 0;
@@ -68,67 +95,95 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId) {
     console.log(`Inserted ${totalInserted}/${rows.length} messages...`);
   }
 
-  await updateSubscribers(importId, orgId);
+  // Subscriber spend is maintained in the shared sales ledger. The daily
+  // dashboard ADDS its sales to that ledger (deduped by fan+date+price+message),
+  // so spend stays current automatically without ever overwriting the bulk
+  // history imported via the dedicated sales-history importer.
+  try {
+    const { addDashboardSalesToLedger } = require('./subscriberSpend');
+    await addDashboardSalesToLedger(orgId);
+  } catch (e) {
+    console.error('[MessageDashboard] ledger update skipped:', e.message);
+  }
   console.log(`Message Dashboard parsing complete: ${totalInserted} records`);
   return { rowCount: totalInserted };
 }
 
-async function updateSubscribers(importId, orgId) {
-  const { data: purchases } = await supabaseAdmin
-    .from('messages')
-    .select('sent_to_username, sent_to_nickname, price, sent_date')
-    .eq('import_id', importId)
-    .eq('purchased', true)
-    .gt('price', 0);
-
-  if (!purchases || !purchases.length) return;
-
-  const subMap = {};
-  for (const p of purchases) {
-    if (!p.sent_to_username) continue;
-    if (!subMap[p.sent_to_username]) {
-      subMap[p.sent_to_username] = {
-        username: p.sent_to_username,
-        display_name: p.sent_to_nickname,
-        total_spend: 0,
-        last_spend_date: p.sent_date,
-      };
-    }
-    subMap[p.sent_to_username].total_spend += parseFloat(p.price) || 0;
+/**
+ * Rebuild subscriber spend from ALL messages currently in the DB.
+ *
+ * Spend = sum of succeeded PPV sales (purchased=true, price>0) per username.
+ * Tips are NOT counted (they are not PPV unlocks). This is computed fresh from
+ * the authoritative message rows rather than accumulated, so it is fully
+ * idempotent: re-uploading a day (which delete-before-inserts that day's
+ * messages) recomputes the correct total instead of inflating it.
+ *
+ * Also maintains first_seen / last_spend_date and a derived classification.
+ */
+async function rebuildSubscriberSpend(orgId) {
+  // Pull every PPV sale in the org (paginated).
+  const sales = [];
+  let offset = 0;
+  while (true) {
+    const { data, error } = await supabaseAdmin
+      .from('messages')
+      .select('sent_to_username, sent_to_nickname, price, sent_date, sent_datetime')
+      .eq('organisation_id', orgId)
+      .eq('purchased', true)
+      .gt('price', 0)
+      .order('sent_datetime', { ascending: true })
+      .range(offset, offset + 999);
+    if (error) { console.error('[Subscribers] fetch error:', error.message); return; }
+    if (!data?.length) break;
+    sales.push(...data);
+    if (data.length < 1000) break;
+    offset += 1000;
   }
 
-  for (const sub of Object.values(subMap)) {
+  // Also need first-contact dates (any outbound message), to help flag new subs.
+  // Aggregate per username.
+  const agg = {};
+  for (const s of sales) {
+    if (!s.sent_to_username) continue;
+    const u = s.sent_to_username;
+    if (!agg[u]) agg[u] = { username: u, display_name: s.sent_to_nickname, total_spend: 0, ppv_sales: 0, first_spend: s.sent_date, last_spend: s.sent_date };
+    agg[u].total_spend += parseFloat(s.price) || 0;
+    agg[u].ppv_sales += parseFloat(s.price) || 0;
+    if (s.sent_date && s.sent_date < agg[u].first_spend) agg[u].first_spend = s.sent_date;
+    if (s.sent_date && s.sent_date > agg[u].last_spend) agg[u].last_spend = s.sent_date;
+    if (s.sent_to_nickname) agg[u].display_name = s.sent_to_nickname;
+  }
+
+  const classify = (total) => total >= 1000 ? 'whale' : total >= 100 ? 'ps' : total > 0 ? 'regular' : 'unclassified';
+
+  let written = 0;
+  for (const sub of Object.values(agg)) {
+    const total = Math.round(sub.total_spend * 100) / 100;
     const { data: existing } = await supabaseAdmin
       .from('subscribers')
-      .select('id, total_spend')
+      .select('id, first_seen')
       .eq('username', sub.username)
       .eq('organisation_id', orgId)
-      .single();
+      .maybeSingle();
+
+    const payload = {
+      total_spend: total,                       // OVERWRITE, not accumulate
+      classification: classify(total),
+      display_name: sub.display_name,
+      last_spend_date: sub.last_spend,
+      last_seen: sub.last_spend,
+    };
 
     if (existing) {
-      await supabaseAdmin
-        .from('subscribers')
-        .update({
-          total_spend: parseFloat(existing.total_spend) + sub.total_spend,
-          display_name: sub.display_name,
-          last_spend_date: sub.last_spend_date,
-          last_seen: sub.last_spend_date,
-        })
-        .eq('id', existing.id);
+      await supabaseAdmin.from('subscribers').update(payload).eq('id', existing.id);
     } else {
-      await supabaseAdmin
-        .from('subscribers')
-        .insert({
-          username: sub.username,
-          display_name: sub.display_name,
-          total_spend: sub.total_spend,
-          organisation_id: orgId,
-          first_seen: sub.last_spend_date,
-          last_seen: sub.last_spend_date,
-          last_spend_date: sub.last_spend_date,
-        });
+      await supabaseAdmin.from('subscribers').insert({
+        username: sub.username, organisation_id: orgId,
+        first_seen: sub.first_spend, ...payload,
+      });
     }
+    written++;
   }
+  console.log(`[Subscribers] Rebuilt spend for ${written} fans (PPV only, recomputed from all messages)`);
 }
-
-module.exports = { parseMessageDashboard };
+module.exports = { parseMessageDashboard, rebuildSubscriberSpend };

@@ -2,19 +2,18 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import Avatar from '../shared/Avatar';
 import {
-  Home, ClipboardList, Users, Upload, BarChart3, Sparkles, Settings
+  Home, ClipboardList, Clock, Upload, Settings, ShieldCheck
 } from 'lucide-react';
 
 const NAV = [
   { to: '/',         icon: Home,          label: 'Dashboard' },
+  { to: '/daily',    icon: ShieldCheck,   label: 'Daily Check' },
   { to: '/tasks',    icon: ClipboardList, label: 'Tasks',    badge: true },
-  { to: '/creators', icon: Users,         label: 'Creators' },
+  { to: '/creators', icon: Clock,         label: 'Shifts Overview' },
   { to: '/reports',  icon: Upload,        label: 'Reports' },
-  { to: '/metrics',  icon: BarChart3,     label: 'Metrics' },
 ];
 
 const LOWER = [
-  { to: '/ai',       icon: Sparkles,  label: 'AI' },
   { to: '/settings', icon: Settings,  label: 'Settings' },
 ];
 

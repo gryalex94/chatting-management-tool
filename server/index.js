@@ -67,6 +67,12 @@ app.use('/api/metrics', authMiddleware, metricsRoutes);
 const aiRoutes = require('./src/routes/ai');
 app.use('/api/ai', authMiddleware, aiRoutes);
 
+const dailyCheckRoutes = require('./src/routes/dailyCheck');
+app.use('/api/daily-check', authMiddleware, dailyCheckRoutes);
+
+const reviewTaskRoutes = require('./src/routes/reviewTasks');
+app.use('/api/review-tasks', authMiddleware, reviewTaskRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------
