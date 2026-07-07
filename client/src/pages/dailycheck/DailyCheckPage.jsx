@@ -514,7 +514,7 @@ function CreatorCard({ p, setFlagStatus, creatorNames, date, seed }) {
         <div style={{ marginTop: 12 }}>
           {m.window_dates && (() => {
             const w = fmtRange(m.window_dates), b = fmtRange(m.baseline_dates);
-            const wIncomplete = m.window_dates.length < (m.window_days || 7) || (w && w.missing.length);
+            const wIncomplete = m.window_dates.length < (m.ltv_window_days || 30) || (w && w.missing.length);
             return (
               <div style={{ fontSize: 11.5, color: 'var(--fg-3)', marginBottom: 10, lineHeight: 1.6 }}>
                 <span style={{ fontWeight: 700, color: wIncomplete ? '#f59e0b' : 'var(--fg-2)' }}>

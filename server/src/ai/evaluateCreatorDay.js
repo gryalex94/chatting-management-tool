@@ -7,9 +7,19 @@ const { supabaseAdmin } = require('../utils/supabase');
 // raw Infloww fields for confirmation / contradiction / correlation.
 const CREATOR_PROMPT = `You are an analyst for an OnlyFans agency reviewing ONE creator's page for a day.
 
-Treat OUR CALCULATED METRICS as the trusted baseline — they are computed consistently and matter most (ratio, 7-day LTV, revenue vs baseline). Start from those. Then CROSS-CHECK against the raw platform fields: confirm or question the picture, and look for correlations or contradictions — e.g. ratio looks fine but the spender count collapsed; revenue is up but only because of tips; renew % is sliding while active fans look flat; earnings per fan cratered. Many raw fields are noisy — use them to corroborate or explain the baseline, not as findings on their own.
+Treat OUR CALCULATED METRICS as the trusted baseline — they are computed consistently and matter most (2-week ratio, 30-day LTV, revenue vs 30-day baseline). Start from those. Then CROSS-CHECK against the raw platform fields: confirm or question the picture, and look for correlations or contradictions — e.g. ratio looks fine but the spender count collapsed; revenue is up but only because of tips; renew % is sliding while active fans look flat; earnings per fan cratered. Many raw fields are noisy — use them to corroborate or explain the baseline, not as findings on their own.
 
 Produce a short report: the state of the page, what's worth the manager's attention, and what to look at. Be concrete with the numbers. If any days are marked MISSING from the window or baseline, raise a "data" issue — those metrics are based on partial data and should be read with caution.
+
+ONLY raise an issue when a metric crosses one of these thresholds — otherwise mention it in 'overall' but do NOT make it an issue (managers do not want a task for every number):
+- revenue: only when it differs from baseline by 90% OR MORE, in EITHER direction (a collapse OR a surprise spike both warrant a look). Smaller swings are normal — no issue.
+- ltv: only when it has dropped 20% or more versus the prior period → severity high.
+- ratio: only when it is BELOW the target of 5 → look it up. At or above 5 is fine.
+- refunds: only when refunds exceed $50 → check the reason (buyer's remorse vs our error).
+- spenders / churn: only when there is a clear, sustained deterioration (not a one-day wobble, not a free-page artefact where renew%/churn is meaningless).
+A day that crosses none of these is a healthy day — say so in 'overall' and return few or no issues.
+
+For a ratio or LTV issue, write the "detail" as an ACTION, not just a number: tell the manager to review THIS page's newest subscribers from the past week, its whales, and its potential spenders, and to flag the weakest chatting performances on the page — the metric points to WHERE to look, the task says WHAT to do. For a revenue anomaly, the action is to open the dashboard and check successful/failed sales for that day. For a refund, the action is to check the reason (buyer's remorse vs our error).
 
 Return JSON with this exact shape:
 {
@@ -67,14 +77,14 @@ async function evaluateCreatorDay({ orgId, creatorId, creatorName, reportDate, m
   const w = fmtRange(m.window_dates);
   const b = fmtRange(m.baseline_dates);
   const windowLine = w
-    ? `ratio & 7-day LTV cover ${w.range} (${w.count} day${w.count === 1 ? '' : 's'})${w.missing.length ? ` — ${w.missing.join(', ')} MISSING from the DB` : ''}`
+    ? `30-day LTV window covers ${w.range} (${w.count} day${w.count === 1 ? '' : 's'})${w.missing.length ? ` — ${w.missing.join(', ')} MISSING from the DB` : ''}`
     : '';
   const baseLine = b
     ? `revenue baseline covers ${b.range} (${b.count} days)${b.missing.length ? ` — ${b.missing.length} day(s) missing` : ''}`
     : '';
   const calc = [
     m.ratio != null ? `ratio ${Number(m.ratio).toFixed(1)} (target ${m.ratio_target ?? 5})` : 'ratio n/a (free page)',
-    m.ltv_7day != null ? `7-day LTV $${m.ltv_7day} (prior week $${m.ltv_7day_prior ?? '?'})` : 'LTV n/a',
+    m.ltv_7day != null ? `30-day LTV $${m.ltv_7day} (prior 30 days $${m.ltv_7day_prior ?? '?'})` : 'LTV n/a',
     m.revenue_net != null ? `revenue (net) $${m.revenue_net} vs baseline $${m.revenue_baseline_net ?? '?'}` : '',
     m.subscriber_count != null ? `subscribers today ${m.subscriber_count} (new ${m.new_subscribers ?? 0})` : '',
     windowLine,

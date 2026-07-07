@@ -7,13 +7,15 @@ const { supabaseAdmin } = require('../utils/supabase');
 const PRIORITISER_PROMPT = `You are the task manager for an OnlyFans agency. You are given the current queue of open tasks, each already assigned a default priority tier (1 = act first) and a cluster. Review them and return ONLY the adjustments worth making, plus a short summary.
 
 PRIORITY TIERS:
-- P1 Critical / safety: possible minor, ToS breach, agreeing/refusing a meeting, free content, persona break, a page in revenue collapse. Always first.
-- P2 Serious work ethic: huge AFK with fans waiting, neglected new subs/whales.
+- P1 Critical / safety: possible minor / edgy age, ToS breach, an explicit agreement or refusal to meet in real life, free content, off-platform contact, a page in revenue collapse. Always first.
+- P2 Serious work ethic: huge AFK with fans waiting, neglected new subs/whales. Also location disclosure (verify vs the creator's bio) and unusually deep (>50%) discounts.
 - P3 Lost money: clear missed sale on a spender/whale, ignored buying intent.
-- P4 Communication breach: dry/banned replies, copy-paste lines, wrong-name slips.
+- P4 Communication breach: dry/banned replies, weak engagement.
 - P5 Sales craft / quality: skipped roadmap, weak follow-up, missing aftercare.
 - P6 Page-health watch: ratio/LTV drift, spender softening, refunds.
-- P7 Polish.
+- P7 Polish (e.g. a bare tip ask).
+
+Note: persona/identity, ordinary discounts, copy-paste/scripts, and wrong-name-for-a-fan are NOT issues here — if you see one mis-filed as a task, lower it or archive it.
 
 ADJUST a task when:
 - It's mis-tiered — e.g. something flagged "high" is really a P1 safety issue, or a "critical" is actually routine. Move it.
@@ -22,7 +24,7 @@ ADJUST a task when:
 - It relates to something just completed — note it may already be handled (you can lower it).
 - A cluster is wrong — give it a better cluster_key ("chatter:Name", "page:Name", or "fan:username").
 
-ARCHIVE the least important tasks so the live queue stays focused and doesn't pile up day after day. Return up to 40 task ids that are genuinely low-value right now — P6/P7 polish, tiny one-off slips, redundant near-duplicates, stale items unlikely to be worth a manager's minute. NEVER archive critical or high severity. Archiving FILES them away (it is reversible and tracked), it does NOT delete them — so be willing to cull the long tail.
+ARCHIVE the least important tasks so the live queue stays focused and doesn't pile up day after day. Return up to 40 task ids that are genuinely low-value right now — P6/P7 polish, tiny one-off slips, redundant near-duplicates, stale items unlikely to be worth a manager's minute. NEVER archive critical or high severity, and NEVER archive a protected compliance item (area tos/age/meeting/free_content/offplatform/location) at any tier. Archiving FILES them away (it is reversible and tracked), it does NOT delete them — so be willing to cull the long tail.
 
 Return JSON with this exact shape:
 {
@@ -43,7 +45,7 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
   const { data: open } = await supabaseAdmin.from('review_tasks')
     .select('id, severity, area, creator_name, chatter_name, fan_username, days_open, carried_over, regressed, title, priority, cluster_key')
     .eq('organisation_id', orgId).in('status', ['open', 'taken'])
-    .neq('source_type', 'custom');   // custom tasks are manager-set — the AI never re-ranks them
+    .not('source_type', 'in', '("custom","spender_dev")');   // manager-set / weekly PS tasks — the AI never re-ranks or archives them
   if (!open || !open.length) return { ok: true, summary: 'No open tasks.', adjusted: 0 };
 
   const { data: completed } = await supabaseAdmin.from('review_tasks')
@@ -68,9 +70,11 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
     maxTokens: 4000,
   });
 
+  const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'location']);
   const adjustments = Array.isArray(result.adjustments) ? result.adjustments : [];
   const validIds = new Set(open.map(t => t.id));
-  const sevOf = {}; open.forEach(t => { sevOf[t.id] = t.severity; });
+  const sevOf = {}; const areaOf = {};
+  open.forEach(t => { sevOf[t.id] = t.severity; areaOf[t.id] = (t.area || '').toLowerCase(); });
   const now = new Date().toISOString();
   let adjusted = 0;
   for (const a of adjustments) {
@@ -90,6 +94,7 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
   for (const id of archiveIds) {
     if (!validIds.has(id)) continue;
     if (sevOf[id] === 'critical' || sevOf[id] === 'high') continue;
+    if (PROTECTED_AREAS.has(areaOf[id])) continue;   // never archive protected ToS classes
     const { data: up } = await supabaseAdmin.from('review_tasks')
       .update({ status: 'archived', completed_at: now, priority_reason: 'AI-archived: low value', updated_at: now })
       .eq('id', id).in('status', ['open', 'taken']).select('id');

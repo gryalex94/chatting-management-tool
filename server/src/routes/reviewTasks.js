@@ -2,7 +2,7 @@ const router = require('express').Router();
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
-const { buildTasksForDate, capLiveQueue } = require('../utils/taskGenerator');
+const { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks } = require('../utils/taskGenerator');
 const { prioritiseTasks } = require('../ai/prioritiseTasks');
 
 // POST /api/review-tasks/custom — a manager-created task that pins ABOVE the AI
@@ -67,6 +67,10 @@ router.post('/rebuild', async (req, res) => {
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });
     const orgId = req.user.organisationId;
     const built = await buildTasksForDate(orgId, report_date);
+    // weekly PS/whale development — one bundled task per page (safe per-page cap)
+    let spenderDev = { created: 0, updated: 0, pages: 0 };
+    try { spenderDev = await buildSpenderDevelopmentTasks(orgId, report_date); }
+    catch (e) { console.error('[reviewTasks] spender-dev error:', e.message); }
     const ranked = await prioritiseTasks(orgId, report_date, model || 'sonnet');
     // deterministic backstop: keep the live queue under the cap (configurable)
     const { data: capCfg } = await supabaseAdmin.from('daily_check_config')
@@ -80,7 +84,7 @@ router.post('/rebuild', async (req, res) => {
     const { data } = await supabaseAdmin.from('review_tasks').select('*')
       .eq('organisation_id', orgId).in('status', ['open', 'taken'])
       .order('priority', { ascending: true, nullsFirst: false });
-    res.json({ built, ranked, capped, tasks: data || [] });
+    res.json({ built, spenderDev, ranked, capped, tasks: data || [] });
   } catch (err) {
     console.error('[reviewTasks] rebuild error:', err);
     res.status(500).json({ error: err.message || 'Rebuild failed' });

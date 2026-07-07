@@ -17,7 +17,7 @@ COMMUNICATION (1-10) — Rice Media standards:
 - Mirror fan energy: playful→playful, flirty→flirt back, deep→match emotional weight
 - >50% of messages should use engagement strategies
 - Drive conversations forward — never let them die
-- Maintain creator persona consistently, never refer to creator in third person
+- Keep a consistent voice and tone (do NOT flag "persona breaks", the creator's real name, display name, or cosplay characters — those are allowed here)
 
 SALES (1-10) — Rice Media Roadmap:
 - Flow: Normal Talk → Flirting → Horny → Sexual → Sale (never skip steps)
@@ -38,10 +38,10 @@ SALES (1-10) — Rice Media Roadmap:
 
 Use the recorded spend to apply the right roadmap (new sub vs spender vs $0 time-waster).
 
-Keep each issue's "detail" to one or two sentences with a short exact quote. Surface the clearest issues — you do not need to list every minor one. Keep "overall" to a few sentences.
+Keep each issue's "detail" to one or two sentences with a short exact quote. If a quote is not in English, add a short English translation right after it. Surface the clearest issues — you do not need to list every minor one. Keep "overall" to a few sentences.
 
 Severity on each issue is only a SORT HINT for the manager, not a verdict:
-- critical = serious persona break or clearly damaging behaviour
+- critical = a ToS risk or clearly damaging behaviour
 - high / medium / low = rough "look at this first" ordering for everything else
 
 Return JSON with this exact shape:

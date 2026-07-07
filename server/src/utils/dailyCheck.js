@@ -32,24 +32,28 @@ async function runDailyCheck(orgId, reportDate) {
     const prior = history.filter(h => h.report_date < reportDate);
 
     // metrics
-    const windowDays = num(cfg.ratio_window_days, 7);
-    const baselineDays = num(cfg.baseline_window_days, 30);   // wider baseline = steadier "normal"
-    const ratio = computeRatio(history, reportDate, windowDays);
-    const ltvWindow = computeLtvWindow(history, reportDate, windowDays, netFactor);
-    const ltvPriorWindow = computeLtvWindow(history, shiftDays(reportDate, -7), windowDays, netFactor);
+    // Windows per Rice policy: ratio over 2 weeks, LTV over 30 days (vs the 30-day
+    // window ending 7 days earlier), revenue trend week-over-week, baseline 30 days.
+    const ratioWindowDays = num(cfg.ratio_window_days, 14);   // 2-week ratio
+    const ltvWindowDays   = num(cfg.ltv_window_days, 30);     // 30-day LTV
+    const trendWindowDays = num(cfg.trend_window_days, 7);    // week-over-week revenue
+    const baselineDays    = num(cfg.baseline_window_days, 30);// wider baseline = steadier "normal"
+    const ratio = computeRatio(history, reportDate, ratioWindowDays);
+    const ltvWindow = computeLtvWindow(history, reportDate, ltvWindowDays, netFactor);
+    const ltvPriorWindow = computeLtvWindow(history, shiftDays(reportDate, -7), ltvWindowDays, netFactor);
     const revToday = today.total_earnings_gross * netFactor;
     const baselineRows = prior.slice(-baselineDays);
     const revBaseline = avg(baselineRows.map(h => h.total_earnings_gross * netFactor));
 
-    // 7-day revenue (net) and the prior 7-day window, for week-over-week.
+    // week-over-week revenue (net): this trend window and the one before it.
     const histUpTo = history.filter(h => h.report_date <= reportDate);
-    const windowRows = histUpTo.slice(-windowDays);
-    const priorWindowRows = histUpTo.slice(-windowDays * 2, -windowDays);
+    const windowRows = histUpTo.slice(-trendWindowDays);
+    const priorWindowRows = histUpTo.slice(-trendWindowDays * 2, -trendWindowDays);
     const revenue7d = round2(sum(windowRows.map(h => h.total_earnings_gross * netFactor)));
     const revenue7dPrior = round2(sum(priorWindowRows.map(h => h.total_earnings_gross * netFactor)));
 
-    // Exact uploaded dates each window actually used — so deviations / gaps are visible.
-    const windowDates = windowRows.map(h => h.report_date);
+    // Dates behind the LTV window (widest) so gaps in the 30-day LTV are visible.
+    const windowDates = histUpTo.slice(-ltvWindowDays).map(h => h.report_date);
     const baselineDates = baselineRows.map(h => h.report_date);
 
     const page = pages[creatorId] = {
@@ -67,8 +71,11 @@ async function runDailyCheck(orgId, reportDate) {
         revenue_7d_prior: revenue7dPrior,
         subscriber_count: (today.new_subscribers || 0) + (today.subscriber_renewals || 0),
         new_subscribers: today.new_subscribers || 0,
-        window_days: windowDays,
-        window_dates: windowDates,          // dates behind ratio & 7-day LTV
+        // ltv_7day/_prior keys kept for back-compat but now hold the 30-DAY LTV
+        // (vs the 30-day window ending 7 days earlier). Ratio is over 2 weeks.
+        ltv_window_days: ltvWindowDays,
+        ratio_window_days: ratioWindowDays,
+        window_dates: windowDates,          // dates behind the 30-day LTV window
         baseline_dates: baselineDates,      // dates behind the revenue baseline
       },
       flags: [],
@@ -85,11 +92,11 @@ async function runDailyCheck(orgId, reportDate) {
     const minRev = num(cfg.min_revenue_floor, 50);
     if (revBaseline >= minRev) {
       const dropPct = ((revBaseline - revToday) / revBaseline) * 100;
-      if (dropPct > num(cfg.bad_day_drop_pct, 80)) {
+      if (dropPct > num(cfg.bad_day_drop_pct, 90)) {
         page.flags.push(mkFlag('page', creatorId, null, reportDate, 'earnings_drop', 'high',
-          `Revenue $${round2(revToday)} is ${Math.round(dropPct)}% below $${Math.round(revBaseline)} baseline`, orgId,
+          `Revenue $${round2(revToday)} is ${Math.round(dropPct)}% below $${Math.round(revBaseline)} baseline — open the dashboard and check the day's successful/failed sales`, orgId,
           { revToday: round2(revToday), baseline: round2(revBaseline), dropPct: Math.round(dropPct) }));
-      } else if (-dropPct > num(cfg.good_day_rise_pct, 50)) {
+      } else if (-dropPct > num(cfg.good_day_rise_pct, 90)) {
         page.flags.push(mkFlag('page', creatorId, null, reportDate, 'earnings_spike', 'low',
           `Revenue $${round2(revToday)} is ${Math.round(-dropPct)}% above $${Math.round(revBaseline)} baseline — worth understanding why`, orgId,
           { revToday: round2(revToday), baseline: round2(revBaseline), risePct: Math.round(-dropPct) }));
@@ -98,9 +105,9 @@ async function runDailyCheck(orgId, reportDate) {
     // LTV drop — windowed (daily LTV is too volatile to alarm on)
     if (ltvWindow != null && ltvPriorWindow && ltvPriorWindow > 0) {
       const ltvDrop = ((ltvPriorWindow - ltvWindow) / ltvPriorWindow) * 100;
-      if (ltvDrop > num(cfg.ltv_drop_pct, 25)) {
-        page.flags.push(mkFlag('page', creatorId, null, reportDate, 'ltv_drop', 'medium',
-          `7-day LTV $${round2(ltvWindow)} dropped ${Math.round(ltvDrop)}% vs $${round2(ltvPriorWindow)} prior week`, orgId,
+      if (ltvDrop > num(cfg.ltv_drop_pct, 20)) {
+        page.flags.push(mkFlag('page', creatorId, null, reportDate, 'ltv_drop', 'high',
+          `30-day LTV $${round2(ltvWindow)} dropped ${Math.round(ltvDrop)}% vs $${round2(ltvPriorWindow)} the prior 30 days — review this page's new subs, whales and PS`, orgId,
           { ltv: round2(ltvWindow), prior: round2(ltvPriorWindow), dropPct: Math.round(ltvDrop) }));
       }
     }
@@ -154,9 +161,9 @@ async function runDailyCheck(orgId, reportDate) {
   for (const [chatterId, row] of Object.entries(chatterAnyRow)) {
     const primaryCreator = chatterPrimaryPage[chatterId].creator_id;
     const cEntry = pages[primaryCreator].chatters[chatterId];
-    const underperforming = row.workload_underperforming ||
-      (row.workload_status === 'light' && row.response_time_avg_seconds >= num(cfg.slow_reply_seconds, 150));
-    const slowInc = row.slow_reply_incidents || [];
+    // Time-wasters' waits don't matter (manager policy) — exclude them so the
+    // reply-time task only covers fans worth a manager's attention.
+    const slowInc = (row.slow_reply_incidents || []).filter(i => i.tier !== 'time_waster');
     const afkInc = row.afk_incidents || [];
 
     // slow replies — grouped per subscriber, pre-sorted by fan priority
@@ -167,18 +174,11 @@ async function runDailyCheck(orgId, reportDate) {
       const neglectedKey = slowInc.filter(i => i.priority_rank <= 1);   // subs that are new/whale
       const hasKeyNeglect = neglectedKey.length > 0;
 
-      let sev;
-      if (underperforming) sev = 'high';
-      else if (row.workload_status === 'overloaded') {
-        sev = hasKeyNeglect ? 'medium' : 'low';
-      } else {
-        sev = (row.response_time_p90_seconds > 600 || hasKeyNeglect) ? 'high' : 'medium';
-      }
-
-      const lens = underperforming ? ' (low volume — no workload excuse)'
-        : (row.workload_status === 'overloaded'
-            ? (hasKeyNeglect ? ' (overloaded, but left high-value fans waiting)' : ' (was overloaded — likely workload-driven)')
-            : '');
+      // Severity comes from the reply-time facts ONLY. Workload is INFORMATIONAL —
+      // shown to the manager (headline + details.workload) but it never changes the
+      // score; the manager weighs "was this chatter overloaded?" themselves.
+      const sev = (row.response_time_p90_seconds > 600 || hasKeyNeglect) ? 'high' : 'medium';
+      const lens = row.workload_status ? ` (workload: ${row.workload_status})` : '';
       const tierTag = top.tier === 'new_sub' ? 'NEW SUB' : top.tier === 'whale' ? `whale $${top.spend}` : top.tier === 'spender' ? `spender $${top.spend}` : top.tier;
       const headline = `kept ${slowInc.length} sub${slowInc.length === 1 ? '' : 's'} waiting (avg ${row.response_time_avg_seconds}s) — worst: ${top.fan_nickname} [${tierTag}] ${top.worst_reply_min}m at ${top.worst_time}${lens}`;
 

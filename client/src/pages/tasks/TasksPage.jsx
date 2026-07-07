@@ -50,6 +50,47 @@ function fmtActioned(iso) {
   return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+// Tag for a kept-waiting fan (matches the tier vocabulary from computeChatterMetrics).
+function tierTag(s) {
+  if (s.tier === 'new_sub') return { label: 'NEW SUB', c: '#ec4899' };
+  if (s.tier === 'whale') return { label: `WHALE $${s.spend}`, c: '#a78bfa' };
+  if (s.tier === 'spender') return { label: `SPENDER $${s.spend}`, c: '#60a5fa' };
+  return { label: (s.tier || 'fan').toUpperCase(), c: 'var(--fg-3)' };
+}
+
+// Reply-time / AFK tasks carry a per-subscriber breakdown in context.subs. Render
+// each fan as its own reviewable row: username (click-to-copy), tier, worst wait,
+// when, and the message — so the manager can open the exact spot in Infloww.
+function ReplyTimeSubs({ subs, workload }) {
+  const [open, setOpen] = useState(subs.length <= 4);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
+        {open ? '▾' : '▸'} {subs.length} fan{subs.length === 1 ? '' : 's'} kept waiting{workload ? ` · workload: ${workload}` : ''}
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {subs.map((s, i) => {
+            const tag = tierTag(s);
+            return (
+              <div key={s.fan_username || i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={() => copy(s.fan_username)} title="click to copy username" style={userBtn}>{s.fan_username || s.fan_nickname}</button>
+                  <span style={{ fontSize: 9.5, fontWeight: 800, color: '#fff', background: tag.c, borderRadius: 4, padding: '1px 5px' }}>{tag.label}</span>
+                  <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>{s.worst_reply_min}m wait</span>
+                  {s.worst_time && <span style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {s.worst_time}</span>}
+                  {s.count > 1 && <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>×{s.count} times</span>}
+                </div>
+                {s.worst_fan_message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 3 }}>fan: “{s.worst_fan_message}”</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Row({ task, onAction }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
@@ -80,6 +121,11 @@ function Row({ task, onAction }) {
         {actionedAt && <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--fg-3)', fontWeight: 600 }}>{task.status === 'completed' ? '✓ done' : task.status === 'archived' ? '📥 archived' : '✕ dismissed'} {fmtActioned(actionedAt)}</span>}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.5, marginTop: 6 }}>{task.detail}</div>
+
+      {/* reply-time / AFK: per-fan reviewable rows */}
+      {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
+        <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} />
+      )}
 
       {task.status === 'archived' && task.priority_reason && (
         <div style={{ marginTop: 7 }}><Chip tone="neutral" style={{ fontSize: 10 }}>📥 {task.priority_reason}</Chip></div>

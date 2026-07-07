@@ -8,14 +8,45 @@ const SOURCE = { compliance: 'compliance', sales_quality: 'sales', creator: 'cre
 
 const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders', 'refunds'];
 
+// Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
+// capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
+// area vocabulary emitted by the compliance prompt in evaluateChatterDay.js.
+const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'location']);
+// The subset that rides at the very top (serious ToS). `location` is protected too
+// but ranks a notch lower (verify-against-bio, not an active breach).
+const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
+
+// Chatter tenure tiers (from join date). New chatters get a full daily deep-check;
+// experienced ones only surface the serious stuff daily (the manager reviews them
+// periodically, per the workflow). Dialogue tasks are gated by this; flags (reply
+// time/AFK), page-health, and protected ToS items always come through.
+const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+const TENURE_MIN_SEV = { new: 'low', learning: 'medium', experienced: 'high' };
+function tenureTier(createdAt, onDate) {
+  if (!createdAt) return 'experienced';                    // unknown join date → treat as light
+  const days = Math.round((new Date(onDate + 'T00:00:00Z') - new Date(createdAt)) / 86400000);
+  if (days <= 7) return 'new';
+  if (days <= 21) return 'learning';
+  return 'experienced';
+}
+function keepByTenure(c, tier) {
+  if (c.source_type === 'flag' || c.source_type === 'creator') return true;   // apply to everyone
+  if (PROTECTED_AREAS.has((c.area || '').toLowerCase())) return true;         // protected always
+  const min = TENURE_MIN_SEV[tier] || 'high';
+  return (SEV_RANK[c.severity] ?? 3) <= SEV_RANK[min];
+}
+
 // Deterministic default tier from severity + source + area (the priority rules,
 // encoded). The AI Task Manager then refines/bumps only where judgment is needed.
 function defaultPriority(sev, source, area) {
   const a = (area || '').toLowerCase();
   const ph = PAGE_HEALTH.includes(a);
   if (sev === 'critical') return 1;
+  if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
+  if (a === 'location') return sev === 'high' ? 3 : 4;         // verify vs bio, not a breach
   if (sev === 'high') {
     if (source === 'flag' || a === 'work_ethic') return 2;
+    if (a === 'discount') return 3;                            // only reaches here if >50% off
     if (a === 'sales') return 3;
     if (a === 'compliance') return 2;
     if (ph) return 6;
@@ -24,12 +55,13 @@ function defaultPriority(sev, source, area) {
   }
   if (sev === 'medium') {
     if (a === 'compliance') return 3;
+    if (a === 'budget') return 5;
     if (a === 'communication') return 4;
     if (a === 'sales' || a === 'quality') return 5;
     if (ph) return 6;
     return 5;
   }
-  return ph ? 6 : 7; // low
+  return ph ? 6 : 7; // low (bare tips arrive as quality/low → 7)
 }
 const defaultCluster = (chatter, creator) =>
   chatter ? `chatter:${chatter}` : creator ? `page:${creator}` : 'general';
@@ -45,21 +77,23 @@ async function buildTasksForDate(orgId, reportDate) {
   // name lookups
   const [{ data: creators }, { data: chatters }] = await Promise.all([
     supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
-    supabaseAdmin.from('chatters').select('id, name').eq('organisation_id', orgId),
+    supabaseAdmin.from('chatters').select('id, name, created_at').eq('organisation_id', orgId),
   ]);
   const creatorNameById = {}; const creatorIdByName = {};
   (creators || []).forEach(c => { creatorNameById[c.id] = c.name; creatorIdByName[_norm(c.name)] = c.id; });
-  const chatterNameById = {};
-  (chatters || []).forEach(c => { chatterNameById[c.id] = c.name; });
+  const chatterNameById = {}; const tenureById = {};
+  (chatters || []).forEach(c => { chatterNameById[c.id] = c.name; tenureById[c.id] = tenureTier(c.created_at, reportDate); });
 
-  // findings: AI report issues + engine flags
-  const [{ data: evals }, { data: flags }] = await Promise.all([
+  // findings: AI report issues + engine flags. Also load the ignore-list of
+  // accounts/chatters that must never appear in reports (e.g. "Paul B").
+  const [{ data: evals }, { data: flags }, ignoreSet] = await Promise.all([
     supabaseAdmin.from('chatter_evaluations')
       .select('chatter_id, creator_id, eval_type, payload')
       .eq('organisation_id', orgId).eq('report_date', reportDate),
     supabaseAdmin.from('anomaly_flags')
-      .select('id, flag_type, severity, evidence, creator_id, chatter_id')
+      .select('id, flag_type, severity, evidence, details, creator_id, chatter_id')
       .eq('organisation_id', orgId).eq('report_date', reportDate).neq('status', 'dismissed'),
+    loadIgnoreSet(orgId),
   ]);
 
   const candidates = [];
@@ -109,14 +143,29 @@ async function buildTasksForDate(orgId, reportDate) {
       severity: f.severity || 'medium',
       title: shortTitle((f.flag_type || '').replace(/_/g, ' ') + ' — ' + (f.evidence || '')),
       detail: f.evidence || (f.flag_type || '').replace(/_/g, ' '),
-      context: { flag_type: f.flag_type },
+      // carry the per-subscriber breakdown so reply-time / AFK tasks render as
+      // individually-reviewable sub-rows (username, worst wait, when, message).
+      context: {
+        flag_type: f.flag_type,
+        subs: f.details?.subs || [],
+        incidents: f.details?.incidents || [],
+        workload: f.details?.workload || null,
+      },
     });
   }
+
+  // drop anything tied to an ignored account/chatter (e.g. "Paul B"), then gate
+  // dialogue tasks by the chatter's tenure (experienced → serious items only).
+  const kept = candidates.filter(c => {
+    if (ignoreSet.has(_norm(c.chatter_name)) || ignoreSet.has(_norm(c.fan_username))) return false;
+    const tier = c.chatter_id ? (tenureById[c.chatter_id] || 'experienced') : 'new';
+    return keepByTenure(c, tier);
+  });
 
   // de-dupe candidates by fingerprint (keep the most severe)
   const SEV = { critical: 0, high: 1, medium: 2, low: 3 };
   const byFp = new Map();
-  for (const c of candidates) {
+  for (const c of kept) {
     const prev = byFp.get(c.fingerprint);
     if (!prev || (SEV[c.severity] ?? 9) < (SEV[prev.severity] ?? 9)) byFp.set(c.fingerprint, c);
   }
@@ -198,6 +247,97 @@ async function countOpen(orgId) {
   return count || 0;
 }
 
+const shiftDays = (date, n) => { const d = new Date(date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/**
+ * PS/whale development (weekly). Finds spenders who were RECENTLY active but have
+ * gone quiet, and raises ONE bundled task per page to re-engage them. Uses the
+ * global `classification` (whale-anywhere), best-effort page attribution via the
+ * last sale, and a hard per-page cap so it can never flood the queue.
+ *   stalling = last spend in [activeDays .. quietDays) ago (default 30..14)
+ */
+async function buildSpenderDevelopmentTasks(orgId, reportDate, opts = {}) {
+  const quietDays = opts.quietDays || 14;
+  const activeDays = opts.activeDays || 30;
+  const perPageCap = opts.perPageCap || 8;
+  const quietCut = shiftDays(reportDate, -quietDays);
+  const activeCut = shiftDays(reportDate, -activeDays);
+
+  // all classified spenders (paginated past the 1000-row cap)
+  let spenders = [];
+  for (let from = 0; ; from += 1000) {
+    const { data } = await supabaseAdmin.from('subscribers')
+      .select('username, display_name, classification, total_spend, last_spend_date')
+      .eq('organisation_id', orgId).in('classification', ['ps', 'whale']).gt('total_spend', 0)
+      .range(from, from + 999);
+    if (!data || !data.length) break;
+    spenders = spenders.concat(data);
+    if (data.length < 1000) break;
+  }
+  const stalling = spenders.filter(s => {
+    const d = s.last_spend_date ? String(s.last_spend_date).slice(0, 10) : null;
+    return d && d < quietCut && d >= activeCut;              // active recently, quiet lately
+  });
+  if (!stalling.length) return { created: 0, updated: 0, pages: 0 };
+
+  // best-effort page = the creator of their most recent sale
+  const users = stalling.map(s => s.username);
+  const pageOf = {};
+  for (let i = 0; i < users.length; i += 300) {
+    const { data: sales } = await supabaseAdmin.from('subscriber_sales')
+      .select('username, creator_name, sale_date').in('username', users.slice(i, i + 300))
+      .order('sale_date', { ascending: false });
+    (sales || []).forEach(r => { if (!pageOf[r.username]) pageOf[r.username] = r.creator_name; });
+  }
+  const { data: creators } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
+  const creatorIdByName = {}; (creators || []).forEach(c => { creatorIdByName[_norm(c.name)] = c.id; });
+
+  const byPage = {};
+  for (const s of stalling) { const pg = pageOf[s.username] || 'Unassigned page'; (byPage[pg] ||= []).push(s); }
+
+  const now = new Date().toISOString();
+  let created = 0, updated = 0, pages = 0;
+  for (const [pg, list] of Object.entries(byPage)) {
+    list.sort((a, b) =>
+      (a.classification === 'whale' ? 0 : 1) - (b.classification === 'whale' ? 0 : 1) ||
+      (parseFloat(b.total_spend) || 0) - (parseFloat(a.total_spend) || 0));
+    const top = list.slice(0, perPageCap);
+    const whales = top.filter(s => s.classification === 'whale').length;
+    const creatorId = creatorIdByName[_norm(pg)] || null;
+    const fans = top.map(s => ({ username: s.username, nickname: s.display_name, spend: Math.round(parseFloat(s.total_spend) || 0), classification: s.classification, last_spend: s.last_spend_date ? String(s.last_spend_date).slice(0, 10) : null }));
+    const fp = `spenderdev:cr=${creatorId || _norm(pg)}`;
+    const row = {
+      organisation_id: orgId, source_type: 'spender_dev', fingerprint: fp,
+      creator_id: creatorId, creator_name: pg, chatter_id: null, chatter_name: null,
+      fan_username: null, area: 'spenders', severity: whales ? 'high' : 'medium',
+      title: shortTitle(`${top.length} spender${top.length === 1 ? '' : 's'} on ${pg} have gone quiet — develop them${whales ? ` (${whales} whale${whales === 1 ? '' : 's'})` : ''}`),
+      detail: `These previously-active spenders on ${pg} haven't purchased in ${quietDays}+ days (they last spent within the prior ${activeDays} days). Review their dialogues and re-engage — grow PS toward whales; drop any who are clearly done.`,
+      context: { fans, quiet_days: quietDays, active_days: activeDays, total_stalling: list.length },
+      priority: whales ? 3 : 5, cluster_key: `page:${pg}`, last_seen_date: reportDate,
+    };
+    const { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')
+      .eq('organisation_id', orgId).eq('fingerprint', fp).maybeSingle();
+    if (ex) {
+      if (ex.status === 'open' || ex.status === 'taken') { await supabaseAdmin.from('review_tasks').update({ ...row, updated_at: now }).eq('id', ex.id); updated++; }
+      // dismissed/archived/completed → leave as the manager set it this cycle
+    } else {
+      await supabaseAdmin.from('review_tasks').insert({ ...row, status: 'open', first_seen_date: reportDate, days_open: 1 });
+      created++;
+    }
+    pages++;
+  }
+  return { created, updated, pages };
+}
+
+// Ignore-list of accounts/chatters to omit from all reports (config key
+// `ignored_accounts`, comma-separated names). Returns a Set of normalised names.
+async function loadIgnoreSet(orgId) {
+  const { data } = await supabaseAdmin.from('daily_check_config')
+    .select('value').eq('organisation_id', orgId).eq('key', 'ignored_accounts').maybeSingle();
+  const raw = data?.value || '';
+  return new Set(String(raw).split(',').map(s => _norm(s)).filter(Boolean));
+}
+
 /**
  * Deterministic backstop so the live queue can never balloon. If open+taken
  * exceeds `cap`, auto-archive the lowest-tier, oldest OPEN tasks down to the cap.
@@ -206,13 +346,15 @@ async function countOpen(orgId) {
  */
 async function capLiveQueue(orgId, cap = 150) {
   const { data: live } = await supabaseAdmin.from('review_tasks')
-    .select('id, priority, severity, last_seen_date, source_type, status')
+    .select('id, priority, severity, last_seen_date, source_type, status, area')
     .eq('organisation_id', orgId).in('status', ['open', 'taken']);
   const total = (live || []).length;
   if (total <= cap) return { archived: 0, live: total, cap };
 
   const archivable = (live || []).filter(t =>
-    t.status === 'open' && t.source_type !== 'custom' && t.severity !== 'critical' && t.severity !== 'high');
+    t.status === 'open' && t.source_type !== 'custom' && t.source_type !== 'spender_dev'
+    && t.severity !== 'critical' && t.severity !== 'high'
+    && !PROTECTED_AREAS.has((t.area || '').toLowerCase()));   // never cap protected ToS classes or PS-dev
   // least-important first: highest tier number (P7), then oldest last seen
   archivable.sort((a, b) => (b.priority || 7) - (a.priority || 7) || String(a.last_seen_date).localeCompare(String(b.last_seen_date)));
   const toArchive = archivable.slice(0, total - cap);
@@ -226,4 +368,4 @@ async function capLiveQueue(orgId, cap = 150) {
   return { archived: toArchive.length, live: total - toArchive.length, cap };
 }
 
-module.exports = { buildTasksForDate, capLiveQueue };
+module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks };

@@ -116,6 +116,7 @@ async function computeChatterDailyMetrics(organisationId, tzOffsetHours = 1) {
     }
     msgs._priorContact = priorContact;
     msgs._historyReliable = date > earliestDate;   // there are loaded days before this one
+    msgs._date = date;                             // report day, for fan-age (new-sub vs time-waster)
     daySignals[k] = computeDaySignals(msgs, fanTier);
   }
 
@@ -214,17 +215,29 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
     const f = fanTier[username];
     const spend = f ? (parseFloat(f.total_spend) || 0) : 0;
     const cls = f ? f.classification : null;
+    const firstSeen = f && f.first_seen ? String(f.first_seen).slice(0, 10) : null;
     let tier;
-    if (cls === 'whale' || spend >= 1000) tier = 'whale';
+    if (cls === 'whale' || spend >= 1000) tier = 'whale';    // whale threshold $1000+
     else if (cls === 'ps' || spend >= 100) tier = 'spender';
     else if (spend > 0) tier = 'low';
     else tier = 'new';                                   // no spend recorded
 
-    // NEW SUB: no spend AND never messaged before — but only trust this when we
-    // actually have prior history loaded. Otherwise treat as ordinary non-spender.
-    const isNewSub = historyReliable && spend === 0 && hadPriorContact === false;
-    const effective = isNewSub ? 'new_sub' : tier;
-    const priorityRank = { new_sub: 0, whale: 1, spender: 2, low: 3, new: 4 }[effective] ?? 5;
+    // For $0-spend fans, separate genuine NEW SUBS (worth chasing) from TIME-WASTERS
+    // (subscribed a while, never spent — their waits don't matter). Prefer the
+    // subscribers.first_seen age signal; fall back to loaded message history.
+    let effective = tier;
+    if (spend === 0) {
+      const today = dayMsgs._date || null;
+      const ageDays = (firstSeen && today)
+        ? Math.round((new Date(today + 'T00:00:00Z') - new Date(firstSeen + 'T00:00:00Z')) / 86400000)
+        : null;
+      const genuinelyNew = ageDays != null ? ageDays <= 7 : (historyReliable && hadPriorContact === false);
+      const timeWaster   = ageDays != null ? ageDays > 14 : (historyReliable && hadPriorContact === true);
+      if (genuinelyNew) effective = 'new_sub';
+      else if (timeWaster) effective = 'time_waster';        // else 8–14d / unknown → ordinary 'new'
+    }
+    // priorityRank: lower = triage first. time_waster ranks LAST (waits don't matter).
+    const priorityRank = { new_sub: 0, whale: 1, spender: 2, low: 3, new: 4, time_waster: 6 }[effective] ?? 5;
     return { tier: effective, spend: Math.round(spend), priorityRank };
   };
 
