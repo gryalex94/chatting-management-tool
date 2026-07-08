@@ -9,7 +9,7 @@ const PRIORITISER_PROMPT = `You are the task manager for an OnlyFans agency. You
 PRIORITY TIERS:
 - P1 Critical / safety: possible minor / edgy age, ToS breach, an explicit agreement or refusal to meet in real life, free content, off-platform contact, a page in revenue collapse. Always first.
 - P2 Serious work ethic: huge AFK with fans waiting, neglected new subs/whales. Also location disclosure (verify vs the creator's bio) and unusually deep (>50%) discounts.
-- P3 Lost money: clear missed sale on a spender/whale, ignored buying intent.
+- P3 Lost money (managers care a LOT about these): a clear missed sale, ignored buying signal, or no follow-up after a soft "no" — on a NEW SUB, whale, or spender. Never archive these; if anything, bump them up.
 - P4 Communication breach: dry/banned replies, weak engagement.
 - P5 Sales craft / quality: skipped roadmap, weak follow-up, missing aftercare.
 - P6 Page-health watch: ratio/LTV drift, spender softening, refunds.
@@ -45,7 +45,10 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
   const { data: open } = await supabaseAdmin.from('review_tasks')
     .select('id, severity, area, creator_name, chatter_name, fan_username, days_open, carried_over, regressed, title, priority, cluster_key')
     .eq('organisation_id', orgId).in('status', ['open', 'taken'])
-    .not('source_type', 'in', '("custom","spender_dev")');   // manager-set / weekly PS tasks — the AI never re-ranks or archives them
+    // The AI ranks only the DIALOGUE findings. Deterministic engine flags (reply
+    // time / AFK / page health), manager customs, and weekly PS tasks pass through
+    // untouched — they carry their own tier and the AI never re-ranks or archives them.
+    .not('source_type', 'in', '("custom","spender_dev","flag")');
   if (!open || !open.length) return { ok: true, summary: 'No open tasks.', adjusted: 0 };
 
   const { data: completed } = await supabaseAdmin.from('review_tasks')

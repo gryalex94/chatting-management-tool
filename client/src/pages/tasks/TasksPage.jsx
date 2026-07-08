@@ -114,6 +114,7 @@ function Row({ task, onAction }) {
         {fans.map(f => (
           <span key={f.username} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <button onClick={() => copy(f.username)} title={f.nickname ? `${f.nickname} — click to copy` : 'click to copy'} style={userBtn}>{f.username}</button>
+            {f.spend != null && <span title="Recorded spend" style={{ fontSize: 10.5, color: f.spend >= 1000 ? '#a78bfa' : f.spend > 0 ? '#4ade80' : 'var(--fg-3)', fontWeight: 700 }}>${f.spend}</span>}
             {f.sent_at && <span title="When this fan's message was sent" style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {fmtSentAt(f.sent_at)}</span>}
           </span>
         ))}

@@ -52,12 +52,13 @@ async function loadChatterMessages(orgId, chatterId, reportDate, creatorId = nul
  *  - withSpend annotates each header with the fan's username + recorded spend,
  *    so a sales review can apply the right roadmap per fan type.
  */
-function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false, spendByUser = {} } = {}) {
+function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false, spendByUser = {}, withPage = false, pageNameByCreator = {} } = {}) {
   const threads = {};
   for (const m of msgs) {
     const username = m.sent_to_username || null;
     const key = username || m.sent_to_nickname || 'unknown';
-    (threads[key] ||= { fan: m.sent_to_nickname || username || 'unknown', username, lines: [] });
+    (threads[key] ||= { fan: m.sent_to_nickname || username || 'unknown', username, creator_id: m.creator_id || null, lines: [] });
+    if (!threads[key].creator_id && m.creator_id) threads[key].creator_id = m.creator_id;
     if (m.fan_message_text) threads[key].lines.push(`FAN: ${stripTags(m.fan_message_text)}`);
     if (m.creator_message_text) {
       const tag = (parseFloat(m.price) || 0) > 0 ? ` [PPV $${m.price}${m.purchased ? ' SOLD' : ' not bought'}]` : '';
@@ -70,6 +71,12 @@ function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false
     if (withSpend && t.username) {
       const sp = spendByUser[t.username];
       header += ` [${t.username}, ${sp ? `spent $${sp}` : 'no recorded spend'}]`;
+    }
+    // Label which PAGE (creator) this fan is on, so cross-page content differences
+    // are never mistaken for a single-page inconsistency.
+    if (withPage) {
+      const pg = t.creator_id ? (pageNameByCreator[t.creator_id] || `page ${String(t.creator_id).slice(0, 6)}`) : 'unknown page';
+      header += ` (page: ${pg})`;
     }
     header += ' ---';
     return `${header}\n${t.lines.slice(0, lineCap).join('\n')}`;
