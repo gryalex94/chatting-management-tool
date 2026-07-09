@@ -368,4 +368,57 @@ async function capLiveQueue(orgId, cap = 150) {
   return { archived: toArchive.length, live: total - toArchive.length, cap };
 }
 
-module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks };
+/**
+ * Turn ONE chatter's just-run evaluation issues into tasks in the MAIN queue —
+ * used right after a manual per-chatter review (e.g. the Dialogue Strategy Review).
+ * Same fingerprint carry-forward as the daily build, scoped to the chatter, and
+ * WITHOUT tenure gating: the manager deliberately chose to review this chatter, so
+ * every finding should surface. Issues are already enriched (fan/message/sent_at).
+ */
+async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, issues) {
+  if (!Array.isArray(issues) || !issues.length) return { created: 0, updated: 0 };
+  const src = SOURCE[evalType] || 'sales';
+  const [{ data: ch }, { data: creators }, ignoreSet] = await Promise.all([
+    supabaseAdmin.from('chatters').select('name').eq('id', chatterId).maybeSingle(),
+    supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
+    loadIgnoreSet(orgId),
+  ]);
+  const chatterName = ch?.name || null;
+  if (ignoreSet.has(_norm(chatterName))) return { created: 0, updated: 0 };
+  const creatorNameById = {}; const creatorIdByName = {};
+  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; creatorIdByName[_norm(c.name)] = c.id; });
+
+  const now = new Date().toISOString();
+  let created = 0, updated = 0;
+  for (const it of issues) {
+    const fan = it.fan_username || null;
+    const creatorId = it.creator ? creatorIdByName[_norm(it.creator)] : null;
+    const fp = `${evalType}:ch=${chatterId}:fan=${fan || '-'}:${it.area || '-'}:${slug(it.detail)}`;
+    const row = {
+      organisation_id: orgId, source_type: src, fingerprint: fp,
+      creator_id: creatorId, creator_name: creatorId ? creatorNameById[creatorId] : (it.creator || null),
+      chatter_id: chatterId, chatter_name: chatterName, fan_username: fan,
+      area: it.area || null, severity: it.severity || 'low',
+      title: shortTitle(it.detail), detail: it.detail || '',
+      context: { message: it.message || null, sent_at: it.sent_at || null, fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null },
+      last_seen_date: reportDate,
+    };
+    const { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')
+      .eq('organisation_id', orgId).eq('fingerprint', fp).maybeSingle();
+    if (!ex) {
+      await supabaseAdmin.from('review_tasks').insert({
+        ...row, status: 'open', first_seen_date: reportDate, days_open: 1,
+        priority: defaultPriority(row.severity, src, row.area),
+        cluster_key: defaultCluster(row.chatter_name, row.creator_name),
+      });
+      created++;
+    } else if (ex.status === 'open' || ex.status === 'taken') {
+      await supabaseAdmin.from('review_tasks').update({ ...row, updated_at: now }).eq('id', ex.id);
+      updated++;
+    }
+    // dismissed / archived / completed → leave as the manager set it
+  }
+  return { created, updated };
+}
+
+module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks, buildTasksForChatterEval };

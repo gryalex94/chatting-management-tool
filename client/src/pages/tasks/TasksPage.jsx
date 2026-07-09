@@ -91,6 +91,43 @@ function ReplyTimeSubs({ subs, workload }) {
   );
 }
 
+// AFK tasks carry context.incidents — each gap with its bracketing times, who the
+// chatter resumed with, and the fans left waiting. Point the manager to the spot.
+function AfkIncidents({ incidents }) {
+  const [open, setOpen] = useState(incidents.length <= 3);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
+        {open ? '▾' : '▸'} {incidents.length} AFK gap{incidents.length === 1 ? '' : 's'} — where to look
+      </button>
+      {open && (
+        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {incidents.map((g, i) => (
+            <div key={i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
+                <span style={{ color: '#f87171', fontWeight: 700 }}>{g.gap_minutes}m gap</span>
+                <span style={{ color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {g.from_time} → {g.to_time}</span>
+                {g.resumed_with_fan && <span style={{ color: 'var(--fg-3)' }}>resumed with <b style={{ color: 'var(--fg-1)' }}>{g.resumed_with_fan}</b></span>}
+              </div>
+              {Array.isArray(g.waiting_fans) && g.waiting_fans.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>waiting:</span>
+                  {g.waiting_fans.map((f, j) => (
+                    <span key={j} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <button onClick={() => copy(f.fan)} title="click to copy" style={userBtn}>{f.fan}</button>
+                      <span style={{ fontSize: 10, color: '#f87171', fontWeight: 700 }}>{f.waited_min}m</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Row({ task, onAction }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
@@ -127,6 +164,9 @@ function Row({ task, onAction }) {
       {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
         <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} />
       )}
+      {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
+        <AfkIncidents incidents={ctx.incidents} />
+      )}
 
       {task.status === 'archived' && task.priority_reason && (
         <div style={{ marginTop: 7 }}><Chip tone="neutral" style={{ fontSize: 10 }}>📥 {task.priority_reason}</Chip></div>
@@ -152,6 +192,7 @@ function Row({ task, onAction }) {
         {task.status === 'taken' && <button onClick={() => onAction(task, 'reopen')} style={ghost}>Release</button>}
         {(task.status === 'open' || task.status === 'taken') && <button onClick={() => onAction(task, 'dismiss')} style={ghost}>Dismiss</button>}
         {(task.status === 'open' || task.status === 'taken') && <button onClick={() => onAction(task, 'archive')} style={ghost} title="File away without actioning">Archive</button>}
+        {task.status === 'open' && <button onClick={() => onAction(task, 'complete')} style={subtle} title="Mark done without taking it first">Complete</button>}
         {(task.status === 'dismissed' || task.status === 'completed' || task.status === 'archived') && <button onClick={() => onAction(task, 'reopen')} style={ghost}>Reopen</button>}
       </div>
     </div>
@@ -237,12 +278,14 @@ export default function TasksPage() {
   const canCreate = ['head_manager', 'admin', 'owner'].includes(user?.role);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState('open');
-  const [search, setSearch] = useState('');
-  const [groupBy, setGroupBy] = useState('none');
-  const [selPages, setSelPages] = useState([]);
-  const [selChatters, setSelChatters] = useState([]);
-  const [showFilters, setShowFilters] = useState(false);
+  // Filter/tab settings persist across tab switches and navigation (localStorage).
+  const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
+  const [tab, setTab] = useState(saved.tab || 'open');
+  const [search, setSearch] = useState(saved.search || '');
+  const [groupBy, setGroupBy] = useState(saved.groupBy || 'none');
+  const [selPages, setSelPages] = useState(saved.selPages || []);
+  const [selChatters, setSelChatters] = useState(saved.selChatters || []);
+  const [showFilters, setShowFilters] = useState(saved.showFilters || false);
   const [dismiss, setDismiss] = useState(null);
   const [showCustom, setShowCustom] = useState(false);
   const [meta, setMeta] = useState({ creators: [], chatters: [], members: [] });
@@ -261,6 +304,10 @@ export default function TasksPage() {
   }, []);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
+  // Persist filter/tab settings so they survive tab switches and navigation.
+  useEffect(() => {
+    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search, groupBy, selPages, selChatters, showFilters })); } catch { /* ignore */ }
+  }, [tab, search, groupBy, selPages, selChatters, showFilters]);
 
   const act = async (task, action, reason_code, reason) => {
     try {
@@ -279,11 +326,14 @@ export default function TasksPage() {
   const counts = Object.fromEntries(TABS.map(tb => [tb.key, tasks.filter(t => tb.statuses.includes(t.status)).length]));
   const cur = TABS.find(tb => tb.key === tab);
 
-  // chip options come from this tab's tasks (before page/chatter filtering) so they stay stable
+  // chip options come from this tab's tasks, UNION the currently-selected values so
+  // a selected chip never vanishes after you action its last task (that made the
+  // whole list look empty with no way to tell why — issue #4).
   const base = tasks.filter(t => cur.statuses.includes(t.status));
-  const pageOpts = [...new Set(base.map(t => t.creator_name).filter(Boolean))].sort();
-  const chatterOpts = [...new Set(base.map(t => t.chatter_name).filter(Boolean))].sort();
+  const pageOpts = [...new Set([...base.map(t => t.creator_name).filter(Boolean), ...selPages])].sort();
+  const chatterOpts = [...new Set([...base.map(t => t.chatter_name).filter(Boolean), ...selChatters])].sort();
   const activeFilters = selPages.length + selChatters.length;
+  const clearFilters = () => { setSelPages([]); setSelChatters([]); };
 
   let list = base;
   if (selPages.length) list = list.filter(t => selPages.includes(t.creator_name));
@@ -375,7 +425,11 @@ export default function TasksPage() {
 
       {list.length === 0 ? (
         <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 50, textAlign: 'center', color: 'var(--fg-3)' }}>
-          Nothing here. Build the queue from Home{canCreate ? ', or add a custom task' : ''}.
+          {activeFilters > 0 ? (
+            <>No tasks match the current filters. <button onClick={clearFilters} style={{ ...subtle, color: 'var(--indigo-bright)', marginLeft: 0, textDecoration: 'underline' }}>Clear filters</button></>
+          ) : (
+            <>Nothing here. Build the queue from Home{canCreate ? ', or add a custom task' : ''}.</>
+          )}
         </div>
       ) : isHistory ? (
         // completed / dismissed → grouped by the day they were actioned
@@ -419,3 +473,4 @@ const chipStyle = (active) => ({ border: `1px solid ${active ? 'var(--indigo)' :
 const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '6px 14px', fontSize: 12, fontWeight: 700 };
 const ghost = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-1)', borderRadius: 'var(--r-btn)', padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 const userBtn = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-0)', borderRadius: 'var(--r-btn)', padding: '2px 7px', fontSize: 10.5, fontWeight: 700, fontFamily: 'var(--ff-mono)', cursor: 'pointer' };
+const subtle = { background: 'transparent', border: 'none', color: 'var(--fg-3)', borderRadius: 'var(--r-btn)', padding: '6px 8px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', marginLeft: 'auto' };

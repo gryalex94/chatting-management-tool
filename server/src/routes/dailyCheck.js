@@ -6,6 +6,7 @@ const { evaluateChatterSales } = require('../ai/evaluateChatterSales');
 const { evaluateCreatorDay } = require('../ai/evaluateCreatorDay');
 const { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations } = require('../utils/evaluationStore');
 const { buildOverview } = require('../utils/overview');
+const { buildTasksForChatterEval } = require('../utils/taskGenerator');
 
 /**
  * POST /api/daily-check/run
@@ -184,7 +185,15 @@ router.post('/evaluate', async (req, res) => {
       chatterId: eval_type === 'creator' ? null : chatter_id,
       creatorId: eval_type === 'creator' ? creator_id : null,
     });
-    res.json({ ...result, created_at: createdAt || new Date().toISOString() });
+
+    // A manual per-chatter strategy review feeds its findings straight into the
+    // main task queue (the manager chose to review this chatter).
+    let tasks_added = null;
+    if (eval_type === 'sales_quality' && chatter_id) {
+      try { tasks_added = await buildTasksForChatterEval(orgId, report_date, chatter_id, 'sales_quality', result.evaluation?.issues || []); }
+      catch (e) { console.error('[DailyCheck] chatter-eval tasks error:', e.message); }
+    }
+    res.json({ ...result, created_at: createdAt || new Date().toISOString(), tasks_added });
   } catch (err) {
     console.error('[DailyCheck] evaluate error:', err);
     res.status(500).json({ error: err.message || 'Evaluation failed' });

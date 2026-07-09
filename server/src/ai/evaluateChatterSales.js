@@ -1,57 +1,50 @@
 const { runAgentDetailed } = require('./agentRunner');
 const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = require('./evalShared');
 
-// ── Craft review (communication + sales) ───────────────────────────────────
-// This layer GRADES the conversation craft against Rice Media standards. Unlike
-// the compliance spotlight, scores are the point. It reads FULL conversations
-// (the rules are sequence-dependent) and each fan's recorded spend (the sales
-// roadmap differs for new sub vs spender vs $0 time-waster).
-const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager reviewing one chatter's full conversations for a single day. You GRADE two skills against Rice Media standards: how well they COMMUNICATE and how well they SELL. A human manager will verify your judgment, so be concrete — quote the exact words and name the fan.
+// ── Strategy review (communication + sales craft) → TASKS ───────────────────
+// Not a grader. This layer reads FULL conversations against Rice Media's strategy
+// and produces a coaching TASK for each concrete deviation (quote + fan + what the
+// strategy expected). It sees each fan's recorded spend and page, so it can apply
+// the right playbook (new sub vs spender vs whale vs $0) and weigh lost money.
+const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager reviewing one chatter's full conversations for a single day. Your job is to find every concrete moment where the chatter DEVIATED from Rice Media's communication and sales strategy, and turn each into a coaching TASK for the manager. Do NOT grade or score — surface actionable moments. Be specific: quote the exact words, name EVERY fan involved, and say what the strategy expected instead. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
-You can only see the message TEXT and each fan's recorded spend (shown in the conversation header, e.g. "[u123, spent $250]"). You CANNOT see reply times or workload — do NOT comment on speed. Read each FULL conversation carefully and count exchanges accurately before judging.
+Each conversation header shows the fan's recorded spend ("[u123, spent $250]" or "no recorded spend") and which PAGE the fan is on ("(page: Leya)"). Use the spend to pick the right playbook and to weigh how much a miss matters. A chatter works SEVERAL pages, each with its OWN content scope — never flag a difference BETWEEN pages as an inconsistency.
 
-COMMUNICATION (1-10) — Rice Media standards:
+You can only see the message TEXT and each fan's spend — not reply times or workload. Do NOT comment on speed. Read each FULL conversation and count exchanges accurately before judging.
+
+COMMUNICATION strategy:
 - NO DRY RESPONSES. Banned: "Nice", "Okay", "Cool", "Oh", "Haha", "Damn", "That's crazy", "I see", "True", "Sure", "Alright", "Yep", "Nope", "Maybe", "Makes sense", "Got it", "Fair enough", "It is what it is", "Same", "Kinda", "Sort of"
-- IMPORTANT: Chatters often send messages in quick bursts (like normal texting). A short message like "Lol" followed immediately by "You are really funny!" is NOT a dry response — it's a natural multi-message sequence. Only flag a short/banned word as dry if it is the LAST or ONLY message before the fan replies or the conversation stalls.
-- Messages must build on what fan said (mini-stories, reactions, open-ended questions)
-- Mirror fan energy: playful→playful, flirty→flirt back, deep→match emotional weight
-- >50% of messages should use engagement strategies
-- Drive conversations forward — never let them die
-- Keep a consistent voice and tone (do NOT flag "persona breaks", the creator's real name, display name, or cosplay characters — those are allowed here)
+- IMPORTANT: Chatters often send messages in quick bursts (like normal texting). A short message like "Lol" followed immediately by "You are really funny!" is NOT dry — it's a natural multi-message sequence. Only flag a short/banned word as dry if it is the LAST or ONLY message before the fan replies or the conversation stalls.
+- Messages must build on what the fan said (mini-stories, reactions, open-ended questions).
+- Mirror fan energy: playful→playful, flirty→flirt back, deep→match emotional weight.
+- >50% of messages should use engagement strategies. Drive conversations forward — never let them die.
+- Keep a consistent voice (do NOT flag persona breaks, the creator's real/display name, or cosplay characters — those are allowed).
 
-SALES (1-10) — Rice Media Roadmap:
-- Flow: Normal Talk → Flirting → Horny → Sexual → Sale (never skip steps)
-- New subs: small talk → flirt until horny → figure out what they want → sale → aftercare
-- Spenders: small talk → confirm they're OK → flirt → sale from history → aftercare
-- Time wasters ($0 spent): can skip to sales after small talk
-- Pricing: naked photos $45-55, videos $70+, long videos $100+, customs $800+
-- Scripts use ladder: free teaser → $10 → $25 → $50
-- PPV descriptions MUST create curiosity — describe but leave something hidden
-- When fan says "yes"/"sure"/"always"/👍 → SEND THE PPV, don't ask another question
-- NO FREE SEXTING (even text-only) unless it's a whale or a sub that recently spent a lot
-- Don't hard-push spenders, they should initiate
-- Always push higher prices if sub buys fast without negotiating
-- Aftercare after every sale — EXCEPT during active sexting/horny sessions where momentum is high. If the fan is still aroused and engaged after a purchase, a quick follow-up PPV is correct — don't break sexual momentum with forced aftercare.
-- SEXTING SESSION UPSELL: Once a fan has bought at least one PPV and the sexting/horny conversation continues, subsequent PPVs can be sent without needing explicit re-confirmation. As long as there are engagement messages between PPV sends and the fan is still in the flow, upselling is correct. Don't flag follow-up PPVs during active sessions as "pushed too fast."
-- After a failed sales attempt, chatter should follow up to figure out what happened and why the sub didn't buy — not with generic "What's the matter dear?" but with a genuine attempt to understand and re-engage.
-- When evaluating failed sales, read the FULL conversation carefully. Count actual exchanges accurately.
+SALES roadmap:
+- Flow: Normal Talk → Flirting → Horny → Sexual → Sale (never skip steps).
+- New subs: small talk → flirt until horny → figure out what they want → sale → aftercare.
+- Spenders: small talk → confirm they're OK → flirt → sale from history → aftercare.
+- Time wasters ($0 spent): can skip to sales after small talk.
+- Pricing: naked photos $45-55, videos $70+, long videos $100+, customs $800+. Ladder: free teaser → $10 → $25 → $50.
+- PPV descriptions MUST create curiosity — describe but leave something hidden.
+- When the fan says "yes"/"sure"/"always"/👍 → SEND THE PPV, don't ask another question.
+- NO FREE SEXTING (even text-only) unless it's a whale or a sub that recently spent a lot.
+- Don't hard-push spenders (they should initiate). Push higher prices if a sub buys fast without negotiating.
+- Aftercare after every sale — EXCEPT during active sexting/horny sessions where momentum is high; a quick follow-up PPV then is correct, don't force aftercare.
+- SEXTING SESSION UPSELL: once a fan has bought one PPV and the horny conversation continues, further PPVs can be sent without re-confirmation as long as there are engagement messages between them. Don't flag follow-up PPVs during active sessions as "pushed too fast."
+- After a FAILED sale, the chatter must follow up to understand why and re-engage — not a generic "What's the matter dear?" but a genuine attempt. No follow-up on a failed sale is a real miss.
 
-Use the recorded spend to apply the right roadmap (new sub vs spender vs $0 time-waster).
-
-Keep each issue's "detail" to one or two sentences with a short exact quote. If a quote is not in English, add a short English translation right after it. Surface the clearest issues — you do not need to list every minor one. Keep "overall" to a few sentences.
-
-Severity on each issue is only a SORT HINT for the manager, not a verdict:
-- critical = a ToS risk or clearly damaging behaviour
-- high / medium / low = rough "look at this first" ordering for everything else
+Turn each deviation into an issue:
+- area: "sales" for roadmap/selling misses (skipped steps, missed sale, ignored a buying signal / an explicit "yes", no follow-up after a failed sale, weak price development, pushed too hard or too soft, free sexting to a non-spender); "communication" for dry / weak / non-engaging talk.
+- severity: HIGH when the fan is a NEW SUB, WHALE, or SPENDER and money was clearly left on the table (a missed sale, an ignored "yes", no follow-up). MEDIUM for a roadmap slip on an ordinary fan. LOW for minor polish. critical only for a genuine ToS risk.
+- detail: what happened + a brief exact quote (+ English translation if not English) + what the strategy expected instead. Name EVERY fan involved.
 
 Return JSON with this exact shape:
 {
-  "communication_score": 1-10 integer,
-  "sales_score": 1-10 integer,
-  "overall": "one short paragraph: how they communicated and sold today, the most important things",
-  "issues": [{"area":"communication | sales","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote","fan":"nickname or null"}]
+  "overall": "one short paragraph: the main strategy gaps to coach today",
+  "issues": [{"area":"sales | communication","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan","fan":"nickname or null"}]
 }
-If there is genuinely nothing worth noting, return an empty issues list. Do not invent issues to fill the list.`;
+If the chatter followed the strategy well, return an empty issues list. Do not invent issues to fill the list.`;
 
 /**
  * Communication + sales craft review (a GRADER) for a chatter-day.
@@ -60,11 +53,11 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
   const loaded = await loadChatterMessages(orgId, chatterId, reportDate, creatorId);
   if (!loaded.ok) return loaded;
 
-  // Enrichment first — its spend map annotates the conversation headers so the
-  // model can apply the right roadmap per fan type.
-  const { enrichIssue, spendByUser } = await buildEnrichment(orgId, loaded.msgs);
+  // Enrichment first — its spend map + page names annotate the conversation
+  // headers so the model applies the right roadmap and never confuses pages.
+  const { enrichIssue, spendByUser, creatorNames } = await buildEnrichment(orgId, loaded.msgs);
   // Fuller conversations than the spotlight: the sales rules are sequence-dependent.
-  const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 25, withSpend: true, spendByUser });
+  const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 25, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
   const userContent = `Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
@@ -79,8 +72,6 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
       model, model_id: baseModelId,
       elapsed_ms: Date.now() - t0, usage,
       evaluation: {
-        communication_score: result.communication_score ?? null,
-        sales_score: result.sales_score ?? null,
         overall: result.overall || '',
         issues,
       },

@@ -102,8 +102,6 @@ function AIDailySummary({ summary, date }) {
 
 // Sales/communication quality grader — run on demand. Feeds the two score cards.
 function AIQualityPanel({ ev, onRun, running, canRun }) {
-  const comm = parseFloat(ev?.evaluation?.communication_score) || 0;
-  const sales = parseFloat(ev?.evaluation?.sales_score) || 0;
   const overall = ev?.evaluation?.overall;
   const issues = ev?.evaluation?.issues || [];
   const sevColor = s => s === 'high' || s === 'critical' ? '#f87171' : s === 'medium' ? '#fbbf24' : 'var(--fg-3)';
@@ -111,7 +109,7 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
     <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', marginBottom:12 }}>
       <div style={{ display:'flex', alignItems:'center', padding:'12px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
         <Brain size={14} style={{ color:'var(--indigo-bright)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>AI Quality Analysis</span>
+        <span style={{ fontWeight:600, fontSize:13 }}>Dialogue Strategy Review</span>
         {ev?.report_date && <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>· last run {ev.report_date}</span>}
         <div style={{ flex:1 }}/>
         <button className="btn sm primary" onClick={onRun} disabled={running || !canRun} style={{ opacity: running || !canRun ? 0.6 : 1 }}>
@@ -124,14 +122,11 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
         </div>
       ) : (
         <div style={{ padding:14 }}>
-          <div style={{ display:'flex', gap:10, marginBottom:overall || issues.length ? 12 : 0 }}>
-            <AIScoreCard icon={MessageSquare} label="Communication" score={comm} trend="stable" color="#60a5fa"/>
-            <AIScoreCard icon={DollarSign} label="Sales Execution" score={sales} trend="stable" color="#4ade80"/>
-          </div>
           {overall && <p style={{ fontSize:12.5, color:'var(--fg-1)', lineHeight:1.6, margin:'0 0 10px' }}>{overall}</p>}
+          {issues.length === 0 && <div style={{ fontSize:12, color:'var(--fg-3)' }}>No strategy deviations found — the chatter followed the playbook.</div>}
           {issues.length > 0 && (
             <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              <div className="label" style={{ fontSize:10 }}>{issues.length} issue{issues.length === 1 ? '' : 's'} flagged</div>
+              <div className="label" style={{ fontSize:10 }}>{issues.length} coaching point{issues.length === 1 ? '' : 's'}</div>
               {issues.map((iss, i) => {
                 const who = iss.fan_username || iss.fan || null;
                 return (

@@ -11,7 +11,7 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = requir
 // keep + tighten the genuine ToS classes; add location disclosure. The protected
 // classes (tos/age/meeting/free_content/offplatform/location) are never auto-cleared
 // downstream — see PROTECTED_AREAS in taskGenerator.js.
-const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and name the fan. If an issue involves more than one fan, name EVERY fan involved. If a message is not in English, add a short English translation right after the quote.
+const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and name the fan. If an issue involves more than one fan, name EVERY fan involved. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
 Each conversation header shows the fan's recorded spend (e.g. "[u123, spent $250]" or "no recorded spend") — use it to weigh how much a missed sale or issue matters.
 
