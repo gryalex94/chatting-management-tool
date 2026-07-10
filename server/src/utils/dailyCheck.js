@@ -182,18 +182,21 @@ async function runDailyCheck(orgId, reportDate) {
       const tierTag = top.tier === 'new_sub' ? 'NEW SUB' : top.tier === 'whale' ? `whale $${top.spend}` : top.tier === 'spender' ? `spender $${top.spend}` : top.tier;
       const headline = `kept ${slowInc.length} sub${slowInc.length === 1 ? '' : 's'} waiting (avg ${row.response_time_avg_seconds}s) — worst: ${top.fan_nickname} [${tierTag}] ${top.worst_reply_min}m at ${top.worst_time}${lens}`;
 
+      // tag each waiting sub with its page — a chatter's subs span several pages.
+      const subsWithPage = slowInc.map(s => ({ ...s, page: creators[s.creator_id] || null }));
       const f = mkFlag('chatter', primaryCreator, chatterId, reportDate, 'high_response_time', sev,
         headline, orgId,
         { avg: row.response_time_avg_seconds, p90: row.response_time_p90_seconds, workload: row.workload_status,
-          key_neglect_count: neglectedKey.length, subs: slowInc });
+          key_neglect_count: neglectedKey.length, subs: subsWithPage });
       cEntry.flags.push(f); flags.push(f);
     }
     // AFK gaps with full incident detail
     if (afkInc.length > 0) {
+      const incWithPage = afkInc.map(a => ({ ...a, page: creators[a.creator_id] || null }));
       const f = mkFlag('chatter', primaryCreator, chatterId, reportDate, 'afk_gap',
         row.afk_gaps_longest_minutes > 60 ? 'high' : 'medium',
         `${afkInc.length} AFK gap(s) with fans waiting, longest ${row.afk_gaps_longest_minutes} min`, orgId,
-        { count: afkInc.length, longest: row.afk_gaps_longest_minutes, workload: row.workload_status, incidents: afkInc });
+        { count: afkInc.length, longest: row.afk_gaps_longest_minutes, workload: row.workload_status, incidents: incWithPage });
       cEntry.flags.push(f); flags.push(f);
     }
   }

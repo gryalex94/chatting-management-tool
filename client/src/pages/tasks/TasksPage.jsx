@@ -58,30 +58,50 @@ function tierTag(s) {
   return { label: (s.tier || 'fan').toUpperCase(), c: 'var(--fg-3)' };
 }
 
-// Reply-time / AFK tasks carry a per-subscriber breakdown in context.subs. Render
-// each fan as its own reviewable row: username (click-to-copy), tier, worst wait,
-// when, and the message — so the manager can open the exact spot in Infloww.
-function ReplyTimeSubs({ subs, workload }) {
+// Per-task checklist: which sub-rows the manager has reviewed. Persisted in
+// localStorage keyed by the task id, so ticks survive navigation.
+function useChecklist(storeKey) {
+  const [done, setDone] = useState(() => { try { return new Set(JSON.parse(localStorage.getItem(storeKey) || '[]')); } catch { return new Set(); } });
+  const toggle = (k) => setDone(prev => {
+    const next = new Set(prev);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    try { localStorage.setItem(storeKey, JSON.stringify([...next])); } catch { /* ignore */ }
+    return next;
+  });
+  return [done, toggle];
+}
+
+// Reply-time tasks carry a per-subscriber breakdown in context.subs. Render each
+// fan as its own reviewable, checkable row: username (click-to-copy), tier, PAGE
+// (a chatter's subs span several pages), worst wait, when, and the message.
+function ReplyTimeSubs({ subs, workload, taskId }) {
   const [open, setOpen] = useState(subs.length <= 4);
+  const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
     <div style={{ marginTop: 8 }}>
       <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
-        {open ? '▾' : '▸'} {subs.length} fan{subs.length === 1 ? '' : 's'} kept waiting{workload ? ` · workload: ${workload}` : ''}
+        {open ? '▾' : '▸'} {done.size ? `${done.size}/${subs.length} reviewed` : `${subs.length} fan${subs.length === 1 ? '' : 's'} kept waiting`}{workload ? ` · workload: ${workload}` : ''}
       </button>
       {open && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {subs.map((s, i) => {
             const tag = tierTag(s);
+            const key = s.fan_username || String(i);
+            const isDone = done.has(key);
             return (
-              <div key={s.fan_username || i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => copy(s.fan_username)} title="click to copy username" style={userBtn}>{s.fan_username || s.fan_nickname}</button>
-                  <span style={{ fontSize: 9.5, fontWeight: 800, color: '#fff', background: tag.c, borderRadius: 4, padding: '1px 5px' }}>{tag.label}</span>
-                  <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>{s.worst_reply_min}m wait</span>
-                  {s.worst_time && <span style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {s.worst_time}</span>}
-                  {s.count > 1 && <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>×{s.count} times</span>}
+              <div key={key} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px', display: 'flex', gap: 8, opacity: isDone ? 0.45 : 1 }}>
+                <input type="checkbox" checked={isDone} onChange={() => toggle(key)} title="Mark reviewed" style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <button onClick={() => copy(s.fan_username)} title="click to copy username" style={{ ...userBtn, textDecoration: isDone ? 'line-through' : 'none' }}>{s.fan_username || s.fan_nickname}</button>
+                    <span style={{ fontSize: 9.5, fontWeight: 800, color: '#fff', background: tag.c, borderRadius: 4, padding: '1px 5px' }}>{tag.label}</span>
+                    {s.page && <span style={{ fontSize: 9.5, color: 'var(--fg-2)', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{s.page}</span>}
+                    <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>{s.worst_reply_min}m wait</span>
+                    {s.worst_time && <span style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {s.worst_time}</span>}
+                    {s.count > 1 && <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>×{s.count} times</span>}
+                  </div>
+                  {s.worst_fan_message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 3 }}>fan: “{s.worst_fan_message}”</div>}
                 </div>
-                {s.worst_fan_message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 3 }}>fan: “{s.worst_fan_message}”</div>}
               </div>
             );
           })}
@@ -93,20 +113,24 @@ function ReplyTimeSubs({ subs, workload }) {
 
 // AFK tasks carry context.incidents — each gap with its bracketing times, who the
 // chatter resumed with, and the fans left waiting. Point the manager to the spot.
-function AfkIncidents({ incidents }) {
+function AfkIncidents({ incidents, taskId }) {
   const [open, setOpen] = useState(incidents.length <= 3);
+  const [done, toggle] = useChecklist(`afkDone:${taskId}`);
   return (
     <div style={{ marginTop: 8 }}>
       <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
-        {open ? '▾' : '▸'} {incidents.length} AFK gap{incidents.length === 1 ? '' : 's'} — where to look
+        {open ? '▾' : '▸'} {done.size ? `${done.size}/${incidents.length} reviewed` : `${incidents.length} AFK gap${incidents.length === 1 ? '' : 's'} — where to look`}
       </button>
       {open && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {incidents.map((g, i) => (
-            <div key={i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px' }}>
+            <div key={i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px', display: 'flex', gap: 8, opacity: done.has(String(i)) ? 0.45 : 1 }}>
+              <input type="checkbox" checked={done.has(String(i))} onChange={() => toggle(String(i))} title="Mark reviewed" style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
                 <span style={{ color: '#f87171', fontWeight: 700 }}>{g.gap_minutes}m gap</span>
                 <span style={{ color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {g.from_time} → {g.to_time}</span>
+                {g.page && <span style={{ fontSize: 9.5, color: 'var(--fg-2)', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{g.page}</span>}
               </div>
               {g.before_message && (
                 <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 4, display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap' }}>
@@ -133,6 +157,7 @@ function AfkIncidents({ incidents }) {
                   ))}
                 </div>
               )}
+              </div>
             </div>
           ))}
         </div>
@@ -175,10 +200,10 @@ function Row({ task, onAction }) {
 
       {/* reply-time / AFK: per-fan reviewable rows */}
       {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
-        <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} />
+        <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} />
       )}
       {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
-        <AfkIncidents incidents={ctx.incidents} />
+        <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
       )}
 
       {task.status === 'archived' && task.priority_reason && (

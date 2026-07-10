@@ -325,6 +325,7 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
     const t = tierOf(curr.sent_to_username, priorContact.has(curr.sent_to_username));
     afkIncidents.push({
       gap_minutes: Math.round(gapMin),
+      creator_id: curr.creator_id || prev.creator_id || null,   // which page they resumed on
       from_time: new Date(prev._ts).toISOString().slice(11, 16),
       to_time: new Date(curr._ts).toISOString().slice(11, 16),
       // the chatter's own messages bracketing the gap, so the manager can search
