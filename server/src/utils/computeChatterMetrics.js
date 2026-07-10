@@ -327,11 +327,18 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
       gap_minutes: Math.round(gapMin),
       from_time: new Date(prev._ts).toISOString().slice(11, 16),
       to_time: new Date(curr._ts).toISOString().slice(11, 16),
+      // the chatter's own messages bracketing the gap, so the manager can search
+      // for them in Infloww — who they were talking to + what they said.
+      before_username: prev.sent_to_username || prev.sent_to_nickname || null,
+      before_message: (prev.creator_message_text || '').slice(0, 200),
+      resumed_username: curr.sent_to_username || curr.sent_to_nickname || null,
+      resumed_message: (curr.creator_message_text || '').slice(0, 200),
       resumed_with_fan: curr.sent_to_nickname || curr.sent_to_username,
       resumed_tier: t.tier, resumed_spend: t.spend,
       resumed_reply_time_min: curr.replay_time_seconds ? Math.round(curr.replay_time_seconds / 60) : null,
       waiting_fans: waitingFans.slice(0, 5).map(m => ({
         fan: m.sent_to_nickname || m.sent_to_username,
+        username: m.sent_to_username || null,
         waited_min: Math.round((m.replay_time_seconds || 0) / 60),
       })),
     });

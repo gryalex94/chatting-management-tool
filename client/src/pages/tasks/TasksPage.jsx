@@ -107,14 +107,27 @@ function AfkIncidents({ incidents }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
                 <span style={{ color: '#f87171', fontWeight: 700 }}>{g.gap_minutes}m gap</span>
                 <span style={{ color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {g.from_time} → {g.to_time}</span>
-                {g.resumed_with_fan && <span style={{ color: 'var(--fg-3)' }}>resumed with <b style={{ color: 'var(--fg-1)' }}>{g.resumed_with_fan}</b></span>}
               </div>
+              {g.before_message && (
+                <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 4, display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--fg-3)' }}>before gap</span>
+                  {g.before_username && <button onClick={() => copy(g.before_username)} title="click to copy" style={userBtn}>{g.before_username}</button>}
+                  <span style={{ fontStyle: 'italic' }}>“{g.before_message}”</span>
+                </div>
+              )}
+              {g.resumed_message && (
+                <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 3, display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--fg-3)' }}>resumed</span>
+                  {g.resumed_username && <button onClick={() => copy(g.resumed_username)} title="click to copy" style={userBtn}>{g.resumed_username}</button>}
+                  <span style={{ fontStyle: 'italic' }}>“{g.resumed_message}”</span>
+                </div>
+              )}
               {Array.isArray(g.waiting_fans) && g.waiting_fans.length > 0 && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, alignItems: 'center' }}>
                   <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>waiting:</span>
                   {g.waiting_fans.map((f, j) => (
                     <span key={j} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                      <button onClick={() => copy(f.fan)} title="click to copy" style={userBtn}>{f.fan}</button>
+                      <button onClick={() => copy(f.username || f.fan)} title="click to copy" style={userBtn}>{f.fan}</button>
                       <span style={{ fontSize: 10, color: '#f87171', fontWeight: 700 }}>{f.waited_min}m</span>
                     </span>
                   ))}
