@@ -8,6 +8,18 @@ const { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluati
 const { buildOverview } = require('../utils/overview');
 const { buildTasksForChatterEval } = require('../utils/taskGenerator');
 
+// Build tasks from EVERY stored eval (compliance + strategy) for one chatter/day,
+// so a per-chatter run surfaces all of that chatter's tasks at once.
+async function buildAllChatterTasks(orgId, reportDate, chatterId) {
+  const evals = await getEvaluations(orgId, chatterId, reportDate);
+  let created = 0, updated = 0;
+  for (const ev of evals) {
+    const r = await buildTasksForChatterEval(orgId, reportDate, chatterId, ev.eval_type, ev.evaluation?.issues || []);
+    created += r.created || 0; updated += r.updated || 0;
+  }
+  return { created, updated };
+}
+
 /**
  * POST /api/daily-check/run
  * Body: { report_date: "YYYY-MM-DD" }
@@ -198,11 +210,13 @@ router.post('/evaluate', async (req, res) => {
       creatorId: eval_type === 'creator' ? creator_id : null,
     });
 
-    // A manual per-chatter strategy review feeds its findings straight into the
-    // main task queue (the manager chose to review this chatter).
+    // A manual per-chatter run populates ALL of this chatter's tasks (compliance +
+    // strategy) from every stored eval for the day — so it doesn't need a separate
+    // Home rebuild. The daily batch omits build_tasks and lets the Home build apply
+    // tenure gating. sales_quality always builds (it's only ever run manually).
     let tasks_added = null;
-    if (eval_type === 'sales_quality' && chatter_id) {
-      try { tasks_added = await buildTasksForChatterEval(orgId, report_date, chatter_id, 'sales_quality', result.evaluation?.issues || []); }
+    if ((req.body.build_tasks || eval_type === 'sales_quality') && chatter_id) {
+      try { tasks_added = await buildAllChatterTasks(orgId, report_date, chatter_id); }
       catch (e) { console.error('[DailyCheck] chatter-eval tasks error:', e.message); }
     }
     res.json({ ...result, created_at: createdAt || new Date().toISOString(), tasks_added });
