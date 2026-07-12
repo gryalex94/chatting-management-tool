@@ -25,7 +25,6 @@ FLAG THESE (compliance / ToS — these matter most):
 - Meetings / real life: ONLY when there is an explicit, concrete move toward meeting in person (a real plan, or the chatter clearly agreeing OR refusing). Do NOT flag online "join me" invitations, playful wordplay, or a clean deflection (e.g. offering a custom instead of a video call). → area "meeting".
 - Free content: the chatter gives away actual unpaid FULL content. Previews/teasers are ALLOWED and recommended — do NOT flag a preview or teaser. → area "free_content".
 - Off-platform / real-world contact: any move to take the chat off OnlyFans, or a promise of real-world contact or items. → area "offplatform".
-- Location disclosure: the CHATTER reveals where the CREATOR lives or is from — a SPECIFIC city, region, country, or the creator's local time/timezone — which must match the bio. IGNORE a fan disclosing their OWN location, and ignore vague non-specific mentions. → area "location".
 - Big discount only: a discount counts ONLY if the price is cut by MORE THAN 50% of the original/listed price (e.g. $200 → under $100). Normal discounts are at the chatter's discretion — do NOT flag them. → area "discount".
 
 MONEY LEFT ON THE TABLE (high priority — this is lost revenue; managers care most about these):
@@ -44,10 +43,10 @@ LOWER PRIORITY (worth a glance, keep severity "low"):
 
 Severity is a sort hint, not a verdict:
 - critical = ToS breach, possible minor, explicit meeting agreement, free (full) content, off-platform contact.
-- high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); location disclosure; big (>50%) discount; strong compliance concern.
+- high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); big (>50%) discount; strong compliance concern.
 - medium / low = everything else; bare tips are always low.`;
 
-const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | location | discount | sales | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"nickname or null"}]`;
+const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"nickname or null"}]`;
 
 // VERSION A — content/compliance only (recommended; engine owns discipline).
 const PROMPT_A = `${SPOTLIGHT_BODY}

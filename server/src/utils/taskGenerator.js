@@ -11,7 +11,7 @@ const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders', 'refunds'];
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
 // capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
 // area vocabulary emitted by the compliance prompt in evaluateChatterDay.js.
-const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'location']);
+const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
 // The subset that rides at the very top (serious ToS). `location` is protected too
 // but ranks a notch lower (verify-against-bio, not an active breach).
 const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
@@ -43,7 +43,6 @@ function defaultPriority(sev, source, area) {
   const ph = PAGE_HEALTH.includes(a);
   if (sev === 'critical') return 1;
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
-  if (a === 'location') return sev === 'high' ? 3 : 4;         // verify vs bio, not a breach
   if (sev === 'high') {
     if (source === 'flag' || a === 'work_ethic') return 2;
     if (a === 'discount') return 3;                            // only reaches here if >50% off

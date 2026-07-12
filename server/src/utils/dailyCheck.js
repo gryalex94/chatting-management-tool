@@ -146,15 +146,8 @@ async function runDailyCheck(orgId, reportDate) {
       chatterPrimaryPage[row.chatter_id] = { creator_id: creatorId, messages_sent: row.messages_sent };
     }
     chatterAnyRow[row.chatter_id] = row;
-
-    // PER-PAGE flag: zero sales on meaningful volume (volume is per-page)
-    if (row.sales_today === 0 && row.messages_sent > 50) {
-      const cEntry = page.chatters[row.chatter_id];
-      const f = mkFlag('chatter', creatorId, row.chatter_id, reportDate, 'zero_sales', 'medium',
-        `No sales across ${row.messages_sent} messages / ${row.fans_chatted} fans on this page`, orgId,
-        { messages: row.messages_sent, fans: row.fans_chatted, workload: row.workload_status });
-      cEntry.flags.push(f); flags.push(f);
-    }
+    // (Removed the "no sales across N messages" flag — redundant; the AI chatter
+    // analysis surfaces genuine missed-sale cases with the actual dialogue.)
   }
 
   // Now day-level flags, attached to the primary page, carrying incident detail.
