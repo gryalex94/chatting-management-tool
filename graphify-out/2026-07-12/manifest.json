@@ -410,8 +410,8 @@
     "semantic_hash": "c5ab317fb102bc599c2214470cb22cb8"
   },
   "client/src/pages/chatters/ChatterProfile.jsx": {
-    "mtime": 1783861103.62946,
-    "ast_hash": "0d02f8a3bc5f54a5ab266f06f80b01b7",
+    "mtime": 1783856187.1703138,
+    "ast_hash": "bac163f1807ec6896452e006912c151a",
     "semantic_hash": ""
   },
   "client/src/pages/creators/CreatorsPage.jsx": {
@@ -445,8 +445,8 @@
     "semantic_hash": "cfb016b211ed142bbf1c50adbd35dd8d"
   },
   "client/src/pages/tasks/TasksPage.jsx": {
-    "mtime": 1783861001.960132,
-    "ast_hash": "50a599db7ee256d0f4e7101d884b010c",
+    "mtime": 1783675518.7050893,
+    "ast_hash": "f4e43d78572bdd36fb5e50ef1ca221d9",
     "semantic_hash": ""
   },
   "client/src/pages/team/TeamPage.jsx": {
@@ -635,8 +635,8 @@
     "semantic_hash": "d37a73c0436227c144f6400d8df2d31b"
   },
   "server/src/routes/reviewTasks.js": {
-    "mtime": 1783860963.7663429,
-    "ast_hash": "473d67f7e3a9fc9fa9ff53f0616481f1",
+    "mtime": 1783458941.8171139,
+    "ast_hash": "ea1c352ecc58a6eac2fb6df6fa38decc",
     "semantic_hash": ""
   },
   "server/src/routes/shifts.js": {
@@ -893,15 +893,5 @@
     "mtime": 1779266132.8444693,
     "ast_hash": "9960a24288958394ac50e57ff638b036",
     "semantic_hash": "9960a24288958394ac50e57ff638b036"
-  },
-  "supabase/migrations/015_task_coaching.sql": {
-    "mtime": 1783860903.3197157,
-    "ast_hash": "96e2d829d87bfd40657d9024b451156a",
-    "semantic_hash": ""
-  },
-  "CHATTING_STRATEGY.md": {
-    "mtime": 1783858622.5534658,
-    "ast_hash": "cfc2e4987072c6a893df8458224a95b9",
-    "semantic_hash": ""
   }
 }
