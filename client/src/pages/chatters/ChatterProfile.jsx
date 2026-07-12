@@ -684,6 +684,61 @@ function CoachingLog({ chatterId, canCreate, onAddCustom }) {
   );
 }
 
+// Reports timeline — the history of AI reviews for this chatter (newest first),
+// each openable to see the overview + findings, so managers can track progress.
+function ReportsTimeline({ chatterId }) {
+  const [reports, setReports] = useState([]);
+  const [openKey, setOpenKey] = useState(null);
+  useEffect(() => {
+    api.get(`/api/daily-check/chatter-eval-history?chatter_id=${chatterId}`)
+      .then(r => setReports(r.data?.evaluations || [])).catch(() => {});
+  }, [chatterId]);
+  const label = t => t === 'compliance' ? 'Daily review' : t === 'sales_quality' ? 'Strategy review' : t;
+  const sevColor = s => s === 'high' || s === 'critical' ? '#f87171' : s === 'medium' ? '#fbbf24' : 'var(--fg-3)';
+  return (
+    <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Reports</span>
+        <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{reports.length} run{reports.length === 1 ? '' : 's'}</span>
+      </div>
+      <div style={{ maxHeight: 460, overflowY: 'auto' }}>
+        {reports.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>No reports generated yet.</div>
+        ) : reports.map((r) => {
+          const key = `${r.report_date}-${r.eval_type}-${r.created_at}`;
+          const issues = r.evaluation?.issues || [];
+          const isOpen = openKey === key;
+          return (
+            <div key={key} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+              <button onClick={() => setOpenKey(isOpen ? null : key)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                <span style={{ fontSize: 10, color: 'var(--fg-3)', width: 12 }}>{isOpen ? '▾' : '▸'}</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-1)' }}>{r.report_date}</span>
+                <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--indigo-bright)', background: 'var(--bg-2)', borderRadius: 4, padding: '1px 6px' }}>{label(r.eval_type)}</span>
+                <div style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: issues.length ? 'var(--fg-2)' : 'var(--fg-4)' }}>{issues.length} issue{issues.length === 1 ? '' : 's'}</span>
+              </button>
+              {isOpen && (
+                <div style={{ padding: '0 14px 12px 34px' }}>
+                  {r.evaluation?.overall && <p style={{ fontSize: 12, color: 'var(--fg-1)', lineHeight: 1.55, margin: '0 0 8px' }}>{r.evaluation.overall}</p>}
+                  {issues.map((iss, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: sevColor(iss.severity), marginTop: 5, flexShrink: 0 }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11.5, color: 'var(--fg-1)', lineHeight: 1.4 }}>{iss.detail || iss.title}</div>
+                        <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 2 }}>{(iss.area || '').replace(/_/g, ' ')}{iss.fan_username ? ` · @${iss.fan_username}` : ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatterProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -883,6 +938,9 @@ export default function ChatterProfile() {
         {/* Right */}
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <WeeklySchedule chatterId={id} workDays={chatter.work_days} assignments={assignments} onUpdate={load}/>
+
+          {/* Reports timeline — openable history of AI reviews (progress over time) */}
+          <ReportsTimeline chatterId={id}/>
 
           {/* Performance reviews */}
           <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>

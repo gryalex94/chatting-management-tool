@@ -80,6 +80,20 @@ async function getLatestEvaluations(orgId, chatterId) {
   return out;
 }
 
+// Full history of a chatter's evaluations across all dates (newest first) — for
+// the Reports timeline on the profile, so managers can see progress over time.
+async function getEvaluationHistory(orgId, chatterId) {
+  const { data, error } = await supabaseAdmin
+    .from('chatter_evaluations')
+    .select('chatter_id, eval_type, model, payload, created_at, report_date')
+    .eq('organisation_id', orgId)
+    .eq('chatter_id', chatterId)
+    .order('report_date', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) { console.error('[evalStore] history load error:', error.message); return []; }
+  return (data || []).map(r => ({ ...shape(r), report_date: r.report_date }));
+}
+
 // All stored evaluations (chatter AND creator) for a day — for at-a-glance badges.
 async function getEvaluationsForDate(orgId, reportDate) {
   const { data, error } = await supabaseAdmin
@@ -91,4 +105,4 @@ async function getEvaluationsForDate(orgId, reportDate) {
   return (data || []).map(shape);
 }
 
-module.exports = { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations };
+module.exports = { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations, getEvaluationHistory };

@@ -4,7 +4,7 @@ const { runDailyCheck } = require('../utils/dailyCheck');
 const { evaluateChatterDay } = require('../ai/evaluateChatterDay');
 const { evaluateChatterSales } = require('../ai/evaluateChatterSales');
 const { evaluateCreatorDay } = require('../ai/evaluateCreatorDay');
-const { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations } = require('../utils/evaluationStore');
+const { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations, getEvaluationHistory } = require('../utils/evaluationStore');
 const { buildOverview } = require('../utils/overview');
 const { buildTasksForChatterEval } = require('../utils/taskGenerator');
 
@@ -77,6 +77,18 @@ router.get('/chatter-evals', async (req, res) => {
     res.json({ evaluations });
   } catch (err) {
     res.status(500).json({ error: 'Failed to load evaluations' });
+  }
+});
+
+// Full evaluation history for one chatter (all dates) — the Reports timeline.
+router.get('/chatter-eval-history', async (req, res) => {
+  try {
+    const { chatter_id } = req.query;
+    if (!chatter_id) return res.status(400).json({ error: 'chatter_id is required' });
+    const evaluations = await getEvaluationHistory(req.user.organisationId, chatter_id);
+    res.json({ evaluations });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to load evaluation history' });
   }
 });
 
