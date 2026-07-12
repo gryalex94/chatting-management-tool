@@ -2330,7 +2330,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis",
-      "community": 37,
+      "community": 23,
       "norm_label": "rundailyanalysis.js"
     },
     {
@@ -2340,7 +2340,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_supabaseadmin",
-      "community": 37,
+      "community": 23,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -2350,7 +2350,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_analyzecomprehensive",
-      "community": 37,
+      "community": 23,
       "norm_label": "{ analyzecomprehensive }"
     },
     {
@@ -2360,7 +2360,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_rundailyanalysis",
-      "community": 37,
+      "community": 23,
       "norm_label": "rundailyanalysis()"
     },
     {
@@ -2370,7 +2370,7 @@
       "source_location": "L193",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_rundailyanalysisfororg",
-      "community": 37,
+      "community": 23,
       "norm_label": "rundailyanalysisfororg()"
     },
     {
@@ -2380,7 +2380,7 @@
       "source_location": "L228",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_getcettocestoffset",
-      "community": 37,
+      "community": 23,
       "norm_label": "getcettocestoffset()"
     },
     {
@@ -2390,7 +2390,7 @@
       "source_location": "L244",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_computereplytimestats",
-      "community": 37,
+      "community": 23,
       "norm_label": "computereplytimestats()"
     },
     {
@@ -2400,7 +2400,7 @@
       "source_location": "L275",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_computeafkperiods",
-      "community": 37,
+      "community": 23,
       "norm_label": "computeafkperiods()"
     },
     {
@@ -2410,7 +2410,7 @@
       "source_location": "L318",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_groupbyfan",
-      "community": 37,
+      "community": 23,
       "norm_label": "groupbyfan()"
     },
     {
@@ -2420,7 +2420,7 @@
       "source_location": "L379",
       "_origin": "ast",
       "id": "backup_server_src_ai_rundailyanalysis_createautotasks",
-      "community": 37,
+      "community": 23,
       "norm_label": "createautotasks()"
     },
     {
@@ -3030,7 +3030,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_chatters",
-      "community": 34,
+      "community": 38,
       "norm_label": "chatters.js"
     },
     {
@@ -3040,7 +3040,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_chatters_router",
-      "community": 34,
+      "community": 38,
       "norm_label": "router"
     },
     {
@@ -3050,7 +3050,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "backup_server_src_routes_chatters_supabaseadmin",
-      "community": 34,
+      "community": 38,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -3060,7 +3060,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "backup_server_src_routes_chatters_requireminrole",
-      "community": 34,
+      "community": 38,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -3190,7 +3190,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_organisations",
-      "community": 34,
+      "community": 67,
       "norm_label": "organisations.js"
     },
     {
@@ -3200,7 +3200,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_organisations_router",
-      "community": 34,
+      "community": 67,
       "norm_label": "router"
     },
     {
@@ -3210,7 +3210,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "backup_server_src_routes_organisations_supabaseadmin",
-      "community": 34,
+      "community": 67,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -3220,7 +3220,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "backup_server_src_routes_organisations_requireminrole",
-      "community": 34,
+      "community": 67,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -3230,7 +3230,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_shifts",
-      "community": 38,
+      "community": 34,
       "norm_label": "shifts.js"
     },
     {
@@ -3240,7 +3240,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_shifts_router",
-      "community": 38,
+      "community": 34,
       "norm_label": "router"
     },
     {
@@ -3250,7 +3250,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "backup_server_src_routes_shifts_supabaseadmin",
-      "community": 38,
+      "community": 34,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -3260,7 +3260,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "backup_server_src_routes_shifts_requireminrole",
-      "community": 38,
+      "community": 34,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -3270,7 +3270,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_tasks",
-      "community": 38,
+      "community": 68,
       "norm_label": "tasks.js"
     },
     {
@@ -3280,7 +3280,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "backup_server_src_routes_tasks_router",
-      "community": 38,
+      "community": 68,
       "norm_label": "router"
     },
     {
@@ -3290,7 +3290,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "backup_server_src_routes_tasks_supabaseadmin",
-      "community": 38,
+      "community": 68,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -3300,7 +3300,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "backup_server_src_routes_tasks_requireminrole",
-      "community": 38,
+      "community": 68,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -4210,7 +4210,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_components_shared_chip",
-      "community": 16,
+      "community": 20,
       "norm_label": "chip.jsx"
     },
     {
@@ -4220,7 +4220,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_components_shared_chip_chip",
-      "community": 16,
+      "community": 20,
       "norm_label": "chip()"
     },
     {
@@ -4280,7 +4280,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_components_shared_dismissmodal",
-      "community": 1,
+      "community": 2,
       "norm_label": "dismissmodal.jsx"
     },
     {
@@ -4290,7 +4290,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "client_src_components_shared_dismissmodal_primary",
-      "community": 1,
+      "community": 2,
       "norm_label": "primary"
     },
     {
@@ -4300,7 +4300,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "client_src_components_shared_dismissmodal_ghost",
-      "community": 1,
+      "community": 2,
       "norm_label": "ghost"
     },
     {
@@ -4310,7 +4310,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "client_src_components_shared_dismissmodal_dismissmodal",
-      "community": 1,
+      "community": 2,
       "norm_label": "dismissmodal()"
     },
     {
@@ -4390,7 +4390,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_context_authcontext",
-      "community": 48,
+      "community": 16,
       "norm_label": "authcontext.jsx"
     },
     {
@@ -4400,7 +4400,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "client_src_context_authcontext_authcontext",
-      "community": 48,
+      "community": 16,
       "norm_label": "authcontext"
     },
     {
@@ -4410,7 +4410,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "client_src_context_authcontext_authprovider",
-      "community": 48,
+      "community": 16,
       "norm_label": "authprovider()"
     },
     {
@@ -4600,7 +4600,7 @@
       "source_location": "L104",
       "_origin": "ast",
       "id": "client_src_pages_chatters_chatterprofile_aiqualitypanel",
-      "community": 12,
+      "community": 2,
       "norm_label": "aiqualitypanel()"
     },
     {
@@ -4724,20 +4724,20 @@
       "norm_label": "addtaskmodal()"
     },
     {
-      "label": "MistakeLog()",
+      "label": "CoachingLog()",
       "file_type": "code",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
       "source_location": "L619",
       "_origin": "ast",
-      "id": "client_src_pages_chatters_chatterprofile_mistakelog",
-      "community": 2,
-      "norm_label": "mistakelog()"
+      "id": "client_src_pages_chatters_chatterprofile_coachinglog",
+      "community": 12,
+      "norm_label": "coachinglog()"
     },
     {
       "label": "ChatterProfile()",
       "file_type": "code",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L683",
+      "source_location": "L687",
       "_origin": "ast",
       "id": "client_src_pages_chatters_chatterprofile_chatterprofile",
       "community": 12,
@@ -5520,7 +5520,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_pages_reports_reportspage",
-      "community": 13,
+      "community": 20,
       "norm_label": "reportspage.jsx"
     },
     {
@@ -5530,7 +5530,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "client_src_pages_reports_reportspage_reports",
-      "community": 13,
+      "community": 20,
       "norm_label": "reports"
     },
     {
@@ -5540,7 +5540,7 @@
       "source_location": "L13",
       "_origin": "ast",
       "id": "client_src_pages_reports_reportspage_reportcard",
-      "community": 13,
+      "community": 20,
       "norm_label": "reportcard()"
     },
     {
@@ -5550,7 +5550,7 @@
       "source_location": "L42",
       "_origin": "ast",
       "id": "client_src_pages_reports_reportspage_reportspage",
-      "community": 13,
+      "community": 20,
       "norm_label": "reportspage()"
     },
     {
@@ -5737,7 +5737,7 @@
       "label": "CustomTaskModal()",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L240",
+      "source_location": "L245",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_customtaskmodal",
       "community": 1,
@@ -5747,7 +5747,7 @@
       "label": "TasksPage()",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L314",
+      "source_location": "L319",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_taskspage",
       "community": 1,
@@ -5757,7 +5757,7 @@
       "label": "inputStyle",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L502",
+      "source_location": "L512",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_inputstyle",
       "community": 1,
@@ -5767,7 +5767,7 @@
       "label": "tabBtn",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L503",
+      "source_location": "L513",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_tabbtn",
       "community": 1,
@@ -5777,7 +5777,7 @@
       "label": "groupBtn",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L504",
+      "source_location": "L514",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_groupbtn",
       "community": 1,
@@ -5787,7 +5787,7 @@
       "label": "dayHeader",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L505",
+      "source_location": "L515",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_dayheader",
       "community": 1,
@@ -5797,7 +5797,7 @@
       "label": "lbl",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L506",
+      "source_location": "L516",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_lbl",
       "community": 1,
@@ -5807,7 +5807,7 @@
       "label": "filterPanel",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L507",
+      "source_location": "L517",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_filterpanel",
       "community": 1,
@@ -5817,7 +5817,7 @@
       "label": "filterRow",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L508",
+      "source_location": "L518",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_filterrow",
       "community": 1,
@@ -5827,7 +5827,7 @@
       "label": "filterLabel",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L509",
+      "source_location": "L519",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_filterlabel",
       "community": 1,
@@ -5837,7 +5837,7 @@
       "label": "chipStyle()",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L510",
+      "source_location": "L520",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_chipstyle",
       "community": 1,
@@ -5847,7 +5847,7 @@
       "label": "primary",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L511",
+      "source_location": "L521",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_primary",
       "community": 1,
@@ -5857,7 +5857,7 @@
       "label": "ghost",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L512",
+      "source_location": "L522",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_ghost",
       "community": 1,
@@ -5867,7 +5867,7 @@
       "label": "userBtn",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L513",
+      "source_location": "L523",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_userbtn",
       "community": 1,
@@ -5877,7 +5877,7 @@
       "label": "subtle",
       "file_type": "code",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L514",
+      "source_location": "L524",
       "_origin": "ast",
       "id": "client_src_pages_tasks_taskspage_subtle",
       "community": 1,
@@ -5980,7 +5980,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "client_src_services_api_setapitoken",
-      "community": 48,
+      "community": 16,
       "norm_label": "setapitoken()"
     },
     {
@@ -5990,7 +5990,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "client_src_services_supabase",
-      "community": 48,
+      "community": 16,
       "norm_label": "supabase.js"
     },
     {
@@ -6000,7 +6000,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "client_src_services_supabase_supabase",
-      "community": 48,
+      "community": 16,
       "norm_label": "supabase"
     },
     {
@@ -6130,7 +6130,7 @@
       "source_location": "L14",
       "_origin": "ast",
       "id": "client_src_utils_taskmeta_dismiss_reasons",
-      "community": 1,
+      "community": 2,
       "norm_label": "dismiss_reasons"
     },
     {
@@ -6800,7 +6800,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive",
-      "community": 3,
+      "community": 6,
       "norm_label": "comprehensive.js"
     },
     {
@@ -6810,7 +6810,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_runagent",
-      "community": 3,
+      "community": 6,
       "norm_label": "{ runagent }"
     },
     {
@@ -6820,7 +6820,7 @@
       "source_location": "L126",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_analyzecomprehensive",
-      "community": 3,
+      "community": 6,
       "norm_label": "analyzecomprehensive()"
     },
     {
@@ -6830,7 +6830,7 @@
       "source_location": "L169",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_formatconversations",
-      "community": 3,
+      "community": 6,
       "norm_label": "formatconversations()"
     },
     {
@@ -6840,7 +6840,7 @@
       "source_location": "L210",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_shiftdatetime",
-      "community": 3,
+      "community": 6,
       "norm_label": "shiftdatetime()"
     },
     {
@@ -6850,7 +6850,7 @@
       "source_location": "L225",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_getamsterdamoffset",
-      "community": 3,
+      "community": 6,
       "norm_label": "getamsterdamoffset()"
     },
     {
@@ -6860,7 +6860,7 @@
       "source_location": "L238",
       "_origin": "ast",
       "id": "server_src_ai_agents_comprehensive_adjusttime",
-      "community": 3,
+      "community": 6,
       "norm_label": "adjusttime()"
     },
     {
@@ -7660,7 +7660,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats",
-      "community": 14,
+      "community": 51,
       "norm_label": "creatorstats.js"
     },
     {
@@ -7670,7 +7670,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_xlsx",
-      "community": 14,
+      "community": 51,
       "norm_label": "xlsx"
     },
     {
@@ -7680,7 +7680,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_findorcreatecreator",
-      "community": 14,
+      "community": 51,
       "norm_label": "{ findorcreatecreator }"
     },
     {
@@ -7690,7 +7690,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_supabaseadmin",
-      "community": 14,
+      "community": 51,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -7700,7 +7700,7 @@
       "source_location": "L16",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_parsecreatorstats",
-      "community": 14,
+      "community": 51,
       "norm_label": "parsecreatorstats()"
     },
     {
@@ -7710,7 +7710,7 @@
       "source_location": "L135",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_extractdate",
-      "community": 14,
+      "community": 51,
       "norm_label": "extractdate()"
     },
     {
@@ -7720,7 +7720,7 @@
       "source_location": "L140",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_dollar",
-      "community": 14,
+      "community": 51,
       "norm_label": "dollar()"
     },
     {
@@ -7730,7 +7730,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_pct",
-      "community": 14,
+      "community": 51,
       "norm_label": "pct()"
     },
     {
@@ -7740,7 +7740,7 @@
       "source_location": "L148",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_intval",
-      "community": 14,
+      "community": 51,
       "norm_label": "intval()"
     },
     {
@@ -7750,7 +7750,7 @@
       "source_location": "L152",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_nulldash",
-      "community": 14,
+      "community": 51,
       "norm_label": "nulldash()"
     },
     {
@@ -7760,7 +7760,7 @@
       "source_location": "L156",
       "_origin": "ast",
       "id": "server_src_parsers_creatorstats_days",
-      "community": 14,
+      "community": 51,
       "norm_label": "days()"
     },
     {
@@ -7770,7 +7770,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport",
-      "community": 14,
+      "community": 44,
       "norm_label": "employeereport.js"
     },
     {
@@ -7780,7 +7780,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_xlsx",
-      "community": 14,
+      "community": 44,
       "norm_label": "xlsx"
     },
     {
@@ -7790,7 +7790,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_findorcreatechatter_findorcreatecreator",
-      "community": 14,
+      "community": 44,
       "norm_label": "{ findorcreatechatter, findorcreatecreator }"
     },
     {
@@ -7800,7 +7800,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_parseemployeereport",
-      "community": 14,
+      "community": 44,
       "norm_label": "parseemployeereport()"
     },
     {
@@ -7810,7 +7810,7 @@
       "source_location": "L131",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_extractdate",
-      "community": 14,
+      "community": 44,
       "norm_label": "extractdate()"
     },
     {
@@ -7820,7 +7820,7 @@
       "source_location": "L139",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_parsedollar",
-      "community": 14,
+      "community": 44,
       "norm_label": "parsedollar()"
     },
     {
@@ -7830,7 +7830,7 @@
       "source_location": "L144",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_parsepercent",
-      "community": 14,
+      "community": 44,
       "norm_label": "parsepercent()"
     },
     {
@@ -7840,7 +7840,7 @@
       "source_location": "L149",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_safeint",
-      "community": 14,
+      "community": 44,
       "norm_label": "safeint()"
     },
     {
@@ -7850,7 +7850,7 @@
       "source_location": "L154",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_safefloat",
-      "community": 14,
+      "community": 44,
       "norm_label": "safefloat()"
     },
     {
@@ -7860,7 +7860,7 @@
       "source_location": "L159",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_nulldash",
-      "community": 14,
+      "community": 44,
       "norm_label": "nulldash()"
     },
     {
@@ -7870,7 +7870,7 @@
       "source_location": "L168",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_parsetimetoseconds",
-      "community": 14,
+      "community": 44,
       "norm_label": "parsetimetoseconds()"
     },
     {
@@ -7880,7 +7880,7 @@
       "source_location": "L188",
       "_origin": "ast",
       "id": "server_src_parsers_employeereport_parsehourstominutes",
-      "community": 14,
+      "community": 44,
       "norm_label": "parsehourstominutes()"
     },
     {
@@ -7960,7 +7960,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend",
-      "community": 14,
+      "community": 48,
       "norm_label": "subscriberspend.js"
     },
     {
@@ -7970,7 +7970,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_xlsx",
-      "community": 14,
+      "community": 48,
       "norm_label": "xlsx"
     },
     {
@@ -7980,7 +7980,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_crypto",
-      "community": 14,
+      "community": 48,
       "norm_label": "crypto"
     },
     {
@@ -7990,7 +7990,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_supabaseadmin",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8000,7 +8000,7 @@
       "source_location": "L19",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_importsubscriberspend",
-      "community": 14,
+      "community": 48,
       "norm_label": "importsubscriberspend()"
     },
     {
@@ -8010,7 +8010,7 @@
       "source_location": "L95",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_recomputesubscribersfromledger",
-      "community": 14,
+      "community": 48,
       "norm_label": "recomputesubscribersfromledger()"
     },
     {
@@ -8020,7 +8020,7 @@
       "source_location": "L141",
       "_origin": "ast",
       "id": "server_src_parsers_subscriberspend_adddashboardsalestoledger",
-      "community": 14,
+      "community": 48,
       "norm_label": "adddashboardsalestoledger()"
     },
     {
@@ -8030,7 +8030,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_ai",
-      "community": 6,
+      "community": 0,
       "norm_label": "ai.js"
     },
     {
@@ -8040,7 +8040,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_ai_router",
-      "community": 6,
+      "community": 0,
       "norm_label": "router"
     },
     {
@@ -8050,7 +8050,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_ai_supabaseadmin",
-      "community": 6,
+      "community": 0,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8060,7 +8060,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_routes_ai_requireminrole",
-      "community": 6,
+      "community": 0,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -8070,7 +8070,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_routes_ai_rundailyanalysis_rundailyanalysisfororg",
-      "community": 6,
+      "community": 0,
       "norm_label": "{ rundailyanalysis, rundailyanalysisfororg }"
     },
     {
@@ -8080,7 +8080,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_auth",
-      "community": 55,
+      "community": 0,
       "norm_label": "auth.js"
     },
     {
@@ -8090,7 +8090,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_auth_router",
-      "community": 55,
+      "community": 0,
       "norm_label": "router"
     },
     {
@@ -8100,7 +8100,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_auth_supabaseadmin",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8110,7 +8110,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_chatters",
-      "community": 44,
+      "community": 0,
       "norm_label": "chatters.js"
     },
     {
@@ -8120,7 +8120,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_chatters_router",
-      "community": 44,
+      "community": 0,
       "norm_label": "router"
     },
     {
@@ -8130,7 +8130,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_chatters_supabaseadmin",
-      "community": 44,
+      "community": 0,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8140,7 +8140,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_routes_chatters_requireminrole",
-      "community": 44,
+      "community": 0,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -8150,7 +8150,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_creators",
-      "community": 55,
+      "community": 0,
       "norm_label": "creators.js"
     },
     {
@@ -8160,7 +8160,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_creators_router",
-      "community": 55,
+      "community": 0,
       "norm_label": "router"
     },
     {
@@ -8170,7 +8170,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_creators_supabaseadmin",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8180,7 +8180,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_routes_creators_requireminrole",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -8490,7 +8490,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_shifts",
-      "community": 55,
+      "community": 0,
       "norm_label": "shifts.js"
     },
     {
@@ -8500,7 +8500,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_shifts_router",
-      "community": 55,
+      "community": 0,
       "norm_label": "router"
     },
     {
@@ -8510,7 +8510,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_shifts_supabaseadmin",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8520,7 +8520,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_routes_shifts_requireminrole",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -8570,7 +8570,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_uploads",
-      "community": 14,
+      "community": 48,
       "norm_label": "uploads.js"
     },
     {
@@ -8580,7 +8580,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_routes_uploads_router",
-      "community": 14,
+      "community": 48,
       "norm_label": "router"
     },
     {
@@ -8590,7 +8590,7 @@
       "source_location": "L2",
       "_origin": "ast",
       "id": "server_src_routes_uploads_multer",
-      "community": 14,
+      "community": 48,
       "norm_label": "multer"
     },
     {
@@ -8600,7 +8600,7 @@
       "source_location": "L3",
       "_origin": "ast",
       "id": "server_src_routes_uploads_supabaseadmin",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8610,7 +8610,7 @@
       "source_location": "L4",
       "_origin": "ast",
       "id": "server_src_routes_uploads_requireminrole",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ requireminrole }"
     },
     {
@@ -8620,7 +8620,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "server_src_routes_uploads_parsemessagedashboard",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ parsemessagedashboard }"
     },
     {
@@ -8630,7 +8630,7 @@
       "source_location": "L6",
       "_origin": "ast",
       "id": "server_src_routes_uploads_parseemployeereport",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ parseemployeereport }"
     },
     {
@@ -8640,7 +8640,7 @@
       "source_location": "L7",
       "_origin": "ast",
       "id": "server_src_routes_uploads_parsecreatorstats",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ parsecreatorstats }"
     },
     {
@@ -8650,7 +8650,7 @@
       "source_location": "L8",
       "_origin": "ast",
       "id": "server_src_routes_uploads_importsubscriberspend",
-      "community": 14,
+      "community": 48,
       "norm_label": "{ importsubscriberspend }"
     },
     {
@@ -8660,7 +8660,7 @@
       "source_location": "L11",
       "_origin": "ast",
       "id": "server_src_routes_uploads_upload",
-      "community": 14,
+      "community": 48,
       "norm_label": "upload"
     },
     {
@@ -8670,7 +8670,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_utils_automatch",
-      "community": 14,
+      "community": 44,
       "norm_label": "automatch.js"
     },
     {
@@ -8680,7 +8680,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_utils_automatch_supabaseadmin",
-      "community": 14,
+      "community": 44,
       "norm_label": "{ supabaseadmin }"
     },
     {
@@ -8690,7 +8690,7 @@
       "source_location": "L9",
       "_origin": "ast",
       "id": "server_src_utils_automatch_findorcreatecreator",
-      "community": 14,
+      "community": 44,
       "norm_label": "findorcreatecreator()"
     },
     {
@@ -8700,7 +8700,7 @@
       "source_location": "L51",
       "_origin": "ast",
       "id": "server_src_utils_automatch_findorcreatechatter",
-      "community": 14,
+      "community": 44,
       "norm_label": "findorcreatechatter()"
     },
     {
@@ -8710,7 +8710,7 @@
       "source_location": "L85",
       "_origin": "ast",
       "id": "server_src_utils_automatch_buildlookupmaps",
-      "community": 14,
+      "community": 44,
       "norm_label": "buildlookupmaps()"
     },
     {
@@ -9350,7 +9350,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_utils_supabase",
-      "community": 55,
+      "community": 0,
       "norm_label": "supabase.js"
     },
     {
@@ -9360,7 +9360,7 @@
       "source_location": "L1",
       "_origin": "ast",
       "id": "server_src_utils_supabase_createclient",
-      "community": 55,
+      "community": 0,
       "norm_label": "{ createclient }"
     },
     {
@@ -9370,7 +9370,7 @@
       "source_location": "L5",
       "_origin": "ast",
       "id": "server_src_utils_supabase_supabaseadmin",
-      "community": 55,
+      "community": 0,
       "norm_label": "supabaseadmin"
     },
     {
@@ -9380,7 +9380,7 @@
       "source_location": "L18",
       "_origin": "ast",
       "id": "server_src_utils_supabase_supabasepublic",
-      "community": 55,
+      "community": 0,
       "norm_label": "supabasepublic"
     },
     {
@@ -10392,6 +10392,96 @@
       "id": "archived_audit_meeting_real_life_visit_1",
       "community": 32,
       "norm_label": "meeting / real-life visit (1)"
+    },
+    {
+      "label": "CHATTING_STRATEGY.md",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "chatting_strategy",
+      "community": 55,
+      "norm_label": "chatting_strategy.md"
+    },
+    {
+      "label": "Rice Media \u2014 Chatting Strategy & Evaluation Blueprint",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "community": 55,
+      "norm_label": "rice media \u2014 chatting strategy & evaluation blueprint"
+    },
+    {
+      "label": "A. Compliance / ToS  \u2014 hard rules ($500 penalty + job risk)",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L9",
+      "_origin": "ast",
+      "id": "chatting_strategy_a_compliance_tos_hard_rules_500_penalty_job_risk",
+      "community": 55,
+      "norm_label": "a. compliance / tos  \u2014 hard rules ($500 penalty + job risk)"
+    },
+    {
+      "label": "B. Engaging communication  \u2014 the foundation (>50% of messages must use a strategy)",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L17",
+      "_origin": "ast",
+      "id": "chatting_strategy_b_engaging_communication_the_foundation_50_of_messages_must_use_a_strategy",
+      "community": 55,
+      "norm_label": "b. engaging communication  \u2014 the foundation (>50% of messages must use a strategy)"
+    },
+    {
+      "label": "C. Sales roadmap  \u2014 the selling flow",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L33",
+      "_origin": "ast",
+      "id": "chatting_strategy_c_sales_roadmap_the_selling_flow",
+      "community": 55,
+      "norm_label": "c. sales roadmap  \u2014 the selling flow"
+    },
+    {
+      "label": "D. Pricing",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L59",
+      "_origin": "ast",
+      "id": "chatting_strategy_d_pricing",
+      "community": 55,
+      "norm_label": "d. pricing"
+    },
+    {
+      "label": "E. Work ethic / technical (measurable)",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L67",
+      "_origin": "ast",
+      "id": "chatting_strategy_e_work_ethic_technical_measurable",
+      "community": 55,
+      "norm_label": "e. work ethic / technical (measurable)"
+    },
+    {
+      "label": "F. Penalties (severity calibration)",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L77",
+      "_origin": "ast",
+      "id": "chatting_strategy_f_penalties_severity_calibration",
+      "community": 55,
+      "norm_label": "f. penalties (severity calibration)"
+    },
+    {
+      "label": "How this maps to our AI evaluation",
+      "file_type": "document",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L84",
+      "_origin": "ast",
+      "id": "chatting_strategy_how_this_maps_to_our_ai_evaluation",
+      "community": 55,
+      "norm_label": "how this maps to our ai evaluation"
     },
     {
       "label": "CLAUDE.md",
@@ -19188,7 +19278,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L686",
+      "source_location": "L690",
       "weight": 1.0,
       "source": "client_src_pages_chatters_chatterprofile_chatterprofile",
       "target": "client_src_context_authcontext_useauth"
@@ -19276,7 +19366,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L315",
+      "source_location": "L320",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_context_authcontext_useauth"
@@ -19427,10 +19517,20 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L683",
+      "source_location": "L687",
       "weight": 1.0,
       "source": "client_src_pages_chatters_chatterprofile",
       "target": "client_src_pages_chatters_chatterprofile_chatterprofile",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
+      "source_location": "L619",
+      "weight": 1.0,
+      "source": "client_src_pages_chatters_chatterprofile",
+      "target": "client_src_pages_chatters_chatterprofile_coachinglog",
       "confidence_score": 1.0
     },
     {
@@ -19481,16 +19581,6 @@
       "weight": 1.0,
       "source": "client_src_pages_chatters_chatterprofile",
       "target": "client_src_pages_chatters_chatterprofile_mistakeentry",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L619",
-      "weight": 1.0,
-      "source": "client_src_pages_chatters_chatterprofile",
-      "target": "client_src_pages_chatters_chatterprofile_mistakelog",
       "confidence_score": 1.0
     },
     {
@@ -19655,7 +19745,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L851",
+      "source_location": "L855",
       "weight": 1.0,
       "source": "client_src_pages_chatters_chatterprofile_chatterprofile",
       "target": "client_src_pages_chatters_chatterprofile_goldencolor",
@@ -19677,7 +19767,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L852",
+      "source_location": "L856",
       "weight": 1.0,
       "source": "client_src_pages_chatters_chatterprofile_chatterprofile",
       "target": "client_src_pages_chatters_chatterprofile_unlockcolor",
@@ -19721,9 +19811,9 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/chatters/ChatterProfile.jsx",
-      "source_location": "L665",
+      "source_location": "L664",
       "weight": 1.0,
-      "source": "client_src_pages_chatters_chatterprofile_mistakelog",
+      "source": "client_src_pages_chatters_chatterprofile_coachinglog",
       "target": "client_src_utils_taskmeta_fmtsentat",
       "confidence_score": 1.0
     },
@@ -21069,7 +21159,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L510",
+      "source_location": "L520",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_chipstyle",
@@ -21089,7 +21179,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L240",
+      "source_location": "L245",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_customtaskmodal",
@@ -21099,7 +21189,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L505",
+      "source_location": "L515",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_dayheader",
@@ -21109,7 +21199,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L509",
+      "source_location": "L519",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_filterlabel",
@@ -21119,7 +21209,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L507",
+      "source_location": "L517",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_filterpanel",
@@ -21129,7 +21219,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L508",
+      "source_location": "L518",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_filterrow",
@@ -21159,7 +21249,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L512",
+      "source_location": "L522",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_ghost",
@@ -21169,7 +21259,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L504",
+      "source_location": "L514",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_groupbtn",
@@ -21199,7 +21289,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L502",
+      "source_location": "L512",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_inputstyle",
@@ -21209,7 +21299,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L506",
+      "source_location": "L516",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_lbl",
@@ -21229,7 +21319,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L511",
+      "source_location": "L521",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_primary",
@@ -21259,7 +21349,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L514",
+      "source_location": "L524",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_subtle",
@@ -21269,7 +21359,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L503",
+      "source_location": "L513",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_tabbtn",
@@ -21289,7 +21379,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L314",
+      "source_location": "L319",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_taskspage",
@@ -21319,7 +21409,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L513",
+      "source_location": "L523",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage",
       "target": "client_src_pages_tasks_taskspage_userbtn",
@@ -21396,7 +21486,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L476",
+      "source_location": "L486",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_pages_tasks_taskspage_fmtday",
@@ -21407,7 +21497,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L474",
+      "source_location": "L484",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_pages_tasks_taskspage_groupbyday",
@@ -21452,7 +21542,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L365",
+      "source_location": "L375",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_pages_tasks_taskspage_tabs"
@@ -21462,7 +21552,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L486",
+      "source_location": "L496",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_pages_tasks_taskspage_buildgroups",
@@ -21528,7 +21618,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "client/src/pages/tasks/TasksPage.jsx",
-      "source_location": "L437",
+      "source_location": "L447",
       "weight": 1.0,
       "source": "client_src_pages_tasks_taskspage_taskspage",
       "target": "client_src_pages_tasks_taskspage_chipstyle",
@@ -28985,6 +29075,86 @@
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L1",
+      "weight": 1.0,
+      "source": "chatting_strategy",
+      "target": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L9",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_a_compliance_tos_hard_rules_500_penalty_job_risk",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L17",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_b_engaging_communication_the_foundation_50_of_messages_must_use_a_strategy",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L33",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_c_sales_roadmap_the_selling_flow",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L59",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_d_pricing",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L67",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_e_work_ethic_technical_measurable",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L77",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_f_penalties_severity_calibration",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "CHATTING_STRATEGY.md",
+      "source_location": "L84",
+      "weight": 1.0,
+      "source": "chatting_strategy_rice_media_chatting_strategy_evaluation_blueprint",
+      "target": "chatting_strategy_how_this_maps_to_our_ai_evaluation",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
       "source_file": "CLAUDE.md",
       "source_location": "L1",
       "weight": 1.0,
@@ -29534,5 +29704,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "558410216dd8d40cdecbb74c88c13483f77903c1"
+  "built_at_commit": "f576d8de7e1ddcec66d3968a1aec19322191bfc8"
 }

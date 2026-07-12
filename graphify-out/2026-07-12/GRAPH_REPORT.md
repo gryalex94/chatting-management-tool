@@ -1,16 +1,16 @@
 # Graph Report - chatting-management-tool  (2026-07-12)
 
 ## Corpus Check
-- 167 files · ~138,610 words
+- 169 files · ~140,188 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1101 nodes · 1761 edges · 66 communities (60 shown, 6 thin omitted)
+- 1110 nodes · 1769 edges · 69 communities (64 shown, 5 thin omitted)
 - Extraction: 95% EXTRACTED · 5% INFERRED · 0% AMBIGUOUS · INFERRED: 95 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `55841021`
+- Built from commit: `f576d8de`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -64,6 +64,7 @@
 - evaluateCreatorDay.js
 - graphify reference: extra exports and benchmark
 - Topbar.jsx
+- creatorStats.js
 - AuthContext.jsx
 - graphify reference: query, path, explain
 - React + Vite
@@ -77,6 +78,8 @@
 - CLAUDE.md
 - CLAUDE.md
 - extraction-spec.md
+- organisations.js
+- tasks.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `supabaseAdmin` - 28 edges
@@ -91,7 +94,7 @@
 10. `runAgent()` - 13 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `AIQualityPanel()` --calls--> `fmtSentAt()`  [EXTRACTED]
+- `CoachingLog()` --calls--> `fmtSentAt()`  [EXTRACTED]
   client/src/pages/chatters/ChatterProfile.jsx → client/src/utils/taskMeta.js
 - `ProtectedRoute()` --calls--> `useAuth()`  [EXTRACTED]
   backup/client/src/App.jsx → backup/client/src/context/AuthContext.jsx
@@ -105,23 +108,23 @@
 ## Import Cycles
 - None detected.
 
-## Communities (66 total, 6 thin omitted)
+## Communities (69 total, 5 thin omitted)
 
 ### Community 0 - "Report Parsers"
-Cohesion: 0.14
-Nodes (12): authMiddleware(), requireMinRole(), { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { requireMinRole }, router (+4 more)
+Cohesion: 0.08
+Nodes (30): authMiddleware(), requireMinRole(), { supabaseAdmin }, { requireMinRole }, router, { runDailyAnalysis, runDailyAnalysisForOrg }, { supabaseAdmin }, router (+22 more)
 
 ### Community 1 - "AI Eval Runner"
-Cohesion: 0.08
-Nodes (31): DismissModal(), ghost, primary, AfkIncidents(), buildGroups(), chipStyle(), copy(), dayHeader (+23 more)
+Cohesion: 0.10
+Nodes (27): AfkIncidents(), buildGroups(), chipStyle(), copy(), dayHeader, filterLabel, filterPanel, filterRow (+19 more)
 
 ### Community 2 - "Creator Stats Parsing"
-Cohesion: 0.24
-Nodes (10): MistakeLog(), inp, SettingsPage(), getInflowwOffset(), setInflowwOffset(), fmtSentAt(), MON, reasonLabel (+2 more)
+Cohesion: 0.16
+Nodes (14): DismissModal(), ghost, primary, AIQualityPanel(), inp, SettingsPage(), getInflowwOffset(), setInflowwOffset() (+6 more)
 
 ### Community 3 - "Daily Check Engine"
-Cohesion: 0.06
-Nodes (52): Anthropic, client, parseJson(), runAgent(), runAgentDetailed(), salvageJson(), analyzeCommunication(), formatConversations() (+44 more)
+Cohesion: 0.07
+Nodes (46): Anthropic, client, parseJson(), runAgent(), runAgentDetailed(), salvageJson(), analyzeCommunication(), formatConversations() (+38 more)
 
 ### Community 4 - "Client Dependencies"
 Cohesion: 0.05
@@ -132,8 +135,8 @@ Cohesion: 0.07
 Nodes (30): AIAnalysis(), aiBox, btnStyle, cardStyle, ChatterCard(), chatterFacts(), copy(), CreatorCard() (+22 more)
 
 ### Community 6 - "Daily Check Page UI"
-Cohesion: 0.20
-Nodes (12): { analyzeComprehensive }, computeAfkPeriods(), computeReplyTimeStats(), getCETtoCESTOffset(), groupByFan(), runDailyAnalysis(), runDailyAnalysisForOrg(), { supabaseAdmin } (+4 more)
+Cohesion: 0.21
+Nodes (14): adjustTime(), analyzeComprehensive(), formatConversations(), getAmsterdamOffset(), { runAgent }, shiftDateTime(), { analyzeComprehensive }, computeAfkPeriods() (+6 more)
 
 ### Community 7 - "Tasks Page UI"
 Cohesion: 0.13
@@ -157,23 +160,23 @@ Nodes (31): prioritiseTasks(), { runAgentDetailed }, shiftDays(), { supabaseAdmi
 
 ### Community 12 - "Server Dependencies"
 Cohesion: 0.11
-Nodes (11): AIQualityPanel(), buildDailySeries(), CATEGORY_COLORS, ChatterProfile(), DAY_LABELS, DAY_NUMBERS, goldenColor(), PageContribution() (+3 more)
+Nodes (11): buildDailySeries(), CATEGORY_COLORS, ChatterProfile(), CoachingLog(), DAY_LABELS, DAY_NUMBERS, goldenColor(), PageContribution() (+3 more)
 
 ### Community 13 - "App Shell & Routing"
-Cohesion: 0.13
-Nodes (9): DEFAULT_TEMPLATE, inp, PRIORITIES, SetupPage(), REPORTS, ReportsPage(), statusConfig, reportTypes (+1 more)
+Cohesion: 0.16
+Nodes (7): DEFAULT_TEMPLATE, inp, PRIORITIES, SetupPage(), statusConfig, reportTypes, api
 
 ### Community 14 - "Chatter Profile UI"
-Cohesion: 0.05
-Nodes (50): days(), dollar(), extractDate(), { findOrCreateCreator }, intval(), nullDash(), parseCreatorStats(), pct() (+42 more)
+Cohesion: 0.16
+Nodes (10): { buildLookupMaps }, parseMessageDashboard(), { parseReplayTime, parseTextDate, parseSentTo, stripHtml, parseDollar }, { supabaseAdmin }, XLSX, parseDollar(), parseReplayTime(), parseSentTo() (+2 more)
 
 ### Community 15 - "Server Entry & Routes"
 Cohesion: 0.06
 Nodes (39): aiRoutes, app, { authMiddleware }, authRoutes, chatterRoutes, cors, creatorRoutes, cycleRoutes (+31 more)
 
 ### Community 16 - "Chatter Profile UI"
-Cohesion: 0.15
-Nodes (16): App(), AppRoutes(), ProtectedRoute(), Layout(), LOWER, NAV, Sidebar(), Topbar() (+8 more)
+Cohesion: 0.13
+Nodes (19): App(), AppRoutes(), ProtectedRoute(), Layout(), LOWER, NAV, Sidebar(), Topbar() (+11 more)
 
 ### Community 17 - "Review Task Generation"
 Cohesion: 0.08
@@ -187,9 +190,13 @@ Nodes (10): { computeMetricsForOrg }, router, { supabaseAdmin }, computeMetricsF
 Cohesion: 0.05
 Nodes (36): dependencies, axios, date-fns, @dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities, framer-motion, lucide-react (+28 more)
 
+### Community 20 - "Server Entry & Routes"
+Cohesion: 0.17
+Nodes (4): Chip(), StatusDot(), REPORTS, ReportsPage()
+
 ### Community 23 - "Server Entry & Routes"
-Cohesion: 0.12
-Nodes (22): Anthropic, client, runAgent(), analyzeCommunication(), formatConversations(), { runAgent }, analyzeCompliance(), formatConversations() (+14 more)
+Cohesion: 0.09
+Nodes (30): Anthropic, client, runAgent(), analyzeCommunication(), formatConversations(), { runAgent }, analyzeCompliance(), formatConversations() (+22 more)
 
 ### Community 24 - "Auth Middleware & Routes"
 Cohesion: 0.07
@@ -232,8 +239,8 @@ Cohesion: 0.12
 Nodes (16): aiRoutes, app, { authMiddleware }, authRoutes, chatterRoutes, cors, creatorRoutes, cycleRoutes (+8 more)
 
 ### Community 34 - "Metrics Computation"
-Cohesion: 0.14
-Nodes (12): authMiddleware(), requireMinRole(), { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { requireMinRole }, router (+4 more)
+Cohesion: 0.18
+Nodes (9): authMiddleware(), requireMinRole(), { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { requireMinRole }, router (+1 more)
 
 ### Community 35 - "Reports & Shared Widgets"
 Cohesion: 0.12
@@ -244,12 +251,12 @@ Cohesion: 0.50
 Nodes (3): { requireMinRole }, router, { supabaseAdmin }
 
 ### Community 37 - "Theme & Topbar"
-Cohesion: 0.20
-Nodes (12): { analyzeComprehensive }, computeAfkPeriods(), computeReplyTimeStats(), getCETtoCESTOffset(), groupByFan(), runDailyAnalysis(), runDailyAnalysisForOrg(), { supabaseAdmin } (+4 more)
+Cohesion: 0.40
+Nodes (4): { requireMinRole }, router, { runDailyAnalysis, runDailyAnalysisForOrg }, { supabaseAdmin }
 
 ### Community 38 - "Auth Context & API Client"
-Cohesion: 0.16
-Nodes (11): router, { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin } (+3 more)
+Cohesion: 0.22
+Nodes (8): router, { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { createClient }, supabaseAdmin, supabasePublic
 
 ### Community 39 - "AI Routes"
 Cohesion: 0.16
@@ -272,8 +279,8 @@ Cohesion: 0.29
 Nodes (10): { computeMetricsForOrg }, router, { supabaseAdmin }, computeMetricsForOrg(), computeResponseTimeTrends(), computeRollingAverages(), percentile(), populateMetricsFromEmployeeStats() (+2 more)
 
 ### Community 44 - "ESLint Config"
-Cohesion: 0.50
-Nodes (3): { requireMinRole }, router, { supabaseAdmin }
+Cohesion: 0.22
+Nodes (15): extractDate(), { findOrCreateChatter, findOrCreateCreator }, nullDash(), parseDollar(), parseEmployeeReport(), parseHoursToMinutes(), parsePercent(), parseTimeToSeconds() (+7 more)
 
 ### Community 45 - "Vite Config"
 Cohesion: 0.24
@@ -288,8 +295,8 @@ Cohesion: 0.20
 Nodes (9): Data flow that matters (AI → tasks), Deployment (Railway) — CURRENTLY LIVE AND WORKING, Handoff — Chatting-Management Tool (Rice Media), Known pending / backlog (not blocking), Repo conventions / traps, Stack, UNCOMMITTED CHANGE (in working tree, needs commit + frontend redeploy), User working style (+1 more)
 
 ### Community 48 - "evaluateCreatorDay.js"
-Cohesion: 0.47
-Nodes (4): AuthContext, AuthProvider(), setApiToken(), supabase
+Cohesion: 0.14
+Nodes (15): addDashboardSalesToLedger(), crypto, importSubscriberSpend(), recomputeSubscribersFromLedger(), { supabaseAdmin }, XLSX, { importSubscriberSpend }, multer (+7 more)
 
 ### Community 49 - "graphify reference: extra exports and benchmark"
 Cohesion: 0.22
@@ -298,6 +305,10 @@ Nodes (8): graphify reference: extra exports and benchmark, Step 6b - Wiki (only
 ### Community 50 - "Topbar.jsx"
 Cohesion: 0.36
 Nodes (5): Topbar(), Chip(), ThemeContext, ThemeProvider(), useTheme()
+
+### Community 51 - "creatorStats.js"
+Cohesion: 0.29
+Nodes (10): days(), dollar(), extractDate(), { findOrCreateCreator }, intval(), nullDash(), parseCreatorStats(), pct() (+2 more)
 
 ### Community 52 - "AuthContext.jsx"
 Cohesion: 0.47
@@ -312,8 +323,8 @@ Cohesion: 0.50
 Nodes (3): Expanding the ESLint configuration, React Compiler, React + Vite
 
 ### Community 55 - "shifts.js"
-Cohesion: 0.16
-Nodes (11): router, { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin }, { requireMinRole }, router, { supabaseAdmin } (+3 more)
+Cohesion: 0.22
+Nodes (8): A. Compliance / ToS  — hard rules ($500 penalty + job risk), B. Engaging communication  — the foundation (>50% of messages must use a strategy), C. Sales roadmap  — the selling flow, D. Pricing, E. Work ethic / technical (measurable), F. Penalties (severity calibration), How this maps to our AI evaluation, Rice Media — Chatting Strategy & Evaluation Blueprint
 
 ### Community 56 - "graphify reference: add a URL and watch a folder"
 Cohesion: 0.50
@@ -331,25 +342,33 @@ Nodes (3): For --cluster-only, For --update (incremental re-extraction), graphif
 Cohesion: 0.50
 Nodes (3): Expanding the ESLint configuration, React Compiler, React + Vite
 
+### Community 67 - "organisations.js"
+Cohesion: 0.50
+Nodes (3): { requireMinRole }, router, { supabaseAdmin }
+
+### Community 68 - "tasks.js"
+Cohesion: 0.50
+Nodes (3): { requireMinRole }, router, { supabaseAdmin }
+
 ## Knowledge Gaps
-- **519 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+514 more)
+- **526 isolated node(s):** `name`, `private`, `version`, `type`, `dev` (+521 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **6 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **5 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `supabaseAdmin` connect `shifts.js` to `Report Parsers`, `Daily Check Engine`, `Daily Check Page UI`, `Tasks Page UI`, `Creators Page UI`, `ESLint Config`, `Chatter Profile UI`, `Server Entry & Routes`, `App Shell & Routing`?**
+- **Why does `supabaseAdmin` connect `Report Parsers` to `Daily Check Engine`, `Daily Check Page UI`, `Tasks Page UI`, `Creators Page UI`, `ESLint Config`, `Chatter Profile UI`, `Server Entry & Routes`, `evaluateCreatorDay.js`, `App Shell & Routing`, `creatorStats.js`?**
   _High betweenness centrality (0.023) - this node is a cross-community bridge._
-- **Why does `supabaseAdmin` connect `Auth Context & API Client` to `Metrics Computation`, `Custom Task Creation`, `Theme & Topbar`, `Server Dependencies`, `Vite Config`, `Review Task Generation`?**
+- **Why does `supabaseAdmin` connect `Auth Context & API Client` to `Metrics Computation`, `organisations.js`, `Custom Task Creation`, `Theme & Topbar`, `tasks.js`, `Server Dependencies`, `Vite Config`, `Review Task Generation`, `Server Entry & Routes`?**
   _High betweenness centrality (0.006) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `runDailyCheck()` (e.g. with `dailyCheck.js` and `stripForDb()`) actually correct?**
   _`runDailyCheck()` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `name`, `private`, `version` to the rest of the system?**
-  _521 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _528 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Report Parsers` be split into smaller, more focused modules?**
-  _Cohesion score 0.13970588235294118 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07682926829268293 - nodes in this community are weakly interconnected._
 - **Should `AI Eval Runner` be split into smaller, more focused modules?**
-  _Cohesion score 0.08199643493761141 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.09852216748768473 - nodes in this community are weakly interconnected._
 - **Should `Daily Check Engine` be split into smaller, more focused modules?**
-  _Cohesion score 0.06093189964157706 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06818181818181818 - nodes in this community are weakly interconnected._

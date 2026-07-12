@@ -50,6 +50,7 @@
   "48": "evaluateCreatorDay.js",
   "49": "graphify reference: extra exports and benchmark",
   "50": "Topbar.jsx",
+  "51": "creatorStats.js",
   "52": "AuthContext.jsx",
   "53": "graphify reference: query, path, explain",
   "54": "React + Vite",
@@ -64,5 +65,7 @@
   "63": "CLAUDE.md",
   "64": "extraction-spec.md",
   "65": "eslint.config.js",
-  "66": "vite.config.js"
+  "66": "vite.config.js",
+  "67": "organisations.js",
+  "68": "tasks.js"
 }
