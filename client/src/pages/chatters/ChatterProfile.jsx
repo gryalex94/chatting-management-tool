@@ -109,7 +109,7 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
     <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', marginBottom:12 }}>
       <div style={{ display:'flex', alignItems:'center', padding:'12px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
         <Brain size={14} style={{ color:'var(--indigo-bright)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>Dialogue Strategy Review</span>
+        <span style={{ fontWeight:600, fontSize:13 }}>AI Analysis for Dialogues and Sales Quality</span>
         {ev?.report_date && <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>· last run {ev.report_date}</span>}
         <div style={{ flex:1 }}/>
         <button className="btn sm primary" onClick={onRun} disabled={running || !canRun} style={{ opacity: running || !canRun ? 0.6 : 1 }}>
@@ -118,7 +118,7 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
       </div>
       {!ev ? (
         <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>
-          Not analysed yet. Run a quality check on this chatter's recent dialogues.
+          Not analysed yet — run the AI analysis on this chatter's recent dialogues & sales quality.
         </div>
       ) : (
         <div style={{ padding:14 }}>
@@ -684,26 +684,25 @@ function CoachingLog({ chatterId, canCreate, onAddCustom }) {
   );
 }
 
-// Reports timeline — the history of AI reviews for this chatter (newest first),
+// Report history for one chatter, filtered to a single eval type (newest first),
 // each openable to see the overview + findings, so managers can track progress.
-function ReportsTimeline({ chatterId }) {
+function ReportsTimeline({ chatterId, type, title, emptyText }) {
   const [reports, setReports] = useState([]);
   const [openKey, setOpenKey] = useState(null);
   useEffect(() => {
     api.get(`/api/daily-check/chatter-eval-history?chatter_id=${chatterId}`)
-      .then(r => setReports(r.data?.evaluations || [])).catch(() => {});
-  }, [chatterId]);
-  const label = t => t === 'compliance' ? 'Daily review' : t === 'sales_quality' ? 'Strategy review' : t;
+      .then(r => setReports((r.data?.evaluations || []).filter(e => !type || e.eval_type === type))).catch(() => {});
+  }, [chatterId, type]);
   const sevColor = s => s === 'high' || s === 'critical' ? '#f87171' : s === 'medium' ? '#fbbf24' : 'var(--fg-3)';
   return (
     <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Reports</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>{title}</span>
         <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{reports.length} run{reports.length === 1 ? '' : 's'}</span>
       </div>
       <div style={{ maxHeight: 460, overflowY: 'auto' }}>
         {reports.length === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>No reports generated yet.</div>
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{emptyText || 'No reports generated yet.'}</div>
         ) : reports.map((r) => {
           const key = `${r.report_date}-${r.eval_type}-${r.created_at}`;
           const issues = r.evaluation?.issues || [];
@@ -713,7 +712,6 @@ function ReportsTimeline({ chatterId }) {
               <button onClick={() => setOpenKey(isOpen ? null : key)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
                 <span style={{ fontSize: 10, color: 'var(--fg-3)', width: 12 }}>{isOpen ? '▾' : '▸'}</span>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-1)' }}>{r.report_date}</span>
-                <span style={{ fontSize: 9.5, fontWeight: 700, color: 'var(--indigo-bright)', background: 'var(--bg-2)', borderRadius: 4, padding: '1px 6px' }}>{label(r.eval_type)}</span>
                 <div style={{ flex: 1 }} />
                 <span style={{ fontSize: 11, color: issues.length ? 'var(--fg-2)' : 'var(--fg-4)' }}>{issues.length} issue{issues.length === 1 ? '' : 's'}</span>
               </button>
@@ -939,20 +937,11 @@ export default function ChatterProfile() {
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
           <WeeklySchedule chatterId={id} workDays={chatter.work_days} assignments={assignments} onUpdate={load}/>
 
-          {/* Reports timeline — openable history of AI reviews (progress over time) */}
-          <ReportsTimeline chatterId={id}/>
+          {/* Daily reports — history of the daily (compliance) AI reports */}
+          <ReportsTimeline chatterId={id} type="compliance" title="Daily reports" emptyText="No daily reports yet."/>
 
-          {/* Performance reviews */}
-          <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-            <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-              <span style={{ fontWeight:600, fontSize:13 }}>Performance Reviews</span>
-              <span style={{ fontSize:11, color:'var(--fg-3)' }}>{reviews.length}</span>
-            </div>
-            <div style={{ padding:'4px 16px', maxHeight:250, overflow:'auto' }}>
-              {reviews.length===0 ? <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>No reviews yet. Reviews come from completed tasks.</div>
-                : reviews.map(r=><ReviewEntry key={r.id} r={r}/>)}
-            </div>
-          </div>
+          {/* AI Analysis for Dialogues and Sales Quality — history of the strategy analyses */}
+          <ReportsTimeline chatterId={id} type="sales_quality" title="AI Analysis for Dialogues and Sales Quality" emptyText="No dialogue / sales-quality analyses yet — run one above."/>
 
           {/* Mistake log */}
           <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
