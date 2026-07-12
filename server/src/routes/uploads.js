@@ -215,6 +215,26 @@ router.get('/status/:id', async (req, res) => {
   }
 });
 
+// GET /api/uploads/day-status?report_date=... — which report types are uploaded & done for a day
+router.get('/day-status', async (req, res) => {
+  try {
+    const { report_date } = req.query;
+    if (!report_date) return res.status(400).json({ error: 'report_date is required' });
+    const { data } = await supabaseAdmin.from('data_imports')
+      .select('report_type, status')
+      .eq('organisation_id', req.user.organisationId)
+      .eq('report_date', report_date);
+    const done = {};
+    (data || []).forEach(r => { if (r.status === 'completed') done[r.report_type] = true; });
+    res.json({
+      report_date,
+      message_dashboard: !!done.message_dashboard,
+      creator_statistics: !!done.creator_statistics,
+      ready: !!done.message_dashboard && !!done.creator_statistics,
+    });
+  } catch { res.status(500).json({ error: 'Failed to load day status' }); }
+});
+
 // GET /api/uploads/history - List all imports
 router.get('/history', async (req, res) => {
   try {
