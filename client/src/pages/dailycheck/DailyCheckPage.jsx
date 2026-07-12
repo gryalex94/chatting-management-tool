@@ -96,7 +96,9 @@ export default function DailyCheckPage() {
     }
   }, []);
 
-  useEffect(() => { run(date); /* eslint-disable-next-line */ }, []);
+  // Reload whenever the selected date changes, so a past date's saved daily check
+  // (flags + stored AI evaluations) can be viewed — not just the date opened on mount.
+  useEffect(() => { run(date); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
 
   // The morning workflow: recompute everything → evaluate every chatter for
   // compliance/work-ethic, with a live progress bar. Runs the AI a few chatters
