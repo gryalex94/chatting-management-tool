@@ -613,48 +613,47 @@ function AddTaskModal({ chatterId, chatterName, onClose, onSaved }) {
 }
 
 /* ═══ MAIN PAGE ══════════════════════════════════ */
-// Mistake Log — the per-chatter coaching board. PENDING = tasks from the daily
-// chatter analysis to work through (with a Complete button so cases can be closed
-// in place while coaching); COMPLETED = the already-coached record / knowledge base.
-function MistakeLog({ chatterId, canCreate, onAddCustom }) {
+// Coaching Log — the per-chatter board. PENDING = all open/taken tasks from the
+// analysis (overview; each can be saved for coaching or completed). TO COACH =
+// cases saved for the next coaching session. COACHED = the coached record / KB.
+function CoachingLog({ chatterId, canCreate, onAddCustom }) {
   const [tab, setTab] = useState('pending');
-  const [pending, setPending] = useState([]);
-  const [completed, setCompleted] = useState([]);
+  const [all, setAll] = useState([]);
   const loadTasks = useCallback(async () => {
-    const [p, c] = await Promise.all([
-      api.get(`/api/review-tasks?chatter_id=${chatterId}&status=open,taken`).catch(() => ({ data: { tasks: [] } })),
-      api.get(`/api/review-tasks?chatter_id=${chatterId}&status=completed`).catch(() => ({ data: { tasks: [] } })),
-    ]);
-    setPending(p.data?.tasks || []);
-    setCompleted(c.data?.tasks || []);
+    const { data } = await api.get(`/api/review-tasks?chatter_id=${chatterId}&status=open,taken,completed`).catch(() => ({ data: { tasks: [] } }));
+    setAll(data?.tasks || []);
   }, [chatterId]);
   useEffect(() => { loadTasks(); }, [loadTasks]);
   const act = async (t, action) => {
-    try { await api.patch(`/api/review-tasks/${t.id}`, { action }); toast.success(action === 'complete' ? 'Marked done' : 'Reopened'); loadTasks(); }
+    try { await api.patch(`/api/review-tasks/${t.id}`, { action }); loadTasks(); }
     catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
   };
-  const list = tab === 'pending' ? pending : completed;
+  const pending = all.filter(t => t.status === 'open' || t.status === 'taken');
+  const toCoach = all.filter(t => t.coach_flag && !t.coached_at);
+  const coached = all.filter(t => t.coached_at);
+  const list = tab === 'pending' ? pending : tab === 'tocoach' ? toCoach : coached;
   const TabBtn = ({ k, label, n }) => (
     <button onClick={() => setTab(k)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, padding: '2px 2px', color: tab === k ? 'var(--fg-0)' : 'var(--fg-3)', borderBottom: tab === k ? '2px solid var(--indigo)' : '2px solid transparent' }}>{label} {n}</button>
   );
+  const empty = { pending: 'No pending cases for this chatter.', tocoach: 'Nothing saved for coaching — use the 📌 button to add cases.', coached: 'No coached cases yet.' };
   return (
     <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 14 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Mistake Log</span>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Coaching Log</span>
         <TabBtn k="pending" label="Pending" n={pending.length} />
-        <TabBtn k="completed" label="Completed" n={completed.length} />
+        <TabBtn k="tocoach" label="To coach" n={toCoach.length} />
+        <TabBtn k="coached" label="Coached" n={coached.length} />
         <div style={{ flex: 1 }} />
         {canCreate && <button className="btn sm" onClick={onAddCustom}><Plus size={12} /> Custom task</button>}
       </div>
       <div style={{ padding: 8, maxHeight: 460, overflowY: 'auto' }}>
         {list.length === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{tab === 'pending' ? 'No pending cases for this chatter.' : 'No coached cases yet.'}</div>
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{empty[tab]}</div>
         ) : list.map(t => {
           const tier = TIER[t.priority] || {};
           const sentAt = t.context?.sent_at;
-          const done = tab === 'completed';
           return (
-            <div key={t.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-soft)', opacity: done ? 0.75 : 1 }}>
+            <div key={t.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-soft)', opacity: t.coached_at ? 0.7 : 1 }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                 <div style={{ width: 6, height: 6, borderRadius: '50%', background: tier.c || 'var(--fg-3)', flexShrink: 0, marginTop: 5 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -664,13 +663,18 @@ function MistakeLog({ chatterId, canCreate, onAddCustom }) {
                     {t.fan_username && <span style={{ color: 'var(--fg-3)' }}>{t.fan_username}</span>}
                     {sentAt && <span style={{ color: 'var(--indigo-bright)', fontWeight: 600 }}>🕐 {fmtSentAt(sentAt)}</span>}
                     <span>{(t.area || '').replace(/_/g, ' ')}</span>
-                    {done && t.completed_at && <span>✓ {new Date(t.completed_at).toLocaleDateString()}</span>}
+                    {t.coached_at && <span>✓ coached {new Date(t.coached_at).toLocaleDateString()}</span>}
                   </div>
                   {t.context?.message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 4 }}>“{t.context.message}”</div>}
                 </div>
-                {done
-                  ? <button className="btn sm" onClick={() => act(t, 'reopen')} title="Reopen this case">↺</button>
-                  : <button className="btn sm primary" onClick={() => act(t, 'complete')}>Complete</button>}
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  {tab === 'pending' && (t.coach_flag
+                    ? <button className="btn sm" onClick={() => act(t, 'uncoach')} title="Remove from coaching" style={{ color: '#f59e0b' }}>📌 Saved</button>
+                    : <button className="btn sm" onClick={() => act(t, 'coach')} title="Save for coaching">📌</button>)}
+                  {tab === 'pending' && <button className="btn sm primary" onClick={() => act(t, 'complete')}>Complete</button>}
+                  {tab === 'tocoach' && <button className="btn sm primary" onClick={() => act(t, 'coached')}>Coached</button>}
+                  {tab === 'coached' && <button className="btn sm" onClick={() => act(t, 'uncoached')} title="Move back to coach">↺</button>}
+                </div>
               </div>
             </div>
           );
@@ -872,8 +876,8 @@ export default function ChatterProfile() {
           {/* Mistake Patterns */}
           <MistakePatterns mistakes={mistakes}/>
 
-          {/* Mistake Log — pending cases (from daily analysis) + coached record */}
-          <MistakeLog chatterId={id} canCreate={canCreate} onAddCustom={() => setShowTaskModal(true)} />
+          {/* Coaching Log — pending cases + saved-for-coaching + coached record */}
+          <CoachingLog chatterId={id} canCreate={canCreate} onAddCustom={() => setShowTaskModal(true)} />
         </div>
 
         {/* Right */}

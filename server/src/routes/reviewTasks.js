@@ -113,6 +113,12 @@ router.patch('/:id', async (req, res) => {
     }
     else if (action === 'archive') { update.status = 'archived'; update.completed_at = now; update.resolved_by = req.user.id; }
     else if (action === 'reopen') { update.status = 'open'; update.taken_by = null; update.taken_at = null; update.completed_at = null; }
+    // Coaching flags are orthogonal to task status — a task can be saved for a
+    // later coaching session regardless of whether it's open/taken/completed.
+    else if (action === 'coach') { update.coach_flag = true; }
+    else if (action === 'uncoach') { update.coach_flag = false; update.coached_at = null; }
+    else if (action === 'coached') { update.coached_at = now; }
+    else if (action === 'uncoached') { update.coached_at = null; }
     else return res.status(400).json({ error: 'Invalid action' });
 
     const { data, error } = await supabaseAdmin.from('review_tasks')

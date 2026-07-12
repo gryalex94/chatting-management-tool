@@ -232,6 +232,11 @@ function Row({ task, onAction }) {
         {(task.status === 'open' || task.status === 'taken') && <button onClick={() => onAction(task, 'archive')} style={ghost} title="File away without actioning">Archive</button>}
         {task.status === 'open' && <button onClick={() => onAction(task, 'complete')} style={subtle} title="Mark done without taking it first">Complete</button>}
         {(task.status === 'dismissed' || task.status === 'completed' || task.status === 'archived') && <button onClick={() => onAction(task, 'reopen')} style={ghost}>Reopen</button>}
+        {task.chatter_id && (
+          task.coach_flag
+            ? <button onClick={() => onAction(task, 'uncoach')} style={{ ...ghost, borderColor: '#f59e0b', color: '#f59e0b' }} title="Remove from this chatter's coaching log">📌 Saved</button>
+            : <button onClick={() => onAction(task, 'coach')} style={ghost} title="Save for this chatter's coaching session">📌 Coach</button>
+        )}
       </div>
     </div>
   );
@@ -350,9 +355,14 @@ export default function TasksPage() {
   const act = async (task, action, reason_code, reason) => {
     try {
       await api.patch(`/api/review-tasks/${task.id}`, { action, reason_code, reason });
-      const next = action === 'take' ? 'taken' : action === 'complete' ? 'completed' : action === 'dismiss' ? 'dismissed' : action === 'archive' ? 'archived' : 'open';
-      setTasks(ts => ts.map(t => t.id === task.id ? { ...t, status: next, dismiss_reason_code: reason_code || t.dismiss_reason_code, dismiss_reason: reason ?? t.dismiss_reason } : t));
-      toast.success('Updated');
+      setTasks(ts => ts.map(t => {
+        if (t.id !== task.id) return t;
+        if (action === 'coach') return { ...t, coach_flag: true };
+        if (action === 'uncoach') return { ...t, coach_flag: false, coached_at: null };
+        const next = action === 'take' ? 'taken' : action === 'complete' ? 'completed' : action === 'dismiss' ? 'dismissed' : action === 'archive' ? 'archived' : 'open';
+        return { ...t, status: next, dismiss_reason_code: reason_code || t.dismiss_reason_code, dismiss_reason: reason ?? t.dismiss_reason };
+      }));
+      toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : 'Updated');
     } catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
   };
   const onAction = (task, action) => { if (action === 'dismiss') setDismiss(task); else act(task, action); };
