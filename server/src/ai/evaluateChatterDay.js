@@ -31,6 +31,10 @@ MONEY LEFT ON THE TABLE (high priority — this is lost revenue; managers care m
 - A clear buying signal ignored or left hanging, a missed sale, or no follow-up / no re-engagement after a soft "no" — ESPECIALLY with a NEW SUB, a WHALE, or a SPENDER. Name the fan and quote the signal. → area "sales", severity HIGH when the fan is a new sub / whale / spender, medium otherwise (low only for a clearly $0 low-value fan).
 - Weak, non-engaging replies to a fan who showed real interest (a flat acknowledgement where a pitch or a real question was called for). → area "sales".
 
+COMMUNICATION (daily catches):
+- Dry reply to a SPENDER: a flat/banned filler ("Nice", "Okay", "Cool", "Oh", "Haha", "Damn", "I see", "True", "Sure", "Alright", "Yep", "Nope", "Maybe", "Makes sense", "Got it", "Fair enough", "Same", "Kinda", "Sort of", or "Lol"/"K" on its own) used as the LAST or ONLY message before the fan replies or the conversation stalls. Quick multi-message bursts are fine — only flag a dead-end dry reply. → area "communication", severity medium.
+- Laughing emojis: the chatter used a laughing emoji (😂 🤣 😆 😹 😅). Not allowed on our pages. → area "quality", severity low.
+
 DO NOT FLAG (allowed here, or the AI cannot judge it — stay silent):
 - Persona / identity: using the creator's display name, referring to the creator by name, cosplay characters, or "revealing" the creator — all allowed.
 - Wrong name for a fan: skip UNLESS the fan themselves points out the name is wrong.
@@ -46,7 +50,7 @@ Severity is a sort hint, not a verdict:
 - high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); big (>50%) discount; strong compliance concern.
 - medium / low = everything else; bare tips are always low.`;
 
-const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"nickname or null"}]`;
+const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"nickname or null"}]`;
 
 // VERSION A — content/compliance only (recommended; engine owns discipline).
 const PROMPT_A = `${SPOTLIGHT_BODY}
