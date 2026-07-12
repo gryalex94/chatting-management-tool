@@ -613,6 +613,73 @@ function AddTaskModal({ chatterId, chatterName, onClose, onSaved }) {
 }
 
 /* ═══ MAIN PAGE ══════════════════════════════════ */
+// Mistake Log — the per-chatter coaching board. PENDING = tasks from the daily
+// chatter analysis to work through (with a Complete button so cases can be closed
+// in place while coaching); COMPLETED = the already-coached record / knowledge base.
+function MistakeLog({ chatterId, canCreate, onAddCustom }) {
+  const [tab, setTab] = useState('pending');
+  const [pending, setPending] = useState([]);
+  const [completed, setCompleted] = useState([]);
+  const loadTasks = useCallback(async () => {
+    const [p, c] = await Promise.all([
+      api.get(`/api/review-tasks?chatter_id=${chatterId}&status=open,taken`).catch(() => ({ data: { tasks: [] } })),
+      api.get(`/api/review-tasks?chatter_id=${chatterId}&status=completed`).catch(() => ({ data: { tasks: [] } })),
+    ]);
+    setPending(p.data?.tasks || []);
+    setCompleted(c.data?.tasks || []);
+  }, [chatterId]);
+  useEffect(() => { loadTasks(); }, [loadTasks]);
+  const act = async (t, action) => {
+    try { await api.patch(`/api/review-tasks/${t.id}`, { action }); toast.success(action === 'complete' ? 'Marked done' : 'Reopened'); loadTasks(); }
+    catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
+  };
+  const list = tab === 'pending' ? pending : completed;
+  const TabBtn = ({ k, label, n }) => (
+    <button onClick={() => setTab(k)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, padding: '2px 2px', color: tab === k ? 'var(--fg-0)' : 'var(--fg-3)', borderBottom: tab === k ? '2px solid var(--indigo)' : '2px solid transparent' }}>{label} {n}</button>
+  );
+  return (
+    <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 14 }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>Mistake Log</span>
+        <TabBtn k="pending" label="Pending" n={pending.length} />
+        <TabBtn k="completed" label="Completed" n={completed.length} />
+        <div style={{ flex: 1 }} />
+        {canCreate && <button className="btn sm" onClick={onAddCustom}><Plus size={12} /> Custom task</button>}
+      </div>
+      <div style={{ padding: 8, maxHeight: 460, overflowY: 'auto' }}>
+        {list.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{tab === 'pending' ? 'No pending cases for this chatter.' : 'No coached cases yet.'}</div>
+        ) : list.map(t => {
+          const tier = TIER[t.priority] || {};
+          const sentAt = t.context?.sent_at;
+          const done = tab === 'completed';
+          return (
+            <div key={t.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-soft)', opacity: done ? 0.75 : 1 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: tier.c || 'var(--fg-3)', flexShrink: 0, marginTop: 5 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 500 }}>{t.title || t.detail}</div>
+                  <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {t.creator_name && <b style={{ color: 'var(--fg-3)' }}>{t.creator_name}</b>}
+                    {t.fan_username && <span style={{ color: 'var(--fg-3)' }}>{t.fan_username}</span>}
+                    {sentAt && <span style={{ color: 'var(--indigo-bright)', fontWeight: 600 }}>🕐 {fmtSentAt(sentAt)}</span>}
+                    <span>{(t.area || '').replace(/_/g, ' ')}</span>
+                    {done && t.completed_at && <span>✓ {new Date(t.completed_at).toLocaleDateString()}</span>}
+                  </div>
+                  {t.context?.message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 4 }}>“{t.context.message}”</div>}
+                </div>
+                {done
+                  ? <button className="btn sm" onClick={() => act(t, 'reopen')} title="Reopen this case">↺</button>
+                  : <button className="btn sm primary" onClick={() => act(t, 'complete')}>Complete</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ChatterProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -805,37 +872,8 @@ export default function ChatterProfile() {
           {/* Mistake Patterns */}
           <MistakePatterns mistakes={mistakes}/>
 
-          {/* Open Tasks */}
-          <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-            <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-              <span style={{ fontWeight:600, fontSize:13 }}>Open Tasks</span>
-              <div style={{ flex:1 }}/>
-              {canCreate && <button className="btn sm" onClick={()=>setShowTaskModal(true)}><Plus size={12}/> Custom task</button>}
-            </div>
-            <div style={{ padding:8 }}>
-              {tasks.length === 0 ? (
-                <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>No open AI tasks for this chatter.</div>
-              ) : tasks.slice(0,12).map(t => {
-                const tier = TIER[t.priority] || {};
-                const sentAt = t.context?.sent_at;
-                return (
-                  <div key={t.id} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderBottom:'1px solid var(--border-soft)' }}>
-                    <div style={{ width:6, height:6, borderRadius:'50%', background:tier.c||'var(--fg-3)', flexShrink:0, marginTop:5 }}/>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:12.5, fontWeight:500 }}>{t.title}</div>
-                      <div style={{ fontSize:10, color:'var(--fg-4)', marginTop:3, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-                        {t.creator_name ? <b style={{ color:'var(--fg-3)' }}>{t.creator_name}</b> : null}
-                        {t.fan_username && <span style={{ color:'var(--fg-3)' }}>{t.fan_username}</span>}
-                        {sentAt && <span style={{ color:'var(--indigo-bright)', fontWeight:600 }}>🕐 {fmtSentAt(sentAt)}</span>}
-                        <span>{(t.area || '').replace(/_/g,' ')}{t.area ? ' · ' : ''}{t.days_open || 0}d open{t.carried_over ? ' · carried' : ''}{t.regressed ? ' · regressed' : ''}</span>
-                      </div>
-                    </div>
-                    <Chip tone={t.status==='taken'?'info':'neutral'} style={{ fontSize:9.5 }}>{t.status}</Chip>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          {/* Mistake Log — pending cases (from daily analysis) + coached record */}
+          <MistakeLog chatterId={id} canCreate={canCreate} onAddCustom={() => setShowTaskModal(true)} />
         </div>
 
         {/* Right */}
