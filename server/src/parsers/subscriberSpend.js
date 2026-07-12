@@ -93,7 +93,11 @@ async function importSubscriberSpend(fileBuffer, fileName, orgId) {
  * subscriber_sales ledger. Spend = sum of all that fan's distinct PPV sales.
  */
 async function recomputeSubscribersFromLedger(orgId, usernames) {
-  const classify = total => total >= 1000 ? 'whale' : total >= 100 ? 'ps' : total > 0 ? 'regular' : 'unclassified';
+  // Thresholds from the Rice playbook: whale = $1000+, PS (potential spender) = $80+.
+  // NOTE: this keys off LIFETIME spend as a proxy; the playbook's true PS is a NEW
+  // sub who spends $80+ in his FIRST session (whale treatment for 1-2 weeks) — that
+  // needs first-session purchase data we don't track yet.
+  const classify = total => total >= 1000 ? 'whale' : total >= 80 ? 'ps' : total > 0 ? 'regular' : 'unclassified';
   let updated = 0;
 
   for (const username of usernames) {
