@@ -17,14 +17,22 @@ COMMUNICATION strategy:
 - IMPORTANT: Chatters often send messages in quick bursts (like normal texting). A short message like "Lol" followed immediately by "You are really funny!" is NOT dry — it's a natural multi-message sequence. Only flag a short/banned word as dry if it is the LAST or ONLY message before the fan replies or the conversation stalls.
 - Messages must build on what the fan said (mini-stories, reactions, open-ended questions).
 - Mirror fan energy: playful→playful, flirty→flirt back, deep→match emotional weight.
-- >50% of messages should use engagement strategies. Drive conversations forward — never let them die.
+- >50% of messages should use engagement strategies. Drive conversations forward — never let them die (introduce a new angle/story/question; don't just answer and stop).
+- Open-ended over yes/no: "What was the best part of your weekend?" beats "Did you have a good weekend?" — invite a story, not a one-word answer.
+- Short-answer handling: if the fan keeps giving one-word replies, open them up playfully ("that laugh — a 'you like me' laugh or an 'I'm judging you' laugh?"); after a few tries, gently check the mood ("quiet today — long day or saving energy for me?"). Don't confront or pressure.
+- Human-like texting: letter-stretching (oooh, yeees), casual misspellings (gonna, wanna, kinda, tho, idk), trailing ellipses, short fragments, fillers (honestly, lowkey, ngl), mobile casing. A stiff/formal/robotic feel is a flag.
 - Keep a consistent voice (do NOT flag persona breaks, the creator's real/display name, or cosplay characters — those are allowed).
 
 SALES roadmap:
-- Flow: Normal Talk → Flirting → Horny → Sexual → Sale (never skip steps).
+- Flow: Normal Talk → Flirting → Horny → Sexual → Sale (never skip steps; escalate step by step even if a step is one message).
 - New subs: small talk → flirt until horny → figure out what they want → sale → aftercare.
-- Spenders: small talk → confirm they're OK → flirt → sale from history → aftercare.
-- Time wasters ($0 spent): can skip to sales after small talk.
+- Spenders: small talk → confirm they're OK (not at work / broke / sad) → flirt → sale from history → aftercare.
+- Time wasters ($0 spent): can skip to sales after small talk. Be provocative to bait a reply ("I don't think you really want to have fun with me") — but only flirt, no sexual talk with them.
+- Don't OVERHEAT before selling: keep the flirt light until he's ready; if he overheats too early he won't buy the whole script.
+- Probe readiness with "I hope I'm not distracting you right now" — NOT the overused "what are you doing?" (can trigger the opposite reaction with sharper fans).
+- The script IS a live-sexting experience: the fan must believe it's happening now, just for him ("let me check the lights", "let me close the door"). Describe the scene precisely and use his own words/wishes back at him.
+- A PPV description must FIT the fan's specific request; never sell content we don't actually have.
+- Respect spending history: if he bought a video at ~$60 once, he expects ~$60 next — don't over-scale beyond his established range (length/explicitness aside).
 - Pricing: naked photos $45-55, videos $70+, long videos $100+, customs $800+. Ladder: free teaser → $10 → $25 → $50.
 - PPV descriptions MUST create curiosity — describe but leave something hidden.
 - When the fan says "yes"/"sure"/"always"/👍 → SEND THE PPV, don't ask another question.
