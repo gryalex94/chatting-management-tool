@@ -45,6 +45,7 @@ export default function ReportsPage() {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [uploading, setUploading] = useState(false);
   const [imports, setImports] = useState([]);
+  const [progress, setProgress] = useState(null);   // daily-tasks pipeline progress
 
   useEffect(()=>{loadHistory();},[]);
 
@@ -90,6 +91,27 @@ export default function ReportsPage() {
     (key==='message-dashboard'&&i.report_type==='message_dashboard')||
     (key==='creator-stats'&&i.report_type==='creator_statistics')
   );
+  const bothReady = getUploaded('message-dashboard')?.status==='completed' && getUploaded('creator-stats')?.status==='completed';
+
+  // One-click daily pipeline (temporary): recompute metrics → AI compliance report
+  // per chatter (progress bar) → build & rank tasks — for the selected report date.
+  async function createDailyTasks() {
+    setProgress({ stage:'calc' });
+    try {
+      const { data:run } = await api.post('/api/daily-check/run', { report_date:date, recompute:true });
+      const chatters = run.chatters || [];
+      for (let i=0;i<chatters.length;i++){
+        const c = chatters[i];
+        setProgress({ stage:'evaluate', done:i, total:chatters.length, current:c.chatter_name });
+        try { await api.post('/api/daily-check/evaluate', { chatter_id:c.chatter_id, report_date:date, eval_type:'compliance', model:'sonnet', prompt_version:'A' }); }
+        catch { /* skip a chatter that fails, keep going */ }
+      }
+      setProgress({ stage:'build', done:chatters.length, total:chatters.length });
+      await api.post('/api/review-tasks/rebuild', { report_date:date });
+      toast.success('Daily tasks created — see them on Home / Tasks');
+    } catch(e){ toast.error(e?.response?.data?.error || 'Failed to create daily tasks'); }
+    finally { setProgress(null); }
+  }
 
   return (
     <div className="animate-in">
@@ -109,6 +131,31 @@ export default function ReportsPage() {
       <div style={{display:'flex',gap:12,marginBottom:24}}>
         {REPORTS.map(r=><ReportCard key={r.key} report={r} selected={selected===r.key} uploaded={getUploaded(r.key)} onSelect={setSelected}/>)}
       </div>
+
+      {/* Both reports in → one-click daily pipeline */}
+      {bothReady && (
+        <div style={{ background:'var(--indigo-soft)', border:'1px solid var(--indigo)', borderRadius:'var(--r-panel)', padding:'14px 16px', marginBottom:24 }}>
+          {!progress ? (
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:200 }}>
+                <div style={{ fontSize:13, fontWeight:600 }}>Both reports uploaded for {date} ✓</div>
+                <div style={{ fontSize:11.5, color:'var(--fg-2)', marginTop:2 }}>Recompute metrics, run the AI report on every chatter, and build the tasks — in one go.</div>
+              </div>
+              <button onClick={createDailyTasks} className="btn primary" style={{ height:38, padding:'0 18px' }}>✨ Create daily tasks</button>
+            </div>
+          ) : (
+            <div>
+              <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--fg-1)', marginBottom:6 }}>
+                <span>{progress.stage==='calc' ? 'Recalculating metrics…' : progress.stage==='build' ? 'Building & ranking tasks…' : `Analysing chatters… ${progress.done}/${progress.total}${progress.current ? ` · ${progress.current}` : ''}`}</span>
+                {progress.total ? <span>{Math.round((progress.done/progress.total)*100)}%</span> : null}
+              </div>
+              <div style={{ height:6, background:'var(--bg-3)', borderRadius:3, overflow:'hidden' }}>
+                <div style={{ height:'100%', background:'var(--indigo)', transition:'width 0.3s', width: progress.stage==='calc' ? '8%' : progress.stage==='build' ? '96%' : `${progress.total ? (progress.done/progress.total)*90+5 : 5}%` }}/>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Upload area */}
       {selected&&(

@@ -137,18 +137,11 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [dayStatus, setDayStatus] = useState(null);   // which uploads exist for the day
-  const [progress, setProgress] = useState(null);      // { stage, done, total, current }
 
   const load = useCallback(async (d) => {
     setLoading(true);
-    try {
-      const [res, ds] = await Promise.all([
-        api.get('/api/daily-check/overview', { params: { date: d } }),
-        api.get('/api/uploads/day-status', { params: { report_date: d } }).catch(() => ({ data: null })),
-      ]);
-      setData(res.data); setDayStatus(ds.data);
-    } catch { /* ignore */ } finally { setLoading(false); }
+    try { const res = await api.get('/api/daily-check/overview', { params: { date: d } }); setData(res.data); }
+    catch { /* ignore */ } finally { setLoading(false); }
   }, []);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(date); }, [load]);
@@ -159,33 +152,10 @@ export default function DashboardPage() {
       const { data: rb } = await api.post('/api/review-tasks/rebuild', { report_date: date });
       await load(date);
       const arch = (rb?.ranked?.archived || 0) + (rb?.capped?.archived || 0);
-      toast.success(`Report built${arch ? ` · archived ${arch} low-value tasks` : ''}`);
+      toast.success(`Tasks built${arch ? ` · archived ${arch} low-value tasks` : ''}`);
     }
     catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
     finally { setGenerating(false); }
-  };
-
-  // One-click daily pipeline (temporary convenience, removed once uploads auto-run):
-  // recompute metrics → AI compliance report per chatter (progress bar) → build & rank tasks.
-  const createDailyTasks = async () => {
-    setGenerating(true);
-    try {
-      setProgress({ stage: 'calc' });
-      const { data: run } = await api.post('/api/daily-check/run', { report_date: date, recompute: true });
-      const chatters = run.chatters || [];
-      for (let i = 0; i < chatters.length; i++) {
-        const c = chatters[i];
-        setProgress({ stage: 'evaluate', done: i, total: chatters.length, current: c.chatter_name });
-        try { await api.post('/api/daily-check/evaluate', { chatter_id: c.chatter_id, report_date: date, eval_type: 'compliance', model: 'sonnet', prompt_version: 'A' }); }
-        catch { /* skip a chatter that fails, keep going */ }
-      }
-      setProgress({ stage: 'build', done: chatters.length, total: chatters.length });
-      const { data: rb } = await api.post('/api/review-tasks/rebuild', { report_date: date });
-      const arch = (rb?.ranked?.archived || 0) + (rb?.capped?.archived || 0);
-      await load(date);
-      toast.success(`Daily tasks created${arch ? ` · archived ${arch} low-value` : ''}`);
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed to create daily tasks'); }
-    finally { setProgress(null); setGenerating(false); }
   };
 
   const hr = new Date().getHours();
@@ -263,30 +233,9 @@ export default function DashboardPage() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input type="date" value={date} onChange={e => { setDate(e.target.value); load(e.target.value); }} style={inputStyle} />
-          {dayStatus?.ready && (
-            <button onClick={createDailyTasks} disabled={generating} style={{ ...primary, opacity: generating ? 0.6 : 1 }}
-              title="Both files are uploaded — recompute metrics, run the AI report, and build the tasks in one go">
-              {progress ? 'Working…' : '✨ Create daily tasks'}
-            </button>
-          )}
-          <button onClick={generate} disabled={generating} style={{ ...primary, opacity: generating ? 0.6 : 1 }}>{generating && !progress ? 'Building…' : 'Build report & tasks'}</button>
+          <button onClick={generate} disabled={generating} style={{ ...primary, opacity: generating ? 0.6 : 1 }}>{generating ? 'Building…' : 'Build tasks'}</button>
         </div>
       </div>
-
-      {progress && (
-        <div style={{ ...panel, padding: '12px 16px', marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--fg-2)', marginBottom: 6 }}>
-            <span>{progress.stage === 'calc' ? 'Recalculating metrics…'
-              : progress.stage === 'build' ? 'Building & ranking tasks…'
-                : `Analysing chatters… ${progress.done}/${progress.total}${progress.current ? ` · ${progress.current}` : ''}`}</span>
-            {progress.total ? <span>{Math.round((progress.done / progress.total) * 100)}%</span> : null}
-          </div>
-          <div style={{ height: 6, background: 'var(--bg-3)', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ height: '100%', background: 'var(--indigo)', transition: 'width 0.3s',
-              width: progress.stage === 'calc' ? '8%' : progress.stage === 'build' ? '96%' : `${progress.total ? (progress.done / progress.total) * 90 + 5 : 5}%` }} />
-          </div>
-        </div>
-      )}
 
       {loading ? <div style={{ paddingTop: 60, textAlign: 'center', color: 'var(--fg-3)' }}>Loading…</div>
         : !hasData ? (
@@ -298,7 +247,7 @@ export default function DashboardPage() {
               {[
                 ['1', <>Upload the <b>Message Dashboard</b> and <b>Creator Statistics</b> spreadsheets from Infloww.</>, '/reports', 'Go to Reports →'],
                 ['2', <>In <b>Daily Check</b>, press <b>Run daily review</b> — the AI analyses every chatter. <span style={{ color: 'var(--fg-3)' }}>(Run the <b>creator review</b> once a week.)</span></>, '/daily', 'Go to Daily Check →'],
-                ['3', <>Come back here and press <b>Build report & tasks</b> to build & rank the tasks and see the full overview.</>, null, null],
+                ['3', <>Come back here and press <b>Build tasks</b> to build & rank the tasks and see the full overview.</>, null, null],
               ].map(([n, text, link, cta]) => (
                 <div key={n} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5 }}>
                   <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--indigo-soft)', color: 'var(--indigo-bright)', fontWeight: 700, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>{n}</span>
@@ -306,7 +255,7 @@ export default function DashboardPage() {
                 </div>
               ))}
             </div>
-            <button onClick={generate} disabled={generating} style={{ ...primary, padding: '10px 18px', fontSize: 13, marginTop: 22 }}>{generating ? 'Building…' : 'Build report & tasks'}</button>
+            <button onClick={generate} disabled={generating} style={{ ...primary, padding: '10px 18px', fontSize: 13, marginTop: 22 }}>{generating ? 'Building…' : 'Build tasks'}</button>
           </div>
         ) : (
           <>
@@ -325,7 +274,7 @@ export default function DashboardPage() {
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#a78bfa', marginBottom: 5 }}>Today's review · AI</div>
                 {data.day_review
                   ? <p style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.55, margin: 0 }}>{data.day_review}</p>
-                  : <p style={{ fontSize: 12, color: 'var(--fg-3)', margin: 0 }}>Press <b>Build report & tasks</b> for the AI summary + task queue.</p>}
+                  : <p style={{ fontSize: 12, color: 'var(--fg-3)', margin: 0 }}>Press <b>Build tasks</b> for the AI summary + task queue.</p>}
               </div>
             </div>
 
