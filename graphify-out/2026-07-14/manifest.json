@@ -410,8 +410,8 @@
     "semantic_hash": "c5ab317fb102bc599c2214470cb22cb8"
   },
   "client/src/pages/chatters/ChatterProfile.jsx": {
-    "mtime": 1783880271.2032704,
-    "ast_hash": "684d396b78bcdcca09167630fd7467e3",
+    "mtime": 1783863178.5927258,
+    "ast_hash": "e9216b9fc614800f5255b94e9c354b88",
     "semantic_hash": ""
   },
   "client/src/pages/creators/CreatorsPage.jsx": {
@@ -425,9 +425,9 @@
     "semantic_hash": ""
   },
   "client/src/pages/dashboard/DashboardPage.jsx": {
-    "mtime": 1783952023.2332313,
-    "ast_hash": "87549addce44d563661248dff8da935a",
-    "semantic_hash": ""
+    "mtime": 1782827201.4309044,
+    "ast_hash": "07331035352dae9dd7778b217c6092eb",
+    "semantic_hash": "07331035352dae9dd7778b217c6092eb"
   },
   "client/src/pages/pulse/PulsePage.jsx": {
     "mtime": 1779346669.731026,
@@ -435,9 +435,9 @@
     "semantic_hash": "a4f2c01e86bf73b174956d74c3c9a122"
   },
   "client/src/pages/reports/ReportsPage.jsx": {
-    "mtime": 1783951928.758037,
-    "ast_hash": "e20a7edafa5ed54e2cd7baca858b7301",
-    "semantic_hash": ""
+    "mtime": 1782795032.0627654,
+    "ast_hash": "8ea3d2486205b03ce0d26fa87372e74e",
+    "semantic_hash": "8ea3d2486205b03ce0d26fa87372e74e"
   },
   "client/src/pages/settings/SettingsPage.jsx": {
     "mtime": 1782807543.2810116,
@@ -535,18 +535,18 @@
     "semantic_hash": "d4f1382d45a2c248c7c19a097d642274"
   },
   "server/src/ai/evalShared.js": {
-    "mtime": 1784026556.4800055,
-    "ast_hash": "aaaebffdd9a3ede9a8e97c3a8014c3a8",
+    "mtime": 1783505233.3151405,
+    "ast_hash": "94473ff0a62f88530100063f2b1b6f53",
     "semantic_hash": ""
   },
   "server/src/ai/evaluateChatterDay.js": {
-    "mtime": 1784026582.5135036,
-    "ast_hash": "c8bcd3fcfc27d782309eedd3d0f20a02",
+    "mtime": 1783863924.580195,
+    "ast_hash": "bd83e5f47a152430da84834c86d89570",
     "semantic_hash": ""
   },
   "server/src/ai/evaluateChatterSales.js": {
-    "mtime": 1784026620.689278,
-    "ast_hash": "ba53b67d52c44b8e6e7eef876a860425",
+    "mtime": 1783864035.4620872,
+    "ast_hash": "97bb1f70d7b51be19ccb3770f373aea2",
     "semantic_hash": ""
   },
   "server/src/ai/evaluateCreatorDay.js": {
@@ -585,14 +585,14 @@
     "semantic_hash": "ccb4a508d76e495609ad0bff712179ab"
   },
   "server/src/parsers/messageDashboard.js": {
-    "mtime": 1784026160.8460186,
-    "ast_hash": "156a49e145a02b39d9780b84b3c7d215",
-    "semantic_hash": ""
+    "mtime": 1782771019.004765,
+    "ast_hash": "8bf74349198390e52168fc80141b1784",
+    "semantic_hash": "8bf74349198390e52168fc80141b1784"
   },
   "server/src/parsers/subscriberSpend.js": {
-    "mtime": 1783865163.951011,
-    "ast_hash": "ed6a7614b6166be7f8f1fbf17ad1e133",
-    "semantic_hash": ""
+    "mtime": 1782663926.0,
+    "ast_hash": "3e5d916799738bdb02150b6508823db7",
+    "semantic_hash": "3e5d916799738bdb02150b6508823db7"
   },
   "server/src/routes/ai.js": {
     "mtime": 1779443880.6193504,
@@ -620,8 +620,8 @@
     "semantic_hash": "ee85627da2f4a13afc79e8d529e7bbe2"
   },
   "server/src/routes/dailyCheck.js": {
-    "mtime": 1783879381.7846363,
-    "ast_hash": "ea7b4183ae63f0742ef6152eb0ce3ecc",
+    "mtime": 1783863129.1515348,
+    "ast_hash": "6767002a03bbfb9c4d68df2ced44036f",
     "semantic_hash": ""
   },
   "server/src/routes/metrics.js": {
@@ -650,9 +650,9 @@
     "semantic_hash": "beb67211e0cec0a22b6f938a863ef489"
   },
   "server/src/routes/uploads.js": {
-    "mtime": 1783879523.0132167,
-    "ast_hash": "de52dbd7c7099a71974649ec57dd22bf",
-    "semantic_hash": ""
+    "mtime": 1782771023.2856078,
+    "ast_hash": "36cb998eecfc047c83fe22bbfaa1a17a",
+    "semantic_hash": "36cb998eecfc047c83fe22bbfaa1a17a"
   },
   "server/src/utils/autoMatch.js": {
     "mtime": 1782765048.4553506,
