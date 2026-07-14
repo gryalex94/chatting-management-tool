@@ -19,3 +19,12 @@ logs
 .idea
 .DS_Store
 *.local
+
+# Generated knowledge graph (rebuilt by `graphify update`, not source)
+graphify-out/
+
+# Working notes containing real fan data (usernames, message quotes, spend).
+# Kept locally, never committed.
+DISMISSED_CALIBRATION.md
+ARCHIVED_AUDIT.md
+CREATOR_REPORT_DUMP.md
