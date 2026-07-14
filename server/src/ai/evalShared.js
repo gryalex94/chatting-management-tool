@@ -115,8 +115,13 @@ async function buildEnrichment(orgId, msgs) {
     (crs || []).forEach(c => { creatorNames[c.id] = c.name; });
   } catch { /* names optional */ }
 
-  const nickToUser = {};     // normalized nickname -> username
+  // Collision-aware identity maps. Several fans often share a nickname ("Alex" can
+  // be 50 different fans), so a nickname only resolves when it's UNambiguous; the
+  // AI is prompted to return the exact username from the thread header instead.
+  const nickToUsers = {};    // normalized nickname -> Set of usernames
   const nickDisplay = {};    // normalized nickname -> display nickname
+  const userToNick = {};     // username -> display nickname
+  const userByLower = {};    // lowercased username -> username (exact id lookup)
   const userToCreator = {};  // username -> creator_id (which page the fan is on)
   const msgIndex = [];
   for (const m of msgs) {
@@ -124,15 +129,18 @@ async function buildEnrichment(orgId, msgs) {
     const nickname = m.sent_to_nickname || username || 'unknown';
     const nl = _norm(nickname);
     if (username) {
-      if (!nickToUser[nl]) nickToUser[nl] = username;
+      (nickToUsers[nl] ||= new Set()).add(username);
       if (!nickDisplay[nl]) nickDisplay[nl] = nickname;
+      if (!userToNick[username]) userToNick[username] = nickname;
+      userByLower[username.toLowerCase()] = username;
       if (m.creator_id && !userToCreator[username]) userToCreator[username] = m.creator_id;
     }
     if (m.fan_message_text) msgIndex.push({ username, who: 'fan', text: stripTags(m.fan_message_text), datetime: m.sent_datetime, creator_id: m.creator_id });
     if (m.creator_message_text) msgIndex.push({ username, who: 'chatter', text: stripTags(m.creator_message_text), datetime: m.sent_datetime, creator_id: m.creator_id });
   }
   for (const x of msgIndex) x.ntext = _norm(x.text);
-  const nickKeys = Object.keys(nickToUser);
+  const nickKeys = Object.keys(nickToUsers);
+  const allUsers = Object.values(userByLower);
 
   // Subscriber spend (global per fan, keyed by username).
   const spendByUser = {};
@@ -147,9 +155,23 @@ async function buildEnrichment(orgId, msgs) {
   }
 
   const enrichIssue = (issue) => {
-    const primaryUser = issue.fan ? (nickToUser[_norm(issue.fan)] || null) : null;
+    // Resolve the AI's "fan" field. Preference order:
+    //  1. an exact USERNAME (the prompt asks for the header's bracketed id) — unambiguous;
+    //  2. an UNambiguous nickname;
+    //  3. an ambiguous nickname → search only the candidates' threads and let the
+    //     quote decide; if it can't, keep the nickname with NO username — never guess.
+    const rawFan = String(issue.fan || '').trim();
+    let primaryUser = rawFan ? (userByLower[rawFan.toLowerCase()] || null) : null;
+    let candidates = null;
+    if (!primaryUser && rawFan) {
+      const us = nickToUsers[_norm(rawFan)];
+      if (us && us.size === 1) primaryUser = [...us][0];
+      else if (us && us.size > 1) candidates = [...us];
+    }
     const quote = extractQuote(issue.detail);
-    const pool = primaryUser ? msgIndex.filter(x => x.username === primaryUser) : msgIndex;
+    const pool = primaryUser ? msgIndex.filter(x => x.username === primaryUser)
+      : candidates ? msgIndex.filter(x => candidates.includes(x.username))
+        : msgIndex;
     let match = null;
     if (quote) {
       const nq = _norm(quote);
@@ -158,23 +180,32 @@ async function buildEnrichment(orgId, msgs) {
         || (primaryUser ? msgIndex.find(x => x.ntext.includes(nq)) : null);
     }
     // Fallback when exact quote-matching fails (apostrophes/emoji/paraphrase):
-    // the best word-overlap message in this fan's thread.
+    // the best word-overlap message within the candidate pool.
     if (!match) match = bestOverlap(pool.length ? pool : msgIndex, _norm(issue.detail));
-    const username = primaryUser || (match && match.username) || null;
+    // The verbatim username (or unambiguous nickname) wins; otherwise the matched
+    // message's owner — restricted to the candidates when the nickname was shared.
+    const matchedUser = (match && (!candidates || candidates.includes(match.username))) ? match.username : null;
+    const username = primaryUser || matchedUser || null;
     const creatorId = (match && match.creator_id) || (username && userToCreator[username]) || null;
 
     const dl = _norm(issue.detail);
     const padded = ` ${dl} `;
-    // Every fan the issue names: the primary + any nickname appearing in the detail
-    // as a WHOLE WORD (whole-word match avoids junk like 'd o' hitting 'good old').
-    // Each fan carries their OWN best-match message + time, so a manager can find
-    // every fan a multi-fan task refers to.
+    const rawDetail = String(issue.detail || '').toLowerCase();
+    // Every fan the issue names: the primary + any USERNAME appearing in the detail
+    // + any UNambiguous nickname as a whole word (shared nicknames are skipped —
+    // attaching one of 50 "Alex"es would point the manager at the wrong dialogue).
     const fanNick = new Map();
-    if (username) fanNick.set(username, nickDisplay[_norm(issue.fan || '')] || issue.fan || null);
+    if (username) fanNick.set(username, userToNick[username] || (rawFan || null));
+    for (const u of allUsers) {
+      if (u.length < 4 || fanNick.has(u)) continue;
+      if (rawDetail.includes(u.toLowerCase())) fanNick.set(u, userToNick[u] || null);
+    }
     for (const nl of nickKeys) {
       if (nl.length < 3) continue;
       if (!padded.includes(` ${nl} `)) continue;
-      const u = nickToUser[nl];
+      const us = nickToUsers[nl];
+      if (us.size !== 1) continue;                 // shared nickname → never guess
+      const u = [...us][0];
       if (u && !fanNick.has(u)) fanNick.set(u, nickDisplay[nl]);
     }
     const fans = [...fanNick.entries()].map(([u, nick]) => {

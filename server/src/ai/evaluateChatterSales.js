@@ -6,7 +6,7 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = requir
 // and produces a coaching TASK for each concrete deviation (quote + fan + what the
 // strategy expected). It sees each fan's recorded spend and page, so it can apply
 // the right playbook (new sub vs spender vs whale vs $0) and weigh lost money.
-const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager reviewing one chatter's full conversations for a single day. Your job is to find every concrete moment where the chatter DEVIATED from Rice Media's communication and sales strategy, and turn each into a coaching TASK for the manager. Do NOT grade or score — surface actionable moments. Be specific: quote the exact words, name EVERY fan involved, and say what the strategy expected instead. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
+const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager reviewing one chatter's full conversations for a single day. Your job is to find every concrete moment where the chatter DEVIATED from Rice Media's communication and sales strategy, and turn each into a coaching TASK for the manager. Do NOT grade or score — surface actionable moments. Be specific: quote the exact words, identify each fan by the USERNAME shown in square brackets in their conversation header (e.g. "[u573778077, spent $480]" → fan is "u573778077" — display names are shared by many fans, usernames are unique), and say what the strategy expected instead. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
 Each conversation header shows the fan's recorded spend ("[u123, spent $250]" or "no recorded spend") and which PAGE the fan is on ("(page: Leya)"). Use the spend to pick the right playbook and to weigh how much a miss matters. A chatter works SEVERAL pages, each with its OWN content scope — never flag a difference BETWEEN pages as an inconsistency.
 
@@ -50,7 +50,7 @@ Turn each deviation into an issue:
 Return JSON with this exact shape:
 {
   "overall": "one short paragraph: the main strategy gaps to coach today",
-  "issues": [{"area":"sales | communication","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan","fan":"nickname or null"}]
+  "issues": [{"area":"sales | communication","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]
 }
 If the chatter followed the strategy well, return an empty issues list. Do not invent issues to fill the list.`;
 

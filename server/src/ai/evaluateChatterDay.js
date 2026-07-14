@@ -11,7 +11,7 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = requir
 // keep + tighten the genuine ToS classes; add location disclosure. The protected
 // classes (tos/age/meeting/free_content/offplatform/location) are never auto-cleared
 // downstream — see PROTECTED_AREAS in taskGenerator.js.
-const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and name the fan. If an issue involves more than one fan, name EVERY fan involved. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
+const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and identify the fan by the USERNAME shown in square brackets in their conversation header (e.g. "[u573778077, spent $480]" → fan is "u573778077") — many fans share the same display name, so the username is the only reliable identifier. If an issue involves more than one fan, include EVERY fan's username in the detail. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
 Each conversation header shows the fan's recorded spend (e.g. "[u123, spent $250]" or "no recorded spend") — use it to weigh how much a missed sale or issue matters.
 
@@ -50,7 +50,7 @@ Severity is a sort hint, not a verdict:
 - high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); big (>50%) discount; strong compliance concern.
 - medium / low = everything else; bare tips are always low.`;
 
-const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"nickname or null"}]`;
+const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]`;
 
 // VERSION A — content/compliance only (recommended; engine owns discipline).
 const PROMPT_A = `${SPOTLIGHT_BODY}
