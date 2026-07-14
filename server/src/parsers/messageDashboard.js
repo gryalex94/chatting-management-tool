@@ -26,9 +26,11 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, repo
   });
   console.log(`Matched ${Object.keys(creatorMap).length} creators, ${Object.keys(chatterMap).length} chatters`);
 
-  // Prevent duplicate stacking on re-upload: clear any existing messages for this
-  // org on the dates present in this file, then insert fresh. Re-uploading the
-  // same day now REPLACES rather than piling up triplicate rows.
+  // Prevent duplicate stacking on re-upload: clear existing messages ONLY within
+  // this file's actual TIME WINDOW (min..max sent_datetime), then insert fresh.
+  // Never delete by whole calendar date: Infloww cuts the day on a CET boundary,
+  // so every file spans two UTC dates (a ~1h tail of yesterday + the full day) —
+  // date-wide deletes were wiping ~94% of the previous day on every upload.
   const fileDates = [...new Set(rows.map(r => parseTextDate(r['Sent date'])).filter(Boolean))];
 
   // Safety: the date you picked must match the date(s) inside the file, so a file
@@ -37,14 +39,27 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, repo
     throw new Error(`Date mismatch — you picked ${reportDate}, but this file's messages are dated ${fileDates.slice(0, 3).join(', ')}${fileDates.length > 3 ? '…' : ''}. Pick the matching date, or upload the file for ${reportDate}.`);
   }
 
-  if (fileDates.length) {
+  const fileDatetimes = rows.map(r => {
+    const d = parseTextDate(r['Sent date']); const t = r['Sent time'];
+    return d && t ? `${d}T${t}` : null;
+  }).filter(Boolean).sort();
+  if (fileDatetimes.length) {
+    const winMin = fileDatetimes[0], winMax = fileDatetimes[fileDatetimes.length - 1];
     const { error: delErr } = await supabaseAdmin
       .from('messages')
       .delete()
       .eq('organisation_id', orgId)
-      .in('sent_date', fileDates);
+      .gte('sent_datetime', winMin)
+      .lte('sent_datetime', winMax);
     if (delErr) console.error('[MessageDashboard] pre-clear error:', delErr.message);
-    else console.log(`[MessageDashboard] Cleared existing messages for ${fileDates.length} date(s) before re-insert`);
+    else console.log(`[MessageDashboard] Cleared existing messages in window ${winMin} .. ${winMax} before re-insert`);
+  } else if (fileDates.length) {
+    // No parseable times in the file (shouldn't happen with Infloww exports) —
+    // fall back to clearing ONLY the picked report date, never neighbouring days.
+    const { error: delErr } = await supabaseAdmin
+      .from('messages').delete()
+      .eq('organisation_id', orgId).eq('sent_date', reportDate || fileDates[0]);
+    if (delErr) console.error('[MessageDashboard] pre-clear error:', delErr.message);
   }
 
   const BATCH_SIZE = 500;
