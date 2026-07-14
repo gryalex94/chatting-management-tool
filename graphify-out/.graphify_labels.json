@@ -50,6 +50,7 @@
   "48": "evaluateCreatorDay.js",
   "49": "graphify reference: extra exports and benchmark",
   "50": "Topbar.jsx",
+  "51": "uploads.js",
   "52": "AuthContext.jsx",
   "53": "graphify reference: query, path, explain",
   "54": "React + Vite",
@@ -65,6 +66,9 @@
   "64": "extraction-spec.md",
   "65": "eslint.config.js",
   "66": "vite.config.js",
+  "67": "computeChatterMetrics.js",
   "68": "tasks.js",
-  "70": "Chatter performance — evaluation blueprint"
+  "69": "overview.js",
+  "70": "Chatter performance — evaluation blueprint",
+  "71": "cycles.js"
 }

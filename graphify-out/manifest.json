@@ -550,13 +550,13 @@
     "semantic_hash": ""
   },
   "server/src/ai/evaluateCreatorDay.js": {
-    "mtime": 1783458676.678219,
-    "ast_hash": "2491fddd8cc3e2eae50d4c202c510235",
+    "mtime": 1784054622.4130774,
+    "ast_hash": "b84139521257959e515ba48d4f1eecbe",
     "semantic_hash": ""
   },
   "server/src/ai/prioritiseTasks.js": {
-    "mtime": 1783856023.7501419,
-    "ast_hash": "2e75141bac2d5ebcb1e1d5b63970c5b7",
+    "mtime": 1784054650.583789,
+    "ast_hash": "d69127c1c91c9d200c3b19c1456e82ba",
     "semantic_hash": ""
   },
   "server/src/ai/runDailyAnalysis.js": {
@@ -670,8 +670,8 @@
     "semantic_hash": "a14b7c263ab1fbbb221bbc0bb5eaefa2"
   },
   "server/src/utils/dailyCheck.js": {
-    "mtime": 1783855958.2117233,
-    "ast_hash": "84df6d07aec08fa42a8d64901ec9b475",
+    "mtime": 1784054564.6358216,
+    "ast_hash": "ecf728afd5f0c403530aa5c8680f0ae5",
     "semantic_hash": ""
   },
   "server/src/utils/evaluationStore.js": {
@@ -695,8 +695,8 @@
     "semantic_hash": "ccc7c269e455d446887bfe65ec8aa619"
   },
   "server/src/utils/taskGenerator.js": {
-    "mtime": 1783855995.018248,
-    "ast_hash": "3443e5eb41fc006afc817efa6605ac63",
+    "mtime": 1784054590.7186286,
+    "ast_hash": "edb9cbebe95f4f299a03e0b15ca32fc1",
     "semantic_hash": ""
   },
   "supabase/migrations/001_initial_schema.sql": {
