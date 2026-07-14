@@ -6,12 +6,14 @@ const shortTitle = (s) => { const t = String(s || '').trim(); return t.length > 
 
 const SOURCE = { compliance: 'compliance', sales_quality: 'sales', creator: 'creator' };
 
-const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders', 'refunds'];
+const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders'];
+// Engine flags default to 'work_ethic'; these ones carry a real area of their own.
+const FLAG_AREA = { chargeback: 'chargeback' };
 
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
 // capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
 // area vocabulary emitted by the compliance prompt in evaluateChatterDay.js.
-const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
+const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'chargeback']);
 // The subset that rides at the very top (serious ToS). `location` is protected too
 // but ranks a notch lower (verify-against-bio, not an active breach).
 const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
@@ -42,6 +44,7 @@ function defaultPriority(sev, source, area) {
   const a = (area || '').toLowerCase();
   const ph = PAGE_HEALTH.includes(a);
   if (sev === 'critical') return 1;
+  if (a === 'chargeback') return 1;                            // money left the business — always look it up
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
   if (sev === 'high') {
     if (source === 'flag' || a === 'work_ethic') return 2;
@@ -138,7 +141,7 @@ async function buildTasksForDate(orgId, reportDate) {
       chatter_id: f.chatter_id || null,
       chatter_name: f.chatter_id ? chatterNameById[f.chatter_id] : null,
       fan_username: null,
-      area: 'work_ethic',
+      area: FLAG_AREA[f.flag_type] || 'work_ethic',
       severity: f.severity || 'medium',
       title: shortTitle((f.flag_type || '').replace(/_/g, ' ') + ' — ' + (f.evidence || '')),
       detail: f.evidence || (f.flag_type || '').replace(/_/g, ' '),

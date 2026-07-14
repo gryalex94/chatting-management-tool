@@ -15,16 +15,16 @@ ONLY raise an issue when a metric crosses one of these thresholds — otherwise 
 - revenue: only when it differs from baseline by 90% OR MORE, in EITHER direction (a collapse OR a surprise spike both warrant a look). Smaller swings are normal — no issue.
 - ltv: only when it has dropped 20% or more versus the prior period → severity high.
 - ratio: only when it is BELOW the target of 5 → look it up. At or above 5 is fine.
-- refunds: only when refunds exceed $50 → check the reason (buyer's remorse vs our error).
+- chargebacks: whenever chargebacks exceed $50. ALWAYS severity high — money left the business and it may be our fault, so a manager must find out what happened (buyer's remorse vs. our mistake).
 - spenders / churn: only when there is a clear, sustained deterioration (not a one-day wobble, not a free-page artefact where renew%/churn is meaningless).
 A day that crosses none of these is a healthy day — say so in 'overall' and return few or no issues.
 
-For a ratio or LTV issue, write the "detail" as an ACTION, not just a number: tell the manager to review THIS page's newest subscribers from the past week, its whales, and its potential spenders, and to flag the weakest chatting performances on the page — the metric points to WHERE to look, the task says WHAT to do. For a revenue anomaly, the action is to open the dashboard and check successful/failed sales for that day. For a refund, the action is to check the reason (buyer's remorse vs our error).
+For a ratio or LTV issue, write the "detail" as an ACTION, not just a number: tell the manager to review THIS page's newest subscribers from the past week, its whales, and its potential spenders, and to flag the weakest chatting performances on the page — the metric points to WHERE to look, the task says WHAT to do. For a revenue anomaly, the action is to open the dashboard and check successful/failed sales for that day. For a chargeback, the action is to find out exactly what happened — was it buyer's remorse, or our mistake?
 
 Return JSON with this exact shape:
 {
   "overall": "one short paragraph: the state of the page and the headline",
-  "issues": [{"area":"ratio | ltv | revenue | churn | spenders | refunds | data | other","severity":"critical | high | medium | low","detail":"what stands out and what to look at, with the numbers"}]
+  "issues": [{"area":"ratio | ltv | revenue | churn | spenders | chargeback | data | other","severity":"critical | high | medium | low","detail":"what stands out and what to look at, with the numbers"}]
 }
 If the page looks healthy, say so in 'overall' and return few or no issues. Do not invent problems.`;
 
@@ -46,7 +46,7 @@ function fmtToday(s) {
     `new fans ${s.new_fans ?? '?'}`,
     `active fans ${s.active_fans ?? '?'}`,
     `expired-fan change ${s.expired_fan_change ?? '?'}`,
-    `refunds (gross) $${s.refund_gross ?? 0}`,
+    `chargebacks (gross) $${s.refund_gross ?? 0}`,
     `following ${s.following ?? '?'}`,
     `OF ranking ${s.of_ranking ?? '?'}`,
     `avg sub length ${s.avg_subscription_length_days ?? '?'}d`,
@@ -55,7 +55,7 @@ function fmtToday(s) {
 
 function fmtTrend(rows) {
   return rows.map(s =>
-    `${s.report_date}: earnings(net) $${Math.round((s.total_earnings_gross || 0) * NET)}, spenders ${s.number_of_spenders ?? '?'}, new subs ${s.new_subscribers ?? '?'}, renew% ${s.renew_on_pct ?? '?'}, refunds $${s.refund_gross ?? 0}`
+    `${s.report_date}: earnings(net) $${Math.round((s.total_earnings_gross || 0) * NET)}, spenders ${s.number_of_spenders ?? '?'}, new subs ${s.new_subscribers ?? '?'}, renew% ${s.renew_on_pct ?? '?'}, chargebacks $${s.refund_gross ?? 0}`
   ).join('\n');
 }
 

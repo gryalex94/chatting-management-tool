@@ -111,10 +111,12 @@ async function runDailyCheck(orgId, reportDate) {
           { ltv: round2(ltvWindow), prior: round2(ltvPriorWindow), dropPct: Math.round(ltvDrop) }));
       }
     }
-    // refund spike
+    // Chargebacks — always P1. Money left the business and it may be our fault:
+    // a manager must find out what happened (buyer's remorse vs. our error).
     if ((today.refund_gross || 0) > num(cfg.refund_spike_amount, 50)) {
-      page.flags.push(mkFlag('page', creatorId, null, reportDate, 'refund_spike', 'medium',
-        `Refunds $${round2(today.refund_gross)} on this page today`, orgId, { refunds: round2(today.refund_gross) }));
+      page.flags.push(mkFlag('page', creatorId, null, reportDate, 'chargeback', 'high',
+        `Chargebacks $${round2(today.refund_gross)} on this page today — find out what happened (buyer's remorse vs. our mistake)`, orgId,
+        { chargebacks: round2(today.refund_gross) }));
     }
 
     flags.push(...page.flags);
