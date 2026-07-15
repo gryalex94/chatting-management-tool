@@ -110,9 +110,10 @@ function bestOverlap(pool, detailNorm) {
 
 async function buildEnrichment(orgId, msgs) {
   const creatorNames = {};
+  const creatorInstructions = {};
   try {
-    const { data: crs } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
-    (crs || []).forEach(c => { creatorNames[c.id] = c.name; });
+    const { data: crs } = await supabaseAdmin.from('creators').select('id, name, ai_instructions').eq('organisation_id', orgId);
+    (crs || []).forEach(c => { creatorNames[c.id] = c.name; if (c.ai_instructions) creatorInstructions[c.id] = c.ai_instructions; });
   } catch { /* names optional */ }
 
   // Collision-aware identity maps. Several fans often share a nickname ("Alex" can
@@ -230,7 +231,23 @@ async function buildEnrichment(orgId, msgs) {
     };
   };
 
-  return { creatorNames, spendByUser, enrichIssue };
+  return { creatorNames, creatorInstructions, spendByUser, enrichIssue };
 }
 
-module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, bestOverlap, sigTokens };
+/**
+ * Build the "special instructions" preamble for the pages that actually appear in
+ * this chatter-day, from each page's manager-written ai_instructions. Returns '' if
+ * none of the present pages have custom rules.
+ */
+function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}) {
+  const present = new Set((msgs || []).map(m => m.creator_id).filter(Boolean));
+  const lines = [];
+  for (const cid of present) {
+    const txt = (creatorInstructions[cid] || '').trim();
+    if (txt) lines.push(`- ${creatorNames[cid] || 'page'}: ${txt}`);
+  }
+  if (!lines.length) return '';
+  return `PER-PAGE SPECIAL INSTRUCTIONS (custom rules the manager set for specific pages — apply the matching page's rules to that page's conversations, IN ADDITION to everything above):\n${lines.join('\n')}\n\n`;
+}
+
+module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens };

@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { Avatar, Chip, StatusDot } from '../../components/shared';
 import { STATUS_META, avatarColor, initials } from '../../utils/helpers';
-import { Plus, ArrowRight, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal, Clock, Trash2, Calendar } from 'lucide-react';
+import { Plus, ArrowRight, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal, Clock, Trash2, Calendar, Sparkles } from 'lucide-react';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, rectIntersection, useDraggable, useDroppable,
@@ -277,7 +277,7 @@ function ShiftSlot({ shift, chatters, creatorId, onAssign, onAddCover, onClickCh
 }
 
 /* ─── Creator Card Menu ──────────────────────────── */
-function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate, onManageShifts }) {
+function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate, onManageShifts, onEditAI }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -311,6 +311,8 @@ function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate,
             onClick={e => { e.stopPropagation(); setOpen(false); onRename(creator); }}><Pencil size={13}/> Rename</button>
           <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
             onClick={e => { e.stopPropagation(); setOpen(false); onManageShifts(); }}><Clock size={13}/> Manage Shifts</button>
+          <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
+            onClick={e => { e.stopPropagation(); setOpen(false); onEditAI(creator); }}><Sparkles size={13}/> AI Instructions{creator.ai_instructions ? ' ✓' : ''}</button>
           {mergedCreators.length > 0 && (<>
             <div style={{ height:1, background:'var(--border)', margin:'4px 0' }}/>
             <div style={{ padding:'6px 12px', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:0.5 }}>Split</div>
@@ -329,7 +331,7 @@ function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate,
 }
 
 /* ─── Creator Card ───────────────────────────────── */
-function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickChatter, onRemove, onSplit, onRename, onDeactivate, mergedCreators, onManageShifts, selectedDay, draggingType }) {
+function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickChatter, onRemove, onSplit, onRename, onDeactivate, mergedCreators, onManageShifts, onEditAI, selectedDay, draggingType }) {
   const memberPages = mergedCreators;                 // pages grouped onto this team
   const isMerged = memberPages.length > 0;
   const groupIds = [creator.id, ...memberPages.map(m => m.id)];
@@ -364,7 +366,7 @@ function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickC
           </div>
         </div>
         <CreatorMenu creator={creator} mergedCreators={mergedCreators}
-          onRename={onRename} onSplit={onSplit} onDeactivate={onDeactivate} onManageShifts={onManageShifts}/>
+          onRename={onRename} onSplit={onSplit} onDeactivate={onDeactivate} onManageShifts={onManageShifts} onEditAI={onEditAI}/>
       </div>
       <div style={{ padding:'12px 14px', flex:1 }}>
         {shifts.map(shift => (
@@ -475,6 +477,30 @@ function RenameModal({ creator, onSave, onClose }) {
           <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:14 }}>
             <button className="btn sm ghost" onClick={onClose}>Cancel</button>
             <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => name.trim() && onSave(creator.id, name.trim())}>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AI Instructions Modal ──────────────────────── */
+function AIInstructionsModal({ creator, onSave, onClose }) {
+  const [text, setText] = useState(creator.ai_instructions || '');
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
+      <div style={{ width:520, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
+        <PanelHeader title={`AI Instructions — ${creator.name}`} sub="Extra rules the AI applies to this page's conversations"/>
+        <div style={{ padding:16 }}>
+          <div style={{ fontSize:12, color:'var(--fg-3)', marginBottom:10, lineHeight:1.5 }}>
+            Free-text rules just for this page — special persona notes, content scope (e.g. solo-only vs B/G), custom do's & don'ts, preferred emojis, anything specific. These are added on top of the standard checks whenever this page's dialogues are reviewed. Leave empty for none.
+          </div>
+          <textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={8}
+            placeholder={"e.g. Solo content only — never imply B/G.\nUse 🖤 not ❤️.\nShe's shy on cam — don't promise video calls.\nCustoms start at $150 on this page."}
+            style={{ width:'100%', padding:'10px 12px', fontSize:13, lineHeight:1.5, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none', resize:'vertical', fontFamily:'inherit' }}/>
+          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:14 }}>
+            <button className="btn sm ghost" onClick={onClose}>Cancel</button>
+            <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => onSave(creator.id, text.trim())}>Save</button>
           </div>
         </div>
       </div>
@@ -594,6 +620,7 @@ export default function CreatorsPage() {
   const [activeCreator, setActiveCreator] = useState(null);
   const [mergePrompt, setMergePrompt] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
+  const [aiTarget, setAiTarget] = useState(null);
   const [shiftsCreatorId, setShiftsCreatorId] = useState(null);
   const [coverTarget, setCoverTarget] = useState(null);
   const [selectedDay, setSelectedDay] = useState(getTodayDayNumber());
@@ -656,6 +683,11 @@ export default function CreatorsPage() {
 
   async function handleRename(creatorId, newName) {
     try { await api.put(`/api/creators/${creatorId}`, { name: newName }); toast.success('Renamed'); setRenameTarget(null); load();
+    } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
+  }
+
+  async function handleSaveAI(creatorId, instructions) {
+    try { await api.put(`/api/creators/${creatorId}`, { ai_instructions: instructions }); toast.success('AI instructions saved'); setAiTarget(null); load();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
@@ -773,6 +805,7 @@ export default function CreatorsPage() {
                 onAssign={handleOpenAssign} onAddCover={handleOpenCover} onClickChatter={handleClickChatter}
                 onRemove={handleRemove} onSplit={handleSplit}
                 onRename={c => setRenameTarget(c)} onDeactivate={handleDeactivate}
+                onEditAI={c => setAiTarget(c)}
                 mergedCreators={membersByPrimary[cr.id] || []}
                 onManageShifts={() => setShiftsCreatorId(cr.id)}
                 selectedDay={selectedDay} draggingType={draggingType}/>
@@ -820,6 +853,7 @@ export default function CreatorsPage() {
       )}
 
       {renameTarget && <RenameModal creator={renameTarget} onSave={handleRename} onClose={() => setRenameTarget(null)}/>}
+      {aiTarget && <AIInstructionsModal creator={aiTarget} onSave={handleSaveAI} onClose={() => setAiTarget(null)}/>}
       {shiftsCreatorId && <ShiftsModal
         shifts={shifts.filter(s => s.creator_id === shiftsCreatorId)}
         creatorId={shiftsCreatorId}

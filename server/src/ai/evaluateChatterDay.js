@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -21,19 +21,29 @@ You can only see the message TEXT and each fan's spend — not reply times, mess
 
 FLAG THESE (compliance / ToS — these matter most):
 - ToS content: scat/pee, minors or relatives roleplay, public sex, bestiality, or hardcore the fan did not ask for. → area "tos", usually critical.
-- Age: sexualized references to characters who are minors; any hint the fan may be under 18; OR restricted-word evasion around age (coded spellings / leetspeak / spacing to dodge filters, e.g. "y0ung", "t33n"). If the fan clearly states they are 18+, or is clearly an adult (e.g. a university student), do NOT flag. When age is genuinely unclear or borderline, DO flag it. → area "age".
-- Meetings / real life: ONLY when there is an explicit, concrete move toward meeting in person (a real plan, or the chatter clearly agreeing OR refusing). Do NOT flag online "join me" invitations, playful wordplay, or a clean deflection (e.g. offering a custom instead of a video call). → area "meeting".
-- Free content: the chatter gives away actual unpaid FULL content. Previews/teasers are ALLOWED and recommended — do NOT flag a preview or teaser. → area "free_content".
-- Off-platform / real-world contact: any move to take the chat off OnlyFans, or a promise of real-world contact or items. → area "offplatform".
+- Age: assume every fan is an adult (18+) by DEFAULT. Flag ONLY when there is a concrete signal the fan may be a minor — they state an age under 18, reference being in high school / a young grade, the chatter sexualizes a character who is a minor — OR restricted-word evasion around age (coded spellings / leetspeak, e.g. "y0ung", "t33n"). A university student or any ordinary adult is NOT a flag. Do not flag on a vague vibe; unclear-but-adult stays silent. → area "age".
+- Meetings / real life: ONLY when there is an explicit, concrete move toward meeting in person (a real plan, or the chatter clearly agreeing OR refusing). Do NOT flag online "join me" invitations, playful wordplay, a clean deflection (e.g. offering a custom instead of a video call), OR imaginative roleplay / fantasy ("come have a taste", "our little coffee date", "if we ever met…") — fantasy is not a real plan. → area "meeting".
+- Free content: the chatter gives away actual unpaid FULL content. Previews/teasers are ALLOWED and recommended — do NOT flag a preview or teaser. Content sent AFTER a fan tips is PAID content — do NOT flag it as free (it need not be a formal PPV). → area "free_content".
+- Off-platform / real-world contact: flag ONLY when the CHATTER initiates or agrees to move off OnlyFans, or promises real-world contact/items. If the FAN raises it and the chatter deflects, ignores it, or keeps things on-platform, that is correct — do NOT flag. "My other account" usually means the creator's SECOND OnlyFans page — that is NOT off-platform. → area "offplatform".
 - Big discount only: a discount counts ONLY if the price is cut by MORE THAN 50% of the original/listed price (e.g. $200 → under $100). Normal discounts are at the chatter's discretion — do NOT flag them. → area "discount".
 
-MONEY LEFT ON THE TABLE (high priority — this is lost revenue; managers care most about these):
-- A clear buying signal ignored or left hanging, a missed sale, or no follow-up / no re-engagement after a soft "no" — ESPECIALLY with a NEW SUB, a WHALE, or a SPENDER. Name the fan and quote the signal. → area "sales", severity HIGH when the fan is a new sub / whale / spender, medium otherwise (low only for a clearly $0 low-value fan).
+MONEY LEFT ON THE TABLE (lost revenue — but read the calibration carefully; do NOT over-flag):
+- A clear buying signal IGNORED: the fan explicitly asked for content, or said "yes" / "send it" / "👍", and the chatter did not deliver or pivoted away. Name the fan and quote the signal. → area "sales", severity HIGH for a new sub / whale / spender.
+- Only flag a "missed sale" when there is a CONCRETE ignored signal like the above — NOT merely because a warm conversation happened to have no PPV in it.
+- WHALES ARE DIFFERENT: with an established whale, pure GFE (girlfriend-experience) talk with no pitch is a VALID, deliberate strategy — do NOT flag a whale chat as a missed sale just because no PPV was sent. Only flag a whale on an explicit, ignored buying signal.
+- A FOLLOW-UP AFTER A SENT PPV IS CORRECT: if the chatter sent a PPV and then followed up ("still there?", "where'd you go?"), that IS the right move — do not flag it as "no re-engagement." If the fan went quiet after opening/viewing the PPV, that is NOT the chatter's fault.
+- BUDGET / CAN'T SPEND: if the fan says they can't spend right now / card is maxed / broke, backing off and keeping the relationship warm (no pressure) is the CORRECT long-term play — do NOT flag it as a missed sale.
 - Weak, non-engaging replies to a fan who showed real interest (a flat acknowledgement where a pitch or a real question was called for). → area "sales".
 
 COMMUNICATION (daily catches):
 - Dry reply to a SPENDER: a flat/banned filler ("Nice", "Okay", "Cool", "Oh", "Haha", "Damn", "I see", "True", "Sure", "Alright", "Yep", "Nope", "Maybe", "Makes sense", "Got it", "Fair enough", "Same", "Kinda", "Sort of", or "Lol"/"K" on its own) used as the LAST or ONLY message before the fan replies or the conversation stalls. Quick multi-message bursts are fine — only flag a dead-end dry reply. → area "communication", severity medium.
 - Laughing emojis: the chatter used a laughing emoji (😂 🤣 😆 😹 😅). Not allowed on our pages. → area "quality", severity low.
+- Swearing out of context: the chatter uses harsh swearwords OUTSIDE of sexting / intimate talk (e.g. in normal chit-chat). Swearing during dirty talk is fine — flag it only when it is NOT part of an intimate exchange. → area "swearing", severity low.
+
+PAGE-MANAGEMENT CATCHES (the manager wants eyes on these):
+- Gift / package incoming: a fan says they are sending the creator a gift, a package, or something in the mail/on the way. Surface it so the manager can handle it. → area "gift", severity medium.
+- Undelivered custom: a fan refers to a CUSTOM they already paid for / ordered that has NOT been delivered yet (chasing it, "where's my video", "still waiting"). The manager must troubleshoot this. → area "custom", severity high.
+- Content too explicit: the chatter sends a screenshot / photo / description that is over-the-top graphic even by sexting standards (gratuitously extreme). Surface it for a look. → area "excessive", severity medium.
 
 DO NOT FLAG (allowed here, or the AI cannot judge it — stay silent):
 - Persona / identity: using the creator's display name, referring to the creator by name, cosplay characters, or "revealing" the creator — all allowed.
@@ -50,7 +60,7 @@ Severity is a sort hint, not a verdict:
 - high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); big (>50%) discount; strong compliance concern.
 - medium / low = everything else; bare tips are always low.`;
 
-const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]`;
+const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality | swearing | gift | custom | excessive","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]`;
 
 // VERSION A — content/compliance only (recommended; engine owns discipline).
 const PROMPT_A = `${SPOTLIGHT_BODY}
@@ -86,14 +96,15 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   const loaded = await loadChatterMessages(orgId, chatterId, reportDate, creatorId);
   if (!loaded.ok) return loaded;
 
-  const { enrichIssue, spendByUser, creatorNames } = await buildEnrichment(orgId, loaded.msgs);
+  const { enrichIssue, spendByUser, creatorNames, creatorInstructions } = await buildEnrichment(orgId, loaded.msgs);
   // Show each fan's recorded spend AND which page (creator) they're on, so the AI
   // can weigh a missed sale (new sub vs whale vs $0 fan) and never mistake a
   // cross-page content difference for a single-page inconsistency.
   const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 40, threadCap: 25, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
   const systemPrompt = PROMPTS[promptVersion] || PROMPT_A;
-  const userContent = `Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
+  const userContent = `${pageInstr}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {

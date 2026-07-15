@@ -46,6 +46,11 @@ function defaultPriority(sev, source, area) {
   if (sev === 'critical') return 1;
   if (a === 'chargeback') return 1;                            // money left the business — always look it up
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
+  if (a === 'custom') return sev === 'high' ? 2 : 3;          // paid custom undelivered — money owed / chargeback risk
+  if (a === 'abandon') return sev === 'high' ? 2 : 3;         // chatter left a warm conversation early
+  if (a === 'gift') return 3;                                 // gift / package incoming — handle it
+  if (a === 'excessive') return 4;                            // over-the-top content — worth a look
+  if (a === 'swearing') return sev === 'medium' ? 5 : 6;      // swearing out of context
   if (sev === 'high') {
     if (source === 'flag' || a === 'work_ethic') return 2;
     if (a === 'discount') return 3;                            // only reaches here if >50% off
@@ -282,17 +287,40 @@ async function buildSpenderDevelopmentTasks(orgId, reportDate, opts = {}) {
   });
   if (!stalling.length) return { created: 0, updated: 0, pages: 0 };
 
-  // best-effort page = the creator of their most recent sale
+  // Resolve each stalling spender to a page. Primary: the creator of their most
+  // recent NON-BLANK sale. We PAGINATE so the 1000-row cap can never silently drop
+  // a fan's sale rows (which used to mis-bucket them into "Unassigned page"), and
+  // we skip rows whose creator_name is blank.
   const users = stalling.map(s => s.username);
-  const pageOf = {};
-  for (let i = 0; i < users.length; i += 300) {
-    const { data: sales } = await supabaseAdmin.from('subscriber_sales')
-      .select('username, creator_name, sale_date').in('username', users.slice(i, i + 300))
-      .order('sale_date', { ascending: false });
-    (sales || []).forEach(r => { if (!pageOf[r.username]) pageOf[r.username] = r.creator_name; });
-  }
   const { data: creators } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
-  const creatorIdByName = {}; (creators || []).forEach(c => { creatorIdByName[_norm(c.name)] = c.id; });
+  const creatorIdByName = {}; const creatorNameById = {};
+  (creators || []).forEach(c => { creatorIdByName[_norm(c.name)] = c.id; creatorNameById[c.id] = c.name; });
+
+  const pageOf = {};
+  for (let i = 0; i < users.length; i += 200) {
+    const batch = users.slice(i, i + 200);
+    for (let from = 0; ; from += 1000) {
+      const { data: sales } = await supabaseAdmin.from('subscriber_sales')
+        .select('username, creator_name, sale_date').in('username', batch)
+        .order('sale_date', { ascending: false }).range(from, from + 999);
+      if (!sales || !sales.length) break;
+      for (const r of sales) if (!pageOf[r.username] && r.creator_name) pageOf[r.username] = r.creator_name;
+      if (sales.length < 1000) break;
+    }
+  }
+  // Fallback for anyone still unresolved: the page of their most recent MESSAGE.
+  const stillMissing = users.filter(u => !pageOf[u]);
+  for (let i = 0; i < stillMissing.length; i += 200) {
+    const { data: mm } = await supabaseAdmin.from('messages')
+      .select('sent_to_username, creator_id, sent_datetime').eq('organisation_id', orgId)
+      .in('sent_to_username', stillMissing.slice(i, i + 200))
+      .order('sent_datetime', { ascending: false }).limit(2000);
+    for (const r of (mm || [])) {
+      if (!pageOf[r.sent_to_username] && r.creator_id && creatorNameById[r.creator_id]) {
+        pageOf[r.sent_to_username] = creatorNameById[r.creator_id];
+      }
+    }
+  }
 
   const byPage = {};
   for (const s of stalling) { const pg = pageOf[s.username] || 'Unassigned page'; (byPage[pg] ||= []).push(s); }

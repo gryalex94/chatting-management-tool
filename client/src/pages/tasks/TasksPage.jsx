@@ -151,7 +151,7 @@ function AfkIncidents({ incidents, taskId }) {
                   <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>waiting:</span>
                   {g.waiting_fans.map((f, j) => (
                     <span key={j} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                      <button onClick={() => copy(f.username || f.fan)} title="click to copy" style={userBtn}>{f.fan}</button>
+                      <button onClick={() => copy(f.username || f.fan)} title={f.fan && f.username ? `${f.fan} — click to copy` : 'click to copy'} style={userBtn}>{f.username || f.fan}</button>
                       <span style={{ fontSize: 10, color: '#f87171', fontWeight: 700 }}>{f.waited_min}m</span>
                     </span>
                   ))}
@@ -186,9 +186,9 @@ function Row({ task, onAction }) {
         {!isCustom && <span style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.3 }}>{task.area}</span>}
         {(task.creator_name || task.chatter_name) && <span style={{ fontSize: 11, color: 'var(--fg-2)', fontWeight: 600 }}>{task.creator_name || ''}{task.creator_name && task.chatter_name ? ' · ' : ''}{task.chatter_name || ''}</span>}
         {isCustom && ctx.assigned_to_name && <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>for <b style={{ color: 'var(--fg-1)' }}>{ctx.assigned_to_name}</b></span>}
-        {fans.map(f => (
-          <span key={f.username} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={() => copy(f.username)} title={f.nickname ? `${f.nickname} — click to copy` : 'click to copy'} style={userBtn}>{f.username}</button>
+        {fans.map((f, fi) => (
+          <span key={f.username || f.nickname || fi} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <button onClick={() => copy(f.username || f.nickname)} title={f.nickname && f.username ? `${f.nickname} — click to copy` : 'click to copy'} style={userBtn}>{f.username || f.nickname}</button>
             {f.spend != null && <span title="Recorded spend" style={{ fontSize: 10.5, color: f.spend >= 1000 ? '#a78bfa' : f.spend > 0 ? '#4ade80' : 'var(--fg-3)', fontWeight: 700 }}>${f.spend}</span>}
             {f.sent_at && <span title="When this fan's message was sent" style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {fmtSentAt(f.sent_at)}</span>}
           </span>

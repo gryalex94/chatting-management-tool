@@ -53,13 +53,18 @@ router.post('/', requireMinRole('admin'), async (req, res) => {
   }
 });
 
-// PUT /api/creators/:id - Update creator
+// PUT /api/creators/:id - Update creator (only the fields actually provided, so
+// saving just the AI instructions never blanks the name).
 router.put('/:id', requireMinRole('admin'), async (req, res) => {
   try {
-    const { name, is_active } = req.body;
+    const { name, is_active, ai_instructions } = req.body;
+    const update = {};
+    if (name !== undefined) update.name = name;
+    if (is_active !== undefined) update.is_active = is_active;
+    if (ai_instructions !== undefined) update.ai_instructions = ai_instructions;
     const { data, error } = await supabaseAdmin
       .from('creators')
-      .update({ name, is_active })
+      .update(update)
       .eq('id', req.params.id)
       .eq('organisation_id', req.user.organisationId)
       .select()

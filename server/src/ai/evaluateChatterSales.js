@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions } = require('./evalShared');
 
 // ── Strategy review (communication + sales craft) → TASKS ───────────────────
 // Not a grader. This layer reads FULL conversations against Rice Media's strategy
@@ -40,17 +40,27 @@ SALES roadmap:
 - Don't hard-push spenders (they should initiate). Push higher prices if a sub buys fast without negotiating.
 - Aftercare after every sale — EXCEPT during active sexting/horny sessions where momentum is high; a quick follow-up PPV then is correct, don't force aftercare.
 - SEXTING SESSION UPSELL: once a fan has bought one PPV and the horny conversation continues, further PPVs can be sent without re-confirmation as long as there are engagement messages between them. Don't flag follow-up PPVs during active sessions as "pushed too fast."
-- After a FAILED sale, the chatter must follow up to understand why and re-engage — not a generic "What's the matter dear?" but a genuine attempt. No follow-up on a failed sale is a real miss.
+- After a FAILED sale, the chatter must follow up to understand why and re-engage — not a generic "What's the matter dear?" but a genuine attempt. ONE genuine follow-up is enough; no follow-up at all on a failed sale is a real miss.
+
+IMPORTANT CALIBRATION — these are NOT misses; do NOT flag them:
+- WHALES: pure GFE conversation with no pitch is a valid, deliberate strategy. Do NOT flag a whale chat as a missed sale just because there was no PPV. Only flag a whale on an explicit, ignored buying signal (a direct content request or a clear "yes").
+- One follow-up after a sent PPV is enough. If the fan opened/viewed the PPV and then went quiet, that is NOT the chatter's fault — do not flag "no re-engagement."
+- If the fan says they can't spend / card maxed / broke, backing off and staying warm is the CORRECT play — not a miss.
+- A conversation that ends on the chatter's own open-ended question is fine — do NOT flag it as "let the conversation die."
+- Content sent after a fan tips is PAID content; a tip-then-content exchange is not "free."
+
+ABANDONING A CONVERSATION EARLY:
+- If the chatter exits a live, engaged conversation with an excuse ("I'm going to sleep", "gotta go", "I have to do X") after fewer than ~5-7 exchanged messages, flag it — they cut a warm conversation short instead of developing it. → area "abandon", severity high.
 
 Turn each deviation into an issue:
-- area: "sales" for roadmap/selling misses (skipped steps, missed sale, ignored a buying signal / an explicit "yes", no follow-up after a failed sale, weak price development, pushed too hard or too soft, free sexting to a non-spender); "communication" for dry / weak / non-engaging talk.
-- severity: HIGH when the fan is a NEW SUB, WHALE, or SPENDER and money was clearly left on the table (a missed sale, an ignored "yes", no follow-up). MEDIUM for a roadmap slip on an ordinary fan. LOW for minor polish. critical only for a genuine ToS risk.
+- area: "sales" for roadmap/selling misses (skipped steps, missed sale, ignored a buying signal / an explicit "yes", no follow-up after a failed sale, weak price development, pushed too hard or too soft, free sexting to a non-spender); "communication" for dry / weak / non-engaging talk; "abandon" for leaving a warm conversation early.
+- severity: HIGH when the fan is a NEW SUB, WHALE, or SPENDER and money was clearly left on the table (a missed sale, an ignored "yes", no follow-up), and for abandoning a warm conversation early. MEDIUM for a roadmap slip on an ordinary fan. LOW for minor polish. critical only for a genuine ToS risk.
 - detail: what happened + a brief exact quote (+ English translation if not English) + what the strategy expected instead. Name EVERY fan involved.
 
 Return JSON with this exact shape:
 {
   "overall": "one short paragraph: the main strategy gaps to coach today",
-  "issues": [{"area":"sales | communication","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]
+  "issues": [{"area":"sales | communication | abandon","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]
 }
 If the chatter followed the strategy well, return an empty issues list. Do not invent issues to fill the list.`;
 
@@ -63,11 +73,12 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
 
   // Enrichment first — its spend map + page names annotate the conversation
   // headers so the model applies the right roadmap and never confuses pages.
-  const { enrichIssue, spendByUser, creatorNames } = await buildEnrichment(orgId, loaded.msgs);
+  const { enrichIssue, spendByUser, creatorNames, creatorInstructions } = await buildEnrichment(orgId, loaded.msgs);
   // Fuller conversations than the spotlight: the sales rules are sequence-dependent.
   const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 25, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
-  const userContent = `Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
+  const userContent = `${pageInstr}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {
