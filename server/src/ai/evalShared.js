@@ -112,7 +112,10 @@ async function buildEnrichment(orgId, msgs) {
   const creatorNames = {};
   const creatorInstructions = {};
   try {
-    const { data: crs } = await supabaseAdmin.from('creators').select('id, name, ai_instructions').eq('organisation_id', orgId);
+    // ai_instructions is optional (migration 016). Try it, but fall back to plain
+    // id/name if the column isn't there yet, so page names never go missing.
+    let { data: crs, error } = await supabaseAdmin.from('creators').select('id, name, ai_instructions').eq('organisation_id', orgId);
+    if (error) ({ data: crs } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId));
     (crs || []).forEach(c => { creatorNames[c.id] = c.name; if (c.ai_instructions) creatorInstructions[c.id] = c.ai_instructions; });
   } catch { /* names optional */ }
 
