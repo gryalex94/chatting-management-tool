@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { Avatar, Chip, StatusDot } from '../../components/shared';
 import { STATUS_META } from '../../utils/helpers';
-import { TIER, fmtSentAt } from '../../utils/taskMeta';
+import { TIER, fmtSentAt, areaLabel } from '../../utils/taskMeta';
 import {
   ArrowLeft, Plus, Clock, ChevronDown, MessageSquare,
   Calendar, DollarSign, Brain, BarChart3, Flag
@@ -136,7 +136,7 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
                       <div style={{ fontSize:11.5, color:'var(--fg-1)', lineHeight:1.45 }}>{iss.detail || iss.title || iss.issue || 'Issue'}</div>
                       {(who || iss.sent_at || iss.area) && (
                         <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:4, fontSize:10.5, color:'var(--fg-3)' }}>
-                          {iss.area && <span style={{ textTransform:'capitalize' }}>{iss.area}</span>}
+                          {iss.area && <span>{areaLabel(iss.area)}</span>}
                           {who && <span style={{ color:'var(--indigo-bright)', fontWeight:600 }}>@{who}</span>}
                           {iss.spend != null && <span>${iss.spend} spent</span>}
                           {iss.sent_at && <span>🕐 {fmtSentAt(iss.sent_at)}</span>}
@@ -662,7 +662,7 @@ function CoachingLog({ chatterId, canCreate, onAddCustom }) {
                     {t.creator_name && <b style={{ color: 'var(--fg-3)' }}>{t.creator_name}</b>}
                     {t.fan_username && <span style={{ color: 'var(--fg-3)' }}>{t.fan_username}</span>}
                     {sentAt && <span style={{ color: 'var(--indigo-bright)', fontWeight: 600 }}>🕐 {fmtSentAt(sentAt)}</span>}
-                    <span>{(t.area || '').replace(/_/g, ' ')}</span>
+                    <span>{areaLabel(t.area)}</span>
                     {t.coached_at && <span>✓ coached {new Date(t.coached_at).toLocaleDateString()}</span>}
                   </div>
                   {t.context?.message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 4 }}>“{t.context.message}”</div>}
@@ -723,7 +723,7 @@ function ReportsTimeline({ chatterId, type, title, emptyText }) {
                       <span style={{ width: 6, height: 6, borderRadius: '50%', background: sevColor(iss.severity), marginTop: 5, flexShrink: 0 }} />
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 11.5, color: 'var(--fg-1)', lineHeight: 1.4 }}>{iss.detail || iss.title}</div>
-                        <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 2 }}>{(iss.area || '').replace(/_/g, ' ')}{iss.fan_username ? ` · @${iss.fan_username}` : ''}</div>
+                        <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 2 }}>{areaLabel(iss.area)}{iss.fan_username ? ` · @${iss.fan_username}` : ''}</div>
                       </div>
                     </div>
                   ))}

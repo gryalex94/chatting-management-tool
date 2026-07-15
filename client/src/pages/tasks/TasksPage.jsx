@@ -4,7 +4,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { Chip } from '../../components/shared';
 import DismissModal from '../../components/shared/DismissModal';
-import { TIER, reasonLabel, fmtSentAt } from '../../utils/taskMeta';
+import { TIER, reasonLabel, fmtSentAt, areaMeta } from '../../utils/taskMeta';
 import toast from 'react-hot-toast';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -183,7 +183,9 @@ function Row({ task, onAction }) {
           ? <span style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', background: '#f59e0b', borderRadius: 5, padding: '2px 7px' }}>{important ? '★ ' : ''}CUSTOM</span>
           : <span style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', background: t.c, borderRadius: 5, padding: '2px 6px' }}>{t.label}</span>}
         {!isCustom && <Chip tone={task.severity === 'critical' || task.severity === 'high' ? 'bad' : task.severity === 'medium' ? 'warn' : 'info'} style={{ fontSize: 9.5 }}>{task.severity}</Chip>}
-        {!isCustom && <span style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.3 }}>{task.area}</span>}
+        {!isCustom && task.area && (() => { const am = areaMeta(task.area); return (
+          <span style={{ fontSize: 10, fontWeight: 700, color: am.c, background: `${am.c}1f`, borderRadius: 5, padding: '2px 6px', letterSpacing: 0.2 }}>{am.label}</span>
+        ); })()}
         {(task.creator_name || task.chatter_name) && <span style={{ fontSize: 11, color: 'var(--fg-2)', fontWeight: 600 }}>{task.creator_name || ''}{task.creator_name && task.chatter_name ? ' · ' : ''}{task.chatter_name || ''}</span>}
         {isCustom && ctx.assigned_to_name && <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>for <b style={{ color: 'var(--fg-1)' }}>{ctx.assigned_to_name}</b></span>}
         {fans.map((f, fi) => (

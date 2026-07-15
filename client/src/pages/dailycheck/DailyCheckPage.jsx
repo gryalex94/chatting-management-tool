@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../services/api';
 import Chip from '../../components/shared/Chip';
 import Avatar from '../../components/shared/Avatar';
-import { fmtSentAt } from '../../utils/taskMeta';
+import { fmtSentAt, areaMeta } from '../../utils/taskMeta';
 
 const yesterday = () => {
   const d = new Date();
@@ -708,7 +708,9 @@ function IssueRow({ issue }) {
         {issue.creator && <span style={{ fontWeight: 800, color: 'var(--fg-0)', fontSize: 12.5 }}>{issue.creator}</span>}
         {u && <UserBtn username={u} spend={issue.spend} title="Copy username to search and open this dialogue" />}
         <Chip tone={SEV_TONE[issue.severity] || 'neutral'} style={{ fontSize: 9.5 }}>{issue.severity || '-'}</Chip>
-        {issue.area && <span style={{ fontSize: 10.5, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.3 }}>{issue.area}</span>}
+        {issue.area && (() => { const am = areaMeta(issue.area); return (
+          <span style={{ fontSize: 10, fontWeight: 700, color: am.c, background: `${am.c}1f`, borderRadius: 5, padding: '2px 6px', letterSpacing: 0.2 }}>{am.label}</span>
+        ); })()}
       </div>
       {/* line 2: the AI's note */}
       <div style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.5, marginTop: 5 }}>{issue.detail}</div>
