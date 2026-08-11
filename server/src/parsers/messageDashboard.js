@@ -11,10 +11,16 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, repo
 
   if (!rows.length) throw new Error('Spreadsheet is empty');
 
-  // Validate file type
-  const headers = Object.keys(rows[0]).map(h => h.toLowerCase());
-  if (!headers.some(h => h.includes('sender')) || !headers.some(h => h.includes('replay time'))) {
-    throw new Error('Wrong file type — this endpoint expects a Message Dashboard report (should have Sender, Replay time columns)');
+  // Validate file type. Infloww exports have shipped the reply-time column under
+  // BOTH spellings — the original typo "Replay time" and the corrected "Reply
+  // time" — so accept either, and resolve the real header name once for reuse.
+  const headerNames = Object.keys(rows[0]);
+  const headers = headerNames.map(h => h.toLowerCase());
+  const replyCol = headerNames.find(h => /^\s*repl(a?)y time\s*$/i.test(h))
+    || headerNames.find(h => /repl(a?)y\s*time/i.test(h))
+    || null;
+  if (!headers.some(h => h.includes('sender')) || !replyCol) {
+    throw new Error('Wrong file type — this endpoint expects a Message Dashboard report (should have Sender, Reply time columns)');
   }
 
   console.log(`Parsing ${rows.length} rows from Message Dashboard...`);
@@ -87,8 +93,8 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, repo
         sent_time: sentTime,
         sent_date: sentDate,
         sent_datetime: sentDatetime,
-        replay_time_raw: row['Replay time'] || null,
-        replay_time_seconds: parseReplayTime(row['Replay time']),
+        replay_time_raw: row[replyCol] || null,
+        replay_time_seconds: parseReplayTime(row[replyCol]),
         price: parseDollar(row['Price']),
         purchased: String(row['Purchased']).toLowerCase() === 'yes',
         source: row['Source'] || null,
