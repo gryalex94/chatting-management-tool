@@ -74,6 +74,49 @@ const defaultCluster = (chatter, creator) =>
   chatter ? `chatter:${chatter}` : creator ? `page:${creator}` : 'general';
 
 /**
+ * When the SAME fan raises the SAME kind of issue against 3+ different chatters
+ * in one day, that is the fan's pattern, not three separate chatter mistakes —
+ * the manager's own words: "when all chatters are following this strategy, only
+ * highlight cases where there's a clear communication mistake by the chatter."
+ * Collapse the group into ONE fan-level task so the queue shows the pattern once.
+ * Protected ToS classes are never collapsed: each of those needs its own look.
+ */
+const COLLAPSE_MIN_CHATTERS = 3;
+function collapseCrossChatter(candidates) {
+  const groups = new Map();
+  for (const c of candidates) {
+    if (!c.fan_username || !c.chatter_id) continue;
+    if (PROTECTED_AREAS.has((c.area || '').toLowerCase())) continue;
+    const k = `${c.fan_username}::${(c.area || '').toLowerCase()}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
+  }
+  const collapsed = [];
+  const drop = new Set();
+  for (const [k, list] of groups) {
+    const chatters = new Set(list.map(c => c.chatter_id));
+    if (chatters.size < COLLAPSE_MIN_CHATTERS) continue;
+    list.forEach(c => drop.add(c));
+    const [fan, area] = k.split('::');
+    const names = [...new Set(list.map(c => c.chatter_name).filter(Boolean))];
+    const worst = list.slice().sort((a, b) => (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3))[0];
+    collapsed.push({
+      ...worst,
+      fingerprint: `fanpattern:fan=${fan}:${area}`,
+      chatter_id: null,
+      chatter_name: null,
+      severity: 'medium',
+      title: shortTitle(`${fan} — same ${area} pattern across ${chatters.size} chatters (${names.join(', ')})`),
+      detail: `The same ${area} issue was raised for ${fan} against ${chatters.size} different chatters today (${names.join(', ')}). When every chatter handles a fan the same way, this is the fan's own pattern rather than a chatter mistake — review the fan, not each chatter. Individual examples:\n\n` +
+        list.map(c => `• ${c.chatter_name || '-'}: ${c.detail}`).join('\n\n'),
+      context: { ...(worst.context || {}), collapsed_from: list.length, chatters: names },
+      cluster_key: `fan:${fan}`,
+    });
+  }
+  return candidates.filter(c => !drop.has(c)).concat(collapsed);
+}
+
+/**
  * Build/refresh the task queue for a day from the stored AI reports + engine flags.
  * Idempotent and cross-day aware:
  *  - same issue recurring  -> carry the existing task forward (days_open++, carried_over)
@@ -163,11 +206,11 @@ async function buildTasksForDate(orgId, reportDate) {
 
   // drop anything tied to an ignored account/chatter (e.g. "Paul B"), then gate
   // dialogue tasks by the chatter's tenure (experienced → serious items only).
-  const kept = candidates.filter(c => {
+  const kept = collapseCrossChatter(candidates.filter(c => {
     if (ignoreSet.has(_norm(c.chatter_name)) || ignoreSet.has(_norm(c.fan_username))) return false;
     const tier = c.chatter_id ? (tenureById[c.chatter_id] || 'experienced') : 'new';
     return keepByTenure(c, tier);
-  });
+  }));
 
   // de-dupe candidates by fingerprint (keep the most severe)
   const SEV = { critical: 0, high: 1, medium: 2, low: 3 };

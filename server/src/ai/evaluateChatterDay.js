@@ -100,11 +100,14 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   // Show each fan's recorded spend AND which page (creator) they're on, so the AI
   // can weigh a missed sale (new sub vs whale vs $0 fan) and never mistake a
   // cross-page content difference for a single-page inconsistency.
-  const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 40, threadCap: 25, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
+  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 40, threadCap: 30, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
   const systemPrompt = PROMPTS[promptVersion] || PROMPT_A;
   const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
-  const userContent = `${pageInstr}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const coverage = droppedThreads
+    ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
+    : '';
+  const userContent = `${pageInstr}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {
@@ -119,6 +122,8 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
       // No score — just the spotlight list. (overall kept as a header.)
       evaluation: { overall: result.overall || '', issues },
       threads_evaluated: threadCount,
+      threads_total: totalThreads,
+      threads_skipped: droppedThreads,
     };
   } catch (e) {
     return { ok: false, reason: e.message };

@@ -75,10 +75,15 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
   // headers so the model applies the right roadmap and never confuses pages.
   const { enrichIssue, spendByUser, creatorNames, creatorInstructions } = await buildEnrichment(orgId, loaded.msgs);
   // Fuller conversations than the spotlight: the sales rules are sequence-dependent.
-  const { threadList, threadCount } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 25, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
+  // Cap raised 25 -> 40: at 25 roughly a third of a busy chatter's conversations
+  // were never reviewed at all, and this is the review that judges missed sales.
+  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
   const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
-  const userContent = `${pageInstr}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const coverage = droppedThreads
+    ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
+    : '';
+  const userContent = `${pageInstr}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {
@@ -95,6 +100,8 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
         issues,
       },
       threads_evaluated: threadCount,
+      threads_total: totalThreads,
+      threads_skipped: droppedThreads,
     };
   } catch (e) {
     return { ok: false, reason: e.message };

@@ -57,15 +57,36 @@ function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false
   for (const m of msgs) {
     const username = m.sent_to_username || null;
     const key = username || m.sent_to_nickname || 'unknown';
-    (threads[key] ||= { fan: m.sent_to_nickname || username || 'unknown', username, creator_id: m.creator_id || null, lines: [] });
-    if (!threads[key].creator_id && m.creator_id) threads[key].creator_id = m.creator_id;
-    if (m.fan_message_text) threads[key].lines.push(`FAN: ${stripTags(m.fan_message_text)}`);
+    (threads[key] ||= { fan: m.sent_to_nickname || username || 'unknown', username, creator_id: m.creator_id || null, lines: [], ppvSent: 0, ppvSold: 0, ppvUnsold: 0, ppvRevenue: 0 });
+    const t = threads[key];
+    if (!t.creator_id && m.creator_id) t.creator_id = m.creator_id;
+    if (m.fan_message_text) t.lines.push(`FAN: ${stripTags(m.fan_message_text)}`);
     if (m.creator_message_text) {
-      const tag = (parseFloat(m.price) || 0) > 0 ? ` [PPV $${m.price}${m.purchased ? ' SOLD' : ' not bought'}]` : '';
-      threads[key].lines.push(`CHATTER: ${stripTags(m.creator_message_text)}${tag}`);
+      const price = parseFloat(m.price) || 0;
+      let tag = '';
+      if (price > 0) {
+        t.ppvSent++;
+        if (m.purchased) { t.ppvSold++; t.ppvRevenue += price; } else t.ppvUnsold++;
+        tag = ` [PPV $${m.price}${m.purchased ? ' SOLD' : ' not bought'}]`;
+      }
+      t.lines.push(`CHATTER: ${stripTags(m.creator_message_text)}${tag}`);
     }
   }
-  const list = Object.values(threads).filter(t => t.lines.length >= 2).slice(0, threadCap);
+
+  // Rank by VALUE AT RISK before capping. The cap used to keep whichever 25
+  // conversations happened to come first, so ~29% of a busy chatter's day —
+  // including sold PPVs — was silently never reviewed. Now the threads the
+  // manager would care about most survive the cut: biggest spenders first,
+  // with a lift for money actively left on the table (an unbought PPV) and for
+  // active selling. Ties break toward the richer conversation.
+  const all = Object.values(threads).filter(t => t.lines.length >= 2);
+  const score = (t) => (spendByUser[t.username] || 0)
+    + (t.ppvUnsold ? 500 : 0)
+    + (t.ppvSent ? 200 : 0)
+    + Math.min(t.lines.length, 100);
+  all.sort((a, b) => score(b) - score(a));
+  const list = all.slice(0, threadCap);
+
   const blocks = list.map(t => {
     let header = `--- Conversation with ${t.fan}`;
     if (withSpend && t.username) {
@@ -78,10 +99,21 @@ function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false
       const pg = t.creator_id ? (pageNameByCreator[t.creator_id] || `page ${String(t.creator_id).slice(0, 6)}`) : 'unknown page';
       header += ` (page: ${pg})`;
     }
+    // State this shift's actual sales outcome for the fan. The model repeatedly
+    // claimed "no PPV was sent" when one had been — this puts the countable fact
+    // in front of it so the claim is contradicted by data it cannot miss.
+    header += t.ppvSent
+      ? ` (this shift: ${t.ppvSent} PPV${t.ppvSent === 1 ? '' : 's'} sent, ${t.ppvSold} sold${t.ppvSold ? ` for $${Math.round(t.ppvRevenue)}` : ''})`
+      : ' (this shift: no PPV sent)';
     header += ' ---';
     return `${header}\n${t.lines.slice(0, lineCap).join('\n')}`;
   });
-  return { threadList: blocks.join('\n\n'), threadCount: list.length };
+  return {
+    threadList: blocks.join('\n\n'),
+    threadCount: list.length,
+    totalThreads: all.length,
+    droppedThreads: all.length - list.length,
+  };
 }
 
 /**
