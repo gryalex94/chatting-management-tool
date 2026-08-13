@@ -96,14 +96,14 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   const loaded = await loadChatterMessages(orgId, chatterId, reportDate, creatorId);
   if (!loaded.ok) return loaded;
 
-  const { enrichIssue, spendByUser, creatorNames, creatorInstructions } = await buildEnrichment(orgId, loaded.msgs);
+  const { enrichIssue, spendByUser, creatorNames, creatorInstructions, creatorContext } = await buildEnrichment(orgId, loaded.msgs);
   // Show each fan's recorded spend AND which page (creator) they're on, so the AI
   // can weigh a missed sale (new sub vs whale vs $0 fan) and never mistake a
   // cross-page content difference for a single-page inconsistency.
   const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 40, threadCap: 30, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
   const systemPrompt = PROMPTS[promptVersion] || PROMPT_A;
-  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';

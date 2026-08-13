@@ -57,11 +57,12 @@ router.post('/', requireMinRole('admin'), async (req, res) => {
 // saving just the AI instructions never blanks the name).
 router.put('/:id', requireMinRole('admin'), async (req, res) => {
   try {
-    const { name, is_active, ai_instructions } = req.body;
+    const { name, is_active, ai_instructions, ai_context } = req.body;
     const update = {};
     if (name !== undefined) update.name = name;
     if (is_active !== undefined) update.is_active = is_active;
     if (ai_instructions !== undefined) update.ai_instructions = ai_instructions;
+    if (ai_context !== undefined) update.ai_context = ai_context;
     const { data, error } = await supabaseAdmin
       .from('creators')
       .update(update)

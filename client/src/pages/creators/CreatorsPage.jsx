@@ -312,7 +312,7 @@ function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate,
           <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
             onClick={e => { e.stopPropagation(); setOpen(false); onManageShifts(); }}><Clock size={13}/> Manage Shifts</button>
           <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-            onClick={e => { e.stopPropagation(); setOpen(false); onEditAI(creator); }}><Sparkles size={13}/> AI Instructions{creator.ai_instructions ? ' ✓' : ''}</button>
+            onClick={e => { e.stopPropagation(); setOpen(false); onEditAI(creator); }}><Sparkles size={13}/> Page context{(creator.ai_instructions || creator.ai_context) ? ' ✓' : ''}</button>
           {mergedCreators.length > 0 && (<>
             <div style={{ height:1, background:'var(--border)', margin:'4px 0' }}/>
             <div style={{ padding:'6px 12px', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:0.5 }}>Split</div>
@@ -484,24 +484,55 @@ function RenameModal({ creator, onSave, onClose }) {
   );
 }
 
-/* ─── AI Instructions Modal ──────────────────────── */
+/* ─── Page Context Modal ─────────────────────────── */
+// Structured facts about a page, fed to the AI whenever this page's dialogues
+// are reviewed. Each field exists because a MISSING fact caused a real false
+// alarm: content that does exist read as a ToS breach, a legitimate second
+// account read as off-platform, content we can't make read as a missed sale.
+const CONTEXT_FIELDS = [
+  { key:'content_available',   label:'Content that DOES exist here',  hint:'Stops it being flagged as off-scope or a ToS breach', ph:'e.g. anal, B/G videos, cosplay sets' },
+  { key:'content_unavailable', label:"Content we CAN'T provide",      hint:"Not offering it won't count as a missed sale",        ph:'e.g. no voice notes, no video calls, no customs' },
+  { key:'known_platforms',     label:'Other places she legitimately exists', hint:'A fan mentioning these is not an off-platform violation', ph:'e.g. second OnlyFans page, public Telegram group' },
+  { key:'persona',             label:'Persona / voice',               hint:'How this page talks',                                 ph:'e.g. shy student, playful and sarcastic' },
+  { key:'pricing',             label:'Pricing on this page',          hint:'Page-specific prices',                                ph:'e.g. photos $45, videos $80, customs from $150' },
+  { key:'emoji',               label:'Emoji rules',                   hint:'Preferred / banned emojis',                           ph:'e.g. use 🖤 not ❤️' },
+];
+
 function AIInstructionsModal({ creator, onSave, onClose }) {
+  const [ctx, setCtx] = useState(() => ({ ...(creator.ai_context || {}) }));
   const [text, setText] = useState(creator.ai_instructions || '');
+  const set = (k, v) => setCtx(p => ({ ...p, [k]: v }));
+  const is = { width:'100%', padding:'8px 10px', fontSize:13, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none', fontFamily:'inherit' };
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:520, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title={`AI Instructions — ${creator.name}`} sub="Extra rules the AI applies to this page's conversations"/>
-        <div style={{ padding:16 }}>
-          <div style={{ fontSize:12, color:'var(--fg-3)', marginBottom:10, lineHeight:1.5 }}>
-            Free-text rules just for this page — special persona notes, content scope (e.g. solo-only vs B/G), custom do's & don'ts, preferred emojis, anything specific. These are added on top of the standard checks whenever this page's dialogues are reviewed. Leave empty for none.
+      <div style={{ width:560, maxHeight:'86vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
+        <PanelHeader title={`Page context — ${creator.name}`} sub="Facts the AI needs so it stops flagging what's normal here"/>
+        <div style={{ padding:16, overflow:'auto' }}>
+          <div style={{ fontSize:12, color:'var(--fg-3)', marginBottom:14, lineHeight:1.5 }}>
+            Anything you fill in is treated as fact for this page and overrides the AI's general assumptions. Every field is optional — leave the ones that don't apply empty.
           </div>
-          <textarea value={text} onChange={e => setText(e.target.value)} autoFocus rows={8}
-            placeholder={"e.g. Solo content only — never imply B/G.\nUse 🖤 not ❤️.\nShe's shy on cam — don't promise video calls.\nCustoms start at $150 on this page."}
-            style={{ width:'100%', padding:'10px 12px', fontSize:13, lineHeight:1.5, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none', resize:'vertical', fontFamily:'inherit' }}/>
-          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:14 }}>
-            <button className="btn sm ghost" onClick={onClose}>Cancel</button>
-            <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => onSave(creator.id, text.trim())}>Save</button>
-          </div>
+          {CONTEXT_FIELDS.map(f => (
+            <div key={f.key} style={{ marginBottom:12 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:'var(--fg-1)' }}>{f.label}</div>
+              <div style={{ fontSize:10.5, color:'var(--fg-3)', margin:'2px 0 5px' }}>{f.hint}</div>
+              <input value={ctx[f.key] || ''} onChange={e => set(f.key, e.target.value)} placeholder={f.ph} style={is}/>
+            </div>
+          ))}
+          <div style={{ height:1, background:'var(--border)', margin:'6px 0 12px' }}/>
+          <div style={{ fontSize:12, fontWeight:600, color:'var(--fg-1)' }}>Anything else</div>
+          <div style={{ fontSize:10.5, color:'var(--fg-3)', margin:'2px 0 5px' }}>Free-text rules that don't fit above</div>
+          <textarea value={text} onChange={e => setText(e.target.value)} rows={3}
+            placeholder={"e.g. She's shy on cam — don't promise video calls."}
+            style={{ ...is, lineHeight:1.5, resize:'vertical' }}/>
+        </div>
+        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--border)', display:'flex', gap:8, justifyContent:'flex-end' }}>
+          <button className="btn sm ghost" onClick={onClose}>Cancel</button>
+          <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }}
+            onClick={() => {
+              const clean = {};
+              CONTEXT_FIELDS.forEach(f => { const v = (ctx[f.key] || '').trim(); if (v) clean[f.key] = v; });
+              onSave(creator.id, text.trim(), Object.keys(clean).length ? clean : null);
+            }}>Save</button>
         </div>
       </div>
     </div>
@@ -686,8 +717,8 @@ export default function CreatorsPage() {
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
-  async function handleSaveAI(creatorId, instructions) {
-    try { await api.put(`/api/creators/${creatorId}`, { ai_instructions: instructions }); toast.success('AI instructions saved'); setAiTarget(null); load();
+  async function handleSaveAI(creatorId, instructions, context) {
+    try { await api.put(`/api/creators/${creatorId}`, { ai_instructions: instructions, ai_context: context }); toast.success('Page context saved'); setAiTarget(null); load();
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 

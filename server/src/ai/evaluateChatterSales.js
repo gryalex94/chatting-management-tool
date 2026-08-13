@@ -73,13 +73,13 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
 
   // Enrichment first — its spend map + page names annotate the conversation
   // headers so the model applies the right roadmap and never confuses pages.
-  const { enrichIssue, spendByUser, creatorNames, creatorInstructions } = await buildEnrichment(orgId, loaded.msgs);
+  const { enrichIssue, spendByUser, creatorNames, creatorInstructions, creatorContext } = await buildEnrichment(orgId, loaded.msgs);
   // Fuller conversations than the spotlight: the sales rules are sequence-dependent.
   // Cap raised 25 -> 40: at 25 roughly a third of a busy chatter's conversations
   // were never reviewed at all, and this is the review that judges missed sales.
   const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
 
-  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions);
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';

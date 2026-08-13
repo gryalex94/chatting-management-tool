@@ -143,12 +143,18 @@ function bestOverlap(pool, detailNorm) {
 async function buildEnrichment(orgId, msgs) {
   const creatorNames = {};
   const creatorInstructions = {};
+  const creatorContext = {};
   try {
-    // ai_instructions is optional (migration 016). Try it, but fall back to plain
-    // id/name if the column isn't there yet, so page names never go missing.
-    let { data: crs, error } = await supabaseAdmin.from('creators').select('id, name, ai_instructions').eq('organisation_id', orgId);
+    // ai_instructions / ai_context are optional (migrations 016/017). Try them,
+    // but fall back to plain id/name if the columns aren't there yet, so page
+    // names never go missing.
+    let { data: crs, error } = await supabaseAdmin.from('creators').select('id, name, ai_instructions, ai_context').eq('organisation_id', orgId);
     if (error) ({ data: crs } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId));
-    (crs || []).forEach(c => { creatorNames[c.id] = c.name; if (c.ai_instructions) creatorInstructions[c.id] = c.ai_instructions; });
+    (crs || []).forEach(c => {
+      creatorNames[c.id] = c.name;
+      if (c.ai_instructions) creatorInstructions[c.id] = c.ai_instructions;
+      if (c.ai_context) creatorContext[c.id] = c.ai_context;
+    });
   } catch { /* names optional */ }
 
   // Collision-aware identity maps. Several fans often share a nickname ("Alex" can
@@ -266,23 +272,44 @@ async function buildEnrichment(orgId, msgs) {
     };
   };
 
-  return { creatorNames, creatorInstructions, spendByUser, enrichIssue };
+  return { creatorNames, creatorInstructions, creatorContext, spendByUser, enrichIssue };
 }
 
+// The named buckets of per-page context, and how each is introduced to the model.
+// Each exists because a missing fact caused a real false positive: content that
+// does exist on the page read as a ToS breach, a legitimate second account or
+// Telegram group read as off-platform, content we cannot produce read as a
+// missed sale.
+const CONTEXT_FIELDS = [
+  ['content_available', 'Content that DOES exist on this page (never flag it as off-scope or a ToS breach)'],
+  ['content_unavailable', 'Content this page CANNOT provide (never treat not offering it as a missed sale)'],
+  ['known_platforms', 'Legitimate other places this creator exists (a second OnlyFans page, a public group) — a fan mentioning these is NOT an off-platform violation'],
+  ['persona', 'Persona / voice notes'],
+  ['pricing', 'Page-specific pricing'],
+  ['emoji', 'Emoji rules'],
+];
+
 /**
- * Build the "special instructions" preamble for the pages that actually appear in
- * this chatter-day, from each page's manager-written ai_instructions. Returns '' if
- * none of the present pages have custom rules.
+ * Build the per-page context preamble for the pages that actually appear in this
+ * chatter-day: the structured facts (ai_context) plus the manager's free-text
+ * rules (ai_instructions). Returns '' when none of the present pages have any.
  */
-function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}) {
+function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}, creatorContext = {}) {
   const present = new Set((msgs || []).map(m => m.creator_id).filter(Boolean));
-  const lines = [];
+  const blocks = [];
   for (const cid of present) {
-    const txt = (creatorInstructions[cid] || '').trim();
-    if (txt) lines.push(`- ${creatorNames[cid] || 'page'}: ${txt}`);
+    const name = creatorNames[cid] || 'page';
+    const ctx = creatorContext[cid] || {};
+    const rows = CONTEXT_FIELDS
+      .map(([key, label]) => [label, String(ctx[key] ?? '').trim()])
+      .filter(([, v]) => v)
+      .map(([label, v]) => `    · ${label}: ${v}`);
+    const free = String(creatorInstructions[cid] ?? '').trim();
+    if (free) rows.push(`    · Additional rules: ${free}`);
+    if (rows.length) blocks.push(`  ${name}:\n${rows.join('\n')}`);
   }
-  if (!lines.length) return '';
-  return `PER-PAGE SPECIAL INSTRUCTIONS (custom rules the manager set for specific pages — apply the matching page's rules to that page's conversations, IN ADDITION to everything above):\n${lines.join('\n')}\n\n`;
+  if (!blocks.length) return '';
+  return `PER-PAGE CONTEXT — these are FACTS about specific pages, set by the manager. They OVERRIDE your general assumptions for that page's conversations. Apply each page's context only to conversations on that page:\n${blocks.join('\n')}\n\n`;
 }
 
 module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens };
