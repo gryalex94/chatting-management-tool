@@ -5,12 +5,23 @@ import { DISMISS_REASONS } from '../../utils/taskMeta';
 const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '6px 14px', fontSize: 12, fontWeight: 700 };
 const ghost = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-1)', borderRadius: 'var(--r-btn)', padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
 
-// Single-select reason + optional note. 'other' requires a note.
+// Picking a reason dismisses IMMEDIATELY — one click, same as Complete.
+// Dismissing used to cost four actions while completing cost one, so the cheap
+// action won and false positives were being marked "done". That is actively
+// harmful: a completed task that recurs reopens as a REGRESSION and gets bumped
+// UP a tier, so wrongly completing a false positive makes it louder every time,
+// while dismissing it makes it stop. The reasons are also the only signal we
+// have for correcting the AI, so they have to be effortless to give.
+// 'other' still needs a note, so it keeps the confirm button.
 export default function DismissModal({ task, onClose, onConfirm }) {
   const [code, setCode] = useState(null);
   const [note, setNote] = useState('');
   const needNote = code === 'other';
   const canConfirm = code && (!needNote || note.trim());
+  const pick = (key) => {
+    setCode(key);
+    if (key !== 'other') onConfirm(key, note.trim());   // one click, done
+  };
   // Portal to body — a transformed ancestor (.animate-in) would otherwise break
   // position:fixed and push the modal off-screen.
   return createPortal((
@@ -18,12 +29,12 @@ export default function DismissModal({ task, onClose, onConfirm }) {
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 20, width: 'min(520px, 92vw)' }}>
         <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Why dismiss this?</div>
         <div style={{ fontSize: 12, color: 'var(--fg-3)', marginBottom: 12 }}>
-          Helps us improve the AI. {task.creator_name || ''}{task.chatter_name ? ` · ${task.chatter_name}` : ''}
+          Pick a reason — it dismisses straight away. {task.creator_name || ''}{task.chatter_name ? ` · ${task.chatter_name}` : ''}
         </div>
         <div style={{ fontSize: 12.5, color: 'var(--fg-2)', background: 'var(--bg-2)', borderRadius: 8, padding: '8px 10px', marginBottom: 14, lineHeight: 1.5 }}>{task.detail}</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
           {DISMISS_REASONS.map(r => (
-            <button key={r.key} onClick={() => setCode(r.key)}
+            <button key={r.key} onClick={() => pick(r.key)}
               style={{ padding: '7px 12px', fontSize: 12.5, fontWeight: 700, borderRadius: 'var(--r-btn)', cursor: 'pointer',
                 border: `1.5px solid ${code === r.key ? 'var(--indigo)' : 'var(--fg-4)'}`,
                 background: code === r.key ? 'var(--indigo-soft)' : 'var(--bg-3)', color: 'var(--fg-0)' }}>
@@ -32,12 +43,15 @@ export default function DismissModal({ task, onClose, onConfirm }) {
           ))}
         </div>
         <textarea value={note} onChange={e => setNote(e.target.value)}
-          placeholder={needNote ? 'Required — explain why…' : 'Optional note…'}
+          autoFocus={needNote}
+          placeholder={needNote ? 'Required — explain why…' : 'Adding detail? Type it here first, then pick a reason above.'}
           style={{ width: '100%', minHeight: 60, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg-0)', fontSize: 12.5, padding: 8, fontFamily: 'var(--ff-sans)', resize: 'vertical' }} />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
           <button onClick={onClose} style={ghost}>Cancel</button>
-          <button disabled={!canConfirm} onClick={() => onConfirm(code, note.trim())}
-            style={{ ...primary, opacity: canConfirm ? 1 : 0.5 }}>Dismiss task</button>
+          {needNote && (
+            <button disabled={!canConfirm} onClick={() => onConfirm(code, note.trim())}
+              style={{ ...primary, opacity: canConfirm ? 1 : 0.5 }}>Dismiss task</button>
+          )}
         </div>
       </div>
     </div>
