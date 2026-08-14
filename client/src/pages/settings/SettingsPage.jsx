@@ -4,6 +4,7 @@ import api from '../../services/api';
 import { Avatar, Chip, StatusDot } from '../../components/shared';
 import { STATUS_META } from '../../utils/helpers';
 import { Plus, Copy, Trash2, Clock, Users, Sparkles } from 'lucide-react';
+import CreatorDetailModal from './CreatorDetailModal';
 import { setInflowwOffset, getInflowwOffset } from '../../utils/displaySettings';
 import { fmtSentAt } from '../../utils/taskMeta';
 import toast from 'react-hot-toast';
@@ -42,6 +43,7 @@ const [templateForm, setTemplateForm] = useState({ label:'', icon:'📝', title:
 const [editingTemplateId, setEditingTemplateId] = useState(null);
 const [emojiOpen, setEmojiOpen] = useState(false);
   const [tab, setTab] = useState('creators');
+  const [creatorDetail, setCreatorDetail] = useState(null);
   const [tzOffset, setTzOffset] = useState(getInflowwOffset());
   const [savingTz, setSavingTz] = useState(false);
 
@@ -147,13 +149,24 @@ const [emojiOpen, setEmojiOpen] = useState(false);
 
       {/* Creators */}
       {tab==='creators'&&(
-        <Section title="Creators" sub={`${creators.length} creator accounts`} right={isAdmin&&<span style={{fontSize:11,color:'var(--fg-3)'}}>Admin only</span>}>
-          <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:16}}>
-            {creators.map(c=>(
-              <div key={c.id} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:'var(--r-tile)'}}>
-                <Avatar name={c.name} size={24}/><span style={{fontSize:12.5,fontWeight:500}}>{c.name}</span>
-              </div>
-            ))}
+        <Section title="Creators" sub={`${creators.length} pages — click one to edit its name, AI context and removal`} right={isAdmin&&<span style={{fontSize:11,color:'var(--fg-3)'}}>Admin only</span>}>
+          <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:16}}>
+            {creators.map(c=>{
+              const hasCtx = !!(c.ai_context || c.ai_instructions);
+              return (
+                <button key={c.id} onClick={()=>setCreatorDetail(c)}
+                  style={{display:'flex',alignItems:'center',gap:10,padding:'9px 12px',background:'var(--bg-2)',border:'1px solid var(--border)',borderRadius:'var(--r-tile)',cursor:'pointer',textAlign:'left',width:'100%'}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor='var(--indigo)'}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor='var(--border)'}>
+                  <Avatar name={c.name} size={26}/>
+                  <span style={{fontSize:12.5,fontWeight:600,color:'var(--fg-0)',flex:1}}>{c.name}</span>
+                  {hasCtx
+                    ? <Chip tone="good" style={{fontSize:9.5}}>AI context set</Chip>
+                    : <span style={{fontSize:10.5,color:'var(--fg-3)'}}>no AI context</span>}
+                  <span style={{fontSize:13,color:'var(--fg-3)'}}>›</span>
+                </button>
+              );
+            })}
           </div>
           {isAdmin&&<form onSubmit={addCreator} style={{display:'flex',gap:8}}>
             <input value={creatorName} onChange={e=>setCreatorName(e.target.value)} placeholder="Creator name" style={{...inp,flex:1}}/>
@@ -356,6 +369,11 @@ const [emojiOpen, setEmojiOpen] = useState(false);
             }}>Close week</button>
           </div>
         </Section>
+      )}
+
+      {creatorDetail && (
+        <CreatorDetailModal creator={creatorDetail} isAdmin={isAdmin}
+          onClose={() => setCreatorDetail(null)} onChanged={load}/>
       )}
     </div>
   );

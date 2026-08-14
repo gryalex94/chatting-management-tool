@@ -78,6 +78,71 @@ router.put('/:id', requireMinRole('admin'), async (req, res) => {
   }
 });
 
+// DELETE /api/creators/:id - Permanently remove a page.
+// Guarded: a page that carries real history (messages, daily stats, tasks) must
+// never be deleted, because every one of those rows points back at this id and
+// would be orphaned. Those pages get deactivated instead. Genuinely empty rows
+// — duplicates and bad name-parses from earlier imports — delete cleanly.
+router.delete('/:id', requireMinRole('admin'), async (req, res) => {
+  try {
+    const id = req.params.id;
+    const orgId = req.user.organisationId;
+    const { data: creator } = await supabaseAdmin
+      .from('creators').select('id, name').eq('id', id).eq('organisation_id', orgId).maybeSingle();
+    if (!creator) return res.status(404).json({ error: 'Page not found' });
+
+    const counted = async (table, col = 'creator_id') => {
+      const { count } = await supabaseAdmin.from(table)
+        .select('*', { count: 'exact', head: true }).eq(col, id);
+      return count || 0;
+    };
+    const [messages, stats, tasks, grouped] = await Promise.all([
+      counted('messages'), counted('creator_daily_stats'), counted('review_tasks'),
+      counted('creators', 'merged_into'),
+    ]);
+
+    if (messages || stats || tasks || grouped) {
+      return res.status(409).json({
+        error: `"${creator.name}" still has history and cannot be deleted`,
+        detail: { messages, daily_stats: stats, tasks, grouped_pages: grouped },
+        suggestion: 'Deactivate it instead — it keeps the history and hides the page everywhere.',
+      });
+    }
+
+    // Empty page: clear its assignments and shifts, then remove it.
+    await Promise.all([
+      supabaseAdmin.from('chatter_creator_assignments').delete().eq('creator_id', id),
+      supabaseAdmin.from('creator_manager_assignments').delete().eq('creator_id', id),
+      supabaseAdmin.from('shifts').delete().eq('creator_id', id),
+    ]);
+    const { error } = await supabaseAdmin.from('creators').delete().eq('id', id).eq('organisation_id', orgId);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ success: true, message: `${creator.name} deleted` });
+  } catch (err) {
+    console.error('Delete creator error:', err);
+    res.status(500).json({ error: 'Failed to delete page' });
+  }
+});
+
+// GET /api/creators/:id/usage - What history a page carries (drives the delete guard in the UI)
+router.get('/:id/usage', async (req, res) => {
+  try {
+    const id = req.params.id;
+    const counted = async (table, col = 'creator_id') => {
+      const { count } = await supabaseAdmin.from(table)
+        .select('*', { count: 'exact', head: true }).eq(col, id);
+      return count || 0;
+    };
+    const [messages, daily_stats, tasks, grouped_pages] = await Promise.all([
+      counted('messages'), counted('creator_daily_stats'), counted('review_tasks'),
+      counted('creators', 'merged_into'),
+    ]);
+    res.json({ messages, daily_stats, tasks, grouped_pages, deletable: !(messages || daily_stats || tasks || grouped_pages) });
+  } catch {
+    res.status(500).json({ error: 'Failed to read page usage' });
+  }
+});
+
 // POST /api/creators/:id/assign-manager - Assign a manager to creator
 router.post('/:id/assign-manager', requireMinRole('admin'), async (req, res) => {
   try {

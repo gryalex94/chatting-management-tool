@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import api from '../../services/api';
 import { Avatar, Chip, StatusDot } from '../../components/shared';
 import { STATUS_META, avatarColor, initials } from '../../utils/helpers';
-import { Plus, ArrowRight, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal, Clock, Trash2, Calendar, Sparkles } from 'lucide-react';
+import { Plus, ArrowRight, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal, Clock, Trash2, Calendar } from 'lucide-react';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, rectIntersection, useDraggable, useDroppable,
@@ -277,7 +277,7 @@ function ShiftSlot({ shift, chatters, creatorId, onAssign, onAddCover, onClickCh
 }
 
 /* ─── Creator Card Menu ──────────────────────────── */
-function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate, onManageShifts, onEditAI }) {
+function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate, onManageShifts }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -311,8 +311,6 @@ function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate,
             onClick={e => { e.stopPropagation(); setOpen(false); onRename(creator); }}><Pencil size={13}/> Rename</button>
           <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
             onClick={e => { e.stopPropagation(); setOpen(false); onManageShifts(); }}><Clock size={13}/> Manage Shifts</button>
-          <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-            onClick={e => { e.stopPropagation(); setOpen(false); onEditAI(creator); }}><Sparkles size={13}/> Page context{(creator.ai_instructions || creator.ai_context) ? ' ✓' : ''}</button>
           {mergedCreators.length > 0 && (<>
             <div style={{ height:1, background:'var(--border)', margin:'4px 0' }}/>
             <div style={{ padding:'6px 12px', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:0.5 }}>Split</div>
@@ -331,7 +329,7 @@ function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate,
 }
 
 /* ─── Creator Card ───────────────────────────────── */
-function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickChatter, onRemove, onSplit, onRename, onDeactivate, mergedCreators, onManageShifts, onEditAI, selectedDay, draggingType }) {
+function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickChatter, onRemove, onSplit, onRename, onDeactivate, mergedCreators, onManageShifts, selectedDay, draggingType }) {
   const memberPages = mergedCreators;                 // pages grouped onto this team
   const isMerged = memberPages.length > 0;
   const groupIds = [creator.id, ...memberPages.map(m => m.id)];
@@ -366,7 +364,7 @@ function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickC
           </div>
         </div>
         <CreatorMenu creator={creator} mergedCreators={mergedCreators}
-          onRename={onRename} onSplit={onSplit} onDeactivate={onDeactivate} onManageShifts={onManageShifts} onEditAI={onEditAI}/>
+          onRename={onRename} onSplit={onSplit} onDeactivate={onDeactivate} onManageShifts={onManageShifts}/>
       </div>
       <div style={{ padding:'12px 14px', flex:1 }}>
         {shifts.map(shift => (
@@ -478,61 +476,6 @@ function RenameModal({ creator, onSave, onClose }) {
             <button className="btn sm ghost" onClick={onClose}>Cancel</button>
             <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => name.trim() && onSave(creator.id, name.trim())}>Save</button>
           </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─── Page Context Modal ─────────────────────────── */
-// Structured facts about a page, fed to the AI whenever this page's dialogues
-// are reviewed. Each field exists because a MISSING fact caused a real false
-// alarm: content that does exist read as a ToS breach, a legitimate second
-// account read as off-platform, content we can't make read as a missed sale.
-const CONTEXT_FIELDS = [
-  { key:'content_available',   label:'Content that DOES exist here',  hint:'Stops it being flagged as off-scope or a ToS breach', ph:'e.g. anal, B/G videos, cosplay sets' },
-  { key:'content_unavailable', label:"Content we CAN'T provide",      hint:"Not offering it won't count as a missed sale",        ph:'e.g. no voice notes, no video calls, no customs' },
-  { key:'known_platforms',     label:'Other places she legitimately exists', hint:'A fan mentioning these is not an off-platform violation', ph:'e.g. second OnlyFans page, public Telegram group' },
-  { key:'persona',             label:'Persona / voice',               hint:'How this page talks',                                 ph:'e.g. shy student, playful and sarcastic' },
-  { key:'pricing',             label:'Pricing on this page',          hint:'Page-specific prices',                                ph:'e.g. photos $45, videos $80, customs from $150' },
-  { key:'emoji',               label:'Emoji rules',                   hint:'Preferred / banned emojis',                           ph:'e.g. use 🖤 not ❤️' },
-];
-
-function AIInstructionsModal({ creator, onSave, onClose }) {
-  const [ctx, setCtx] = useState(() => ({ ...(creator.ai_context || {}) }));
-  const [text, setText] = useState(creator.ai_instructions || '');
-  const set = (k, v) => setCtx(p => ({ ...p, [k]: v }));
-  const is = { width:'100%', padding:'8px 10px', fontSize:13, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none', fontFamily:'inherit' };
-  return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:560, maxHeight:'86vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title={`Page context — ${creator.name}`} sub="Facts the AI needs so it stops flagging what's normal here"/>
-        <div style={{ padding:16, overflow:'auto' }}>
-          <div style={{ fontSize:12, color:'var(--fg-3)', marginBottom:14, lineHeight:1.5 }}>
-            Anything you fill in is treated as fact for this page and overrides the AI's general assumptions. Every field is optional — leave the ones that don't apply empty.
-          </div>
-          {CONTEXT_FIELDS.map(f => (
-            <div key={f.key} style={{ marginBottom:12 }}>
-              <div style={{ fontSize:12, fontWeight:600, color:'var(--fg-1)' }}>{f.label}</div>
-              <div style={{ fontSize:10.5, color:'var(--fg-3)', margin:'2px 0 5px' }}>{f.hint}</div>
-              <input value={ctx[f.key] || ''} onChange={e => set(f.key, e.target.value)} placeholder={f.ph} style={is}/>
-            </div>
-          ))}
-          <div style={{ height:1, background:'var(--border)', margin:'6px 0 12px' }}/>
-          <div style={{ fontSize:12, fontWeight:600, color:'var(--fg-1)' }}>Anything else</div>
-          <div style={{ fontSize:10.5, color:'var(--fg-3)', margin:'2px 0 5px' }}>Free-text rules that don't fit above</div>
-          <textarea value={text} onChange={e => setText(e.target.value)} rows={3}
-            placeholder={"e.g. She's shy on cam — don't promise video calls."}
-            style={{ ...is, lineHeight:1.5, resize:'vertical' }}/>
-        </div>
-        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--border)', display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button className="btn sm ghost" onClick={onClose}>Cancel</button>
-          <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }}
-            onClick={() => {
-              const clean = {};
-              CONTEXT_FIELDS.forEach(f => { const v = (ctx[f.key] || '').trim(); if (v) clean[f.key] = v; });
-              onSave(creator.id, text.trim(), Object.keys(clean).length ? clean : null);
-            }}>Save</button>
         </div>
       </div>
     </div>
@@ -651,7 +594,6 @@ export default function CreatorsPage() {
   const [activeCreator, setActiveCreator] = useState(null);
   const [mergePrompt, setMergePrompt] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
-  const [aiTarget, setAiTarget] = useState(null);
   const [shiftsCreatorId, setShiftsCreatorId] = useState(null);
   const [coverTarget, setCoverTarget] = useState(null);
   const [selectedDay, setSelectedDay] = useState(getTodayDayNumber());
@@ -717,10 +659,6 @@ export default function CreatorsPage() {
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
-  async function handleSaveAI(creatorId, instructions, context) {
-    try { await api.put(`/api/creators/${creatorId}`, { ai_instructions: instructions, ai_context: context }); toast.success('Page context saved'); setAiTarget(null); load();
-    } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
-  }
 
   async function handleDeactivate(creator) {
     if (!window.confirm(`Deactivate "${creator.name}"?`)) return;
@@ -836,7 +774,6 @@ export default function CreatorsPage() {
                 onAssign={handleOpenAssign} onAddCover={handleOpenCover} onClickChatter={handleClickChatter}
                 onRemove={handleRemove} onSplit={handleSplit}
                 onRename={c => setRenameTarget(c)} onDeactivate={handleDeactivate}
-                onEditAI={c => setAiTarget(c)}
                 mergedCreators={membersByPrimary[cr.id] || []}
                 onManageShifts={() => setShiftsCreatorId(cr.id)}
                 selectedDay={selectedDay} draggingType={draggingType}/>
@@ -884,7 +821,6 @@ export default function CreatorsPage() {
       )}
 
       {renameTarget && <RenameModal creator={renameTarget} onSave={handleRename} onClose={() => setRenameTarget(null)}/>}
-      {aiTarget && <AIInstructionsModal creator={aiTarget} onSave={handleSaveAI} onClose={() => setAiTarget(null)}/>}
       {shiftsCreatorId && <ShiftsModal
         shifts={shifts.filter(s => s.creator_id === shiftsCreatorId)}
         creatorId={shiftsCreatorId}
