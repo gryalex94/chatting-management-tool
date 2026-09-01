@@ -112,6 +112,30 @@ async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
     console.log(`[CreatorStats] Collapsed ${records.length} -> ${uniqueRecords.length} rows (removed ${records.length - uniqueRecords.length} duplicate creator/day entries)`);
   }
 
+  // A single out-of-range value used to abort the entire upload with Postgres's
+  // opaque "numeric field overflow", losing every other row and telling nobody
+  // which cell was at fault. Check the numeric limits up front and name the
+  // exact field, value, creator and date instead.
+  const LIMITS = {
+    total_subscription_gross: 1e8, subscription_gross: 1e8, recurring_subscriptions_gross: 1e8,
+    tips_gross: 1e8, message_gross: 1e8, total_earnings_gross: 1e8, refund_gross: 1e8,
+    avg_spend_per_spender_gross: 1e8, avg_spend_per_transaction_gross: 1e8,
+    avg_earnings_per_fan_gross: 1e8,
+    contribution_pct: 1e8, of_ranking: 1e8, renew_on_pct: 1e8,
+  };
+  const offenders = [];
+  for (const r of uniqueRecords) {
+    for (const [field, max] of Object.entries(LIMITS)) {
+      const v = r[field];
+      if (typeof v === 'number' && Math.abs(v) >= max) {
+        offenders.push(`${field}=${v} (${r.creator_name}, ${r.report_date})`);
+      }
+    }
+  }
+  if (offenders.length) {
+    throw new Error(`Value out of range for: ${offenders.slice(0, 5).join('; ')}${offenders.length > 5 ? ` and ${offenders.length - 5} more` : ''}. Check these cells in the export.`);
+  }
+
   const BATCH = 500;
   let upserted = 0;
   for (let i = 0; i < uniqueRecords.length; i += BATCH) {
@@ -120,8 +144,9 @@ async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
       .from('creator_daily_stats')
       .upsert(batch, { onConflict: 'creator_id,report_date' });
     if (error) {
-      console.error(`[CreatorStats] Upsert error at ${i}:`, error.message);
-      throw error;
+      const span = `${batch[0].creator_name} ${batch[0].report_date} .. ${batch[batch.length - 1].creator_name} ${batch[batch.length - 1].report_date}`;
+      console.error(`[CreatorStats] Upsert error at ${i} (${span}):`, error.message);
+      throw new Error(`${error.message} — while saving rows ${i + 1}-${i + batch.length} (${span})`);
     }
     upserted += batch.length;
   }
