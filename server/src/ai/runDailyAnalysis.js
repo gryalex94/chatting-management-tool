@@ -50,7 +50,7 @@ async function runDailyAnalysis(chatterId, creatorId, reportDate, orgId) {
 
   // 2. Resolve chatter name
   const { data: chatter } = await supabaseAdmin
-    .from('chatters').select('name').eq('id', chatterId).single();
+    .from('chatters').select('name').eq('id', chatterId).eq('organisation_id', orgId).single();
   const chatterName = chatter?.name || 'Unknown';
 
   // Filter messages by this chatter
@@ -73,6 +73,7 @@ async function runDailyAnalysis(chatterId, creatorId, reportDate, orgId) {
   const { data: empStats } = await supabaseAdmin
     .from('employee_daily_stats')
     .select('*')
+    .eq('organisation_id', orgId)
     .eq('chatter_id', chatterId)
     .eq('report_date', reportDate);
   const stats = empStats?.find(s => s.creator_id === creatorId) || empStats?.[0] || {};
@@ -95,7 +96,7 @@ async function runDailyAnalysis(chatterId, creatorId, reportDate, orgId) {
 
   // 6. Get creator name
   const { data: creator } = await supabaseAdmin
-    .from('creators').select('name').eq('id', creatorId).single();
+    .from('creators').select('name').eq('id', creatorId).eq('organisation_id', orgId).single();
 
   // 6b. Get fan spending data for all fans in these conversations
   const fanUsernames = conversations.map(c => c.fan_username).filter(Boolean);

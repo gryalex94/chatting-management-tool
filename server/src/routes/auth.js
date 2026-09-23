@@ -5,6 +5,12 @@ const { supabaseAdmin } = require('../utils/supabase');
 // This is called once to bootstrap the system
 router.post('/setup', async (req, res) => {
   try {
+    // Closed by default: this endpoint needs no login and creates an organisation
+    // plus an owner account for whoever calls it. Set ALLOW_SIGNUP=true on the
+    // server only while onboarding a new organisation, then remove it.
+    if (process.env.ALLOW_SIGNUP !== 'true') {
+      return res.status(403).json({ error: 'Sign-up is closed. Ask an administrator for an invitation.' });
+    }
     const { email, password, name, orgName } = req.body;
 
     if (!email || !password || !name || !orgName) {
@@ -70,20 +76,29 @@ router.post('/setup', async (req, res) => {
 // This endpoint returns the user profile
 router.post('/login', async (req, res) => {
   try {
-    const { authId } = req.body;
-
-    if (!authId) {
-      return res.status(400).json({ error: 'Auth ID required' });
+    // Identify the caller from their verified session token — never from an id in
+    // the request body, which used to let anyone fetch any user's profile and
+    // organisation just by supplying an auth id.
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'No token provided' });
+    }
+    const { data: { user: authUser }, error: authErr } = await supabaseAdmin.auth.getUser(authHeader.split(' ')[1]);
+    if (authErr || !authUser) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
     const { data: user, error } = await supabaseAdmin
       .from('users')
       .select('*, organisations(*)')
-      .eq('auth_id', authId)
+      .eq('auth_id', authUser.id)
       .single();
 
     if (error || !user) {
       return res.status(404).json({ error: 'User profile not found' });
+    }
+    if (user.is_active === false) {
+      return res.status(403).json({ error: 'This account has been deactivated.' });
     }
 
     res.json({

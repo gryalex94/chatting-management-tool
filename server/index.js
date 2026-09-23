@@ -2,24 +2,43 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+// Railway sits in front of the app — trust its proxy so rate limits see the real client IP.
+app.set('trust proxy', 1);
 
 // ---------------------
 // MIDDLEWARE
 // ---------------------
 app.use(helmet());
 app.use(morgan('dev'));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// File uploads go through multer (multipart), so JSON bodies never need to be large.
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // CORS - allow frontend to talk to backend
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
 }));
+
+// ---------------------
+// RATE LIMITS
+// ---------------------
+// Login/sign-up: slow down password guessing. AI routes: cap spend if an account
+// is misused (a full "Create daily tasks" run is ~25 evaluations, well inside
+// this). Everything else: a generous ceiling that normal use never reaches.
+const limiter = (windowMin, max, what) => rateLimit({
+  windowMs: windowMin * 60 * 1000, max, standardHeaders: true, legacyHeaders: false,
+  message: { error: `Too many ${what} — please wait a few minutes and try again.` },
+});
+app.use('/api/auth', limiter(15, 30, 'login attempts'));
+app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/review-tasks/rebuild', '/api/ai'],
+  limiter(15, 150, 'AI requests'));
+app.use('/api', limiter(15, 3000, 'requests'));
 
 // ---------------------
 // AUTH MIDDLEWARE
@@ -78,8 +97,12 @@ app.use('/api/review-tasks', authMiddleware, reviewTaskRoutes);
 // ---------------------
 app.use((err, req, res, next) => {
   console.error('Server error:', err);
-  res.status(err.status || 500).json({
-    error: err.message || 'Internal server error',
+  const isUploadError = err.name === 'MulterError' || /Only CSV and Excel/.test(err.message || '');
+  const status = err.status || err.statusCode || (isUploadError ? 400 : 500);
+  // Client mistakes (bad file type, file too large…) keep their helpful message;
+  // server failures never expose internal/database details to the browser.
+  res.status(status).json({
+    error: status < 500 ? (err.message || 'Bad request') : 'Internal server error',
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });

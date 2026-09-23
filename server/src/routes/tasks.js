@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { ownedBy, allOwned } = require('../utils/ownership');
 
 // GET /api/tasks - List tasks with filters
 router.get('/', async (req, res) => {
@@ -45,6 +46,8 @@ router.post('/', requireMinRole('manager'), async (req, res) => {
     } = req.body;
 
     if (!title) return res.status(400).json({ error: 'Title is required' });
+    const refs = [['creators', creator_id], ['chatters', chatter_id], ['cycles', cycle_id], ['users', assigned_to]];
+    if (!await allOwned(req.user.organisationId, refs)) return res.status(404).json({ error: 'Not found' });
 
     // Get active cycle if not specified
     let activeCycleId = cycle_id;
@@ -129,14 +132,21 @@ router.post('/templates', requireMinRole('admin'), async (req, res) => {
 // PUT /api/tasks/templates/:id - Update template
 router.put('/templates/:id', requireMinRole('admin'), async (req, res) => {
   try {
+    // Whitelisted fields only; shared templates (organisation_id null) are not editable.
+    const update = {};
+    for (const k of ['label', 'icon', 'title', 'description', 'priority']) {
+      if (req.body[k] !== undefined) update[k] = req.body[k];
+    }
     const { data, error } = await supabaseAdmin
       .from('task_templates')
-      .update(req.body)
+      .update(update)
       .eq('id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: 'Not found' });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to update template' });
@@ -146,10 +156,13 @@ router.put('/templates/:id', requireMinRole('admin'), async (req, res) => {
 // DELETE /api/tasks/templates/:id - Deactivate template
 router.delete('/templates/:id', requireMinRole('admin'), async (req, res) => {
   try {
-    await supabaseAdmin
+    const { data } = await supabaseAdmin
       .from('task_templates')
       .update({ is_active: false })
-      .eq('id', req.params.id);
+      .eq('id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
+      .select('id');
+    if (!data?.length) return res.status(404).json({ error: 'Not found' });
 
     res.json({ message: 'Template removed' });
   } catch (err) {
@@ -168,6 +181,7 @@ router.post('/:id/claim', async (req, res) => {
         claimed_at: new Date().toISOString(),
       })
       .eq('id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .eq('status', 'pool')
       .select()
       .single();
@@ -187,6 +201,8 @@ router.post('/:id/timer', async (req, res) => {
     if (!['start', 'pause', 'resume', 'complete'].includes(action)) {
       return res.status(400).json({ error: 'Invalid action' });
     }
+
+    if (!await ownedBy('tasks', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     // Log the timer event
     await supabaseAdmin.from('task_timer_logs').insert({
@@ -231,6 +247,7 @@ router.post('/:id/timer', async (req, res) => {
       .from('tasks')
       .update(update)
       .eq('id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .select()
       .single();
 
@@ -248,6 +265,8 @@ router.post('/:id/attachments', async (req, res) => {
     if (!attachment_type || !file_url) {
       return res.status(400).json({ error: 'Type and file URL required' });
     }
+    if (!await ownedBy('tasks', req.params.id, req.user.organisationId)
+      || !await allOwned(req.user.organisationId, [['chatters', chatter_id]])) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('task_attachments')
@@ -272,6 +291,7 @@ router.post('/:id/attachments', async (req, res) => {
 // GET /api/tasks/:id/timer-logs - Get timer history for a task
 router.get('/:id/timer-logs', async (req, res) => {
   try {
+    if (!await ownedBy('tasks', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
     const { data, error } = await supabaseAdmin
       .from('task_timer_logs')
       .select('*, users:user_id(name)')

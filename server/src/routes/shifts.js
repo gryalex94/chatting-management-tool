@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { ownedBy } = require('../utils/ownership');
 
 // GET /api/shifts - List shifts (optionally filtered by creatorId)
 router.get('/', async (req, res) => {
@@ -36,6 +37,7 @@ router.post('/', requireMinRole('admin'), async (req, res) => {
     if (!creatorId) {
       return res.status(400).json({ error: 'creatorId is required' });
     }
+    if (!await ownedBy('creators', creatorId, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('shifts')
@@ -63,6 +65,7 @@ router.post('/init-defaults/:creatorId', requireMinRole('admin'), async (req, re
   try {
     const creatorId = req.params.creatorId;
     const orgId = req.user.organisationId;
+    if (!await ownedBy('creators', creatorId, orgId)) return res.status(404).json({ error: 'Not found' });
 
     // Check if creator already has shifts
     const { data: existing } = await supabaseAdmin
@@ -128,6 +131,8 @@ router.delete('/:id', requireMinRole('admin'), async (req, res) => {
   try {
     const shiftId = req.params.id;
     const orgId = req.user.organisationId;
+    // Ownership first — assignments have no org column, so never touch them for a foreign shift.
+    if (!await ownedBy('shifts', shiftId, orgId)) return res.status(404).json({ error: 'Not found' });
 
     await supabaseAdmin
       .from('chatter_creator_assignments')

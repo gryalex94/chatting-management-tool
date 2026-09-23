@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { ownedBy } = require('../utils/ownership');
 
 // GET /api/cycles - List all cycles
 router.get('/', async (req, res) => {
@@ -78,6 +79,7 @@ router.post('/start', requireMinRole('admin'), async (req, res) => {
 router.post('/:id/close', requireMinRole('admin'), async (req, res) => {
   try {
     const cycleId = req.params.id;
+    if (!await ownedBy('cycles', cycleId, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     // 1. Close the cycle
     const { data: cycle, error: cycleError } = await supabaseAdmin
@@ -88,6 +90,7 @@ router.post('/:id/close', requireMinRole('admin'), async (req, res) => {
         closed_at: new Date().toISOString(),
       })
       .eq('id', cycleId)
+      .eq('organisation_id', req.user.organisationId)
       .select()
       .single();
 
@@ -114,6 +117,7 @@ router.post('/:id/close', requireMinRole('admin'), async (req, res) => {
       .from('tasks')
       .select('*')
       .eq('cycle_id', cycleId)
+      .eq('organisation_id', req.user.organisationId)
       .in('status', ['pool', 'claimed', 'in_progress', 'pending_review']);
 
     // Start new cycle

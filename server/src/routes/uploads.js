@@ -206,9 +206,11 @@ router.get('/status/:id', async (req, res) => {
       .from('data_imports')
       .select('*')
       .eq('id', req.params.id)
-      .single();
+      .eq('organisation_id', req.user.organisationId)
+      .maybeSingle();
 
     if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: 'Not found' });
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to check status' });

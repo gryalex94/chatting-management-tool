@@ -61,7 +61,7 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/review-tasks/rebuild  { report_date }  — build from reports/flags, then rank
-router.post('/rebuild', async (req, res) => {
+router.post('/rebuild', requireMinRole('va'), async (req, res) => {
   try {
     const { report_date, model } = req.body;
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });

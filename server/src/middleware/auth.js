@@ -27,6 +27,11 @@ async function authMiddleware(req, res, next) {
     if (profileError || !profile) {
       return res.status(403).json({ error: 'User profile not found. Complete registration first.' });
     }
+    // A deactivated staff member's session token stays valid with Supabase, so
+    // access has to be cut here, on every request.
+    if (profile.is_active === false) {
+      return res.status(403).json({ error: 'This account has been deactivated.' });
+    }
 
     // Attach user info to request
     req.user = {

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { ownedBy, allOwned } = require('../utils/ownership');
 
 // GET /api/chatters - List all chatters in org
 router.get('/', async (req, res) => {
@@ -203,11 +204,9 @@ router.post('/:id/assign', requireMinRole('manager'), async (req, res) => {
     const dow = isCover ? Number(dayOfWeek) : null;
     const hours = isCover ? Number(coverHours) : null;
 
-    const { data: chatter } = await supabaseAdmin
-      .from('chatters')
-      .select('status')
-      .eq('id', req.params.id)
-      .single();
+    const orgId = req.user.organisationId;
+    const chatter = await ownedBy('chatters', req.params.id, orgId, 'status');
+    if (!chatter || !await allOwned(orgId, [['creators', creatorId], ['shifts', shiftId]])) return res.status(404).json({ error: 'Not found' });
 
     // Don't double-add the same person to the same slot (a regular and a cover, or
     // covers on different weekdays, are distinct — so match on day_of_week too).
@@ -255,6 +254,7 @@ router.post('/:id/unassign', requireMinRole('manager'), async (req, res) => {
   try {
     const { creatorId, shiftId, dayOfWeek } = req.body;
     if (!creatorId) return res.status(400).json({ error: 'Creator ID is required' });
+    if (!await ownedBy('chatters', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     const query = supabaseAdmin
       .from('chatter_creator_assignments')
@@ -282,6 +282,7 @@ router.post('/:id/day-off', requireMinRole('manager'), async (req, res) => {
   try {
     const { date, overtimeChatterId, note } = req.body;
     if (!date) return res.status(400).json({ error: 'Date is required' });
+    if (!await allOwned(req.user.organisationId, [['chatters', req.params.id], ['chatters', overtimeChatterId]])) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('chatter_days_off')
@@ -316,6 +317,7 @@ router.delete('/:id/day-off', requireMinRole('manager'), async (req, res) => {
       .from('chatter_days_off')
       .delete()
       .eq('chatter_id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .eq('date', date);
 
     if (error) return res.status(500).json({ error: error.message });
@@ -331,7 +333,8 @@ router.get('/:id/overtime', async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from('chatter_overtime')
       .select('*, chatter:chatter_id(id, name), covering_for_chatter:covering_for(id, name)')
-      .eq('covering_for', req.params.id);
+      .eq('covering_for', req.params.id)
+      .eq('organisation_id', req.user.organisationId);
     if (error) return res.status(500).json({ error: error.message });
     res.json(data || []);
   } catch (err) {
@@ -346,6 +349,7 @@ router.post('/:id/overtime', requireMinRole('manager'), async (req, res) => {
     if (!dayOfWeek || !overtimeType || !coveringFor) {
       return res.status(400).json({ error: 'dayOfWeek, overtimeType, and coveringFor are required' });
     }
+    if (!await allOwned(req.user.organisationId, [['chatters', req.params.id], ['chatters', coveringFor]])) return res.status(404).json({ error: 'Not found' });
     const { data, error } = await supabaseAdmin
       .from('chatter_overtime')
       .insert({
@@ -374,7 +378,8 @@ router.delete('/:id/overtime/:overtimeId', requireMinRole('manager'), async (req
     const { error } = await supabaseAdmin
       .from('chatter_overtime')
       .delete()
-      .eq('id', req.params.overtimeId);
+      .eq('id', req.params.overtimeId)
+      .eq('organisation_id', req.user.organisationId);
     if (error) return res.status(500).json({ error: error.message });
     res.json({ message: 'Overtime removed' });
   } catch (err) {
@@ -387,6 +392,7 @@ router.post('/:id/mistakes', requireMinRole('manager'), async (req, res) => {
   try {
     const { category, description } = req.body;
     if (!category) return res.status(400).json({ error: 'Category is required' });
+    if (!await ownedBy('chatters', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('chatter_mistakes')
@@ -411,6 +417,7 @@ router.post('/:id/penalties', requireMinRole('manager'), async (req, res) => {
   try {
     const { description, penalty_type, amount } = req.body;
     if (!description) return res.status(400).json({ error: 'Description is required' });
+    if (!await ownedBy('chatters', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('chatter_penalties')
@@ -436,6 +443,7 @@ router.post('/:id/reviews', requireMinRole('manager'), async (req, res) => {
   try {
     const { notes } = req.body;
     if (!notes) return res.status(400).json({ error: 'Notes are required' });
+    if (!await ownedBy('chatters', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
 
     const { data, error } = await supabaseAdmin
       .from('chatter_performance_reviews')

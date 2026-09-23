@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { ownedBy } = require('../utils/ownership');
 
 // GET /api/creators - List all creators in org
 router.get('/', async (req, res) => {
@@ -128,6 +129,7 @@ router.delete('/:id', requireMinRole('admin'), async (req, res) => {
 router.get('/:id/usage', async (req, res) => {
   try {
     const id = req.params.id;
+    if (!await ownedBy('creators', id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
     const counted = async (table, col = 'creator_id') => {
       const { count } = await supabaseAdmin.from(table)
         .select('*', { count: 'exact', head: true }).eq(col, id);
@@ -147,6 +149,10 @@ router.get('/:id/usage', async (req, res) => {
 router.post('/:id/assign-manager', requireMinRole('admin'), async (req, res) => {
   try {
     const { userId } = req.body;
+    const orgId = req.user.organisationId;
+    if (!await ownedBy('creators', req.params.id, orgId) || !await ownedBy('users', userId, orgId)) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     const { data, error } = await supabaseAdmin
       .from('creator_manager_assignments')
       .insert({ user_id: userId, creator_id: req.params.id })
@@ -163,6 +169,7 @@ router.post('/:id/assign-manager', requireMinRole('admin'), async (req, res) => 
 // DELETE /api/creators/:id/unassign-manager/:userId
 router.delete('/:id/unassign-manager/:userId', requireMinRole('admin'), async (req, res) => {
   try {
+    if (!await ownedBy('creators', req.params.id, req.user.organisationId)) return res.status(404).json({ error: 'Not found' });
     const { error } = await supabaseAdmin
       .from('creator_manager_assignments')
       .delete()
@@ -190,10 +197,9 @@ router.post('/:id/merge', requireMinRole('admin'), async (req, res) => {
     if (!sourceId) return res.status(400).json({ error: 'sourceId is required' });
     if (sourceId === targetId) return res.status(400).json({ error: 'Cannot merge a page into itself' });
 
-    const { data: target } = await supabaseAdmin
-      .from('creators').select('id, name, merged_into').eq('id', targetId).single();
-    const { data: source } = await supabaseAdmin
-      .from('creators').select('id, name, merged_into').eq('id', sourceId).single();
+    const orgId = req.user.organisationId;
+    const target = await ownedBy('creators', targetId, orgId, 'id, name, merged_into');
+    const source = await ownedBy('creators', sourceId, orgId, 'id, name, merged_into');
     if (!target || !source) return res.status(404).json({ error: 'Page not found' });
 
     // The group is always anchored on a top-level page. If the target is itself
@@ -204,7 +210,7 @@ router.post('/:id/merge', requireMinRole('admin'), async (req, res) => {
     // If the source already had pages grouped under it, re-point them to the primary.
     await supabaseAdmin
       .from('creators').update({ merged_into: primaryId })
-      .eq('merged_into', sourceId);
+      .eq('merged_into', sourceId).eq('organisation_id', orgId);
 
     // Move the source's team roster onto the primary, remapping each assignment to
     // the primary's same-named shift (so chatters still land in the right slot).
@@ -229,7 +235,7 @@ router.post('/:id/merge', requireMinRole('admin'), async (req, res) => {
     await supabaseAdmin
       .from('creators')
       .update({ merged_into: primaryId, merged_at: new Date().toISOString() })
-      .eq('id', sourceId);
+      .eq('id', sourceId).eq('organisation_id', orgId);
 
     res.json({ success: true, primaryId });
   } catch (err) {
@@ -245,6 +251,7 @@ router.get('/:id/merged', async (req, res) => {
       .from('creators')
       .select('id, name, merged_at')
       .eq('merged_into', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .neq('is_active', false)
       .order('merged_at', { ascending: false });
 
@@ -260,8 +267,8 @@ router.get('/:id/merged', async (req, res) => {
 router.post('/:id/split', requireMinRole('admin'), async (req, res) => {
   try {
     const sourceId = req.params.id;
-    const { data: source } = await supabaseAdmin
-      .from('creators').select('id, name, merged_into').eq('id', sourceId).single();
+    const orgId = req.user.organisationId;
+    const source = await ownedBy('creators', sourceId, orgId, 'id, name, merged_into');
 
     if (!source || !source.merged_into) {
       return res.status(400).json({ error: 'This page is not part of a group' });
@@ -270,7 +277,7 @@ router.post('/:id/split', requireMinRole('admin'), async (req, res) => {
     await supabaseAdmin
       .from('creators')
       .update({ merged_into: null, merged_at: null })
-      .eq('id', sourceId);
+      .eq('id', sourceId).eq('organisation_id', orgId);
 
     res.json({ success: true, message: `${source.name} split off` });
   } catch (err) {

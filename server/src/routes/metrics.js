@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { computeMetricsForOrg } = require('../utils/computeMetrics');
+const { requireMinRole } = require('../middleware/auth');
 
 // GET /api/metrics/chatter/:id - Get metrics for a specific chatter
 router.get('/chatter/:id', async (req, res) => {
@@ -12,6 +13,7 @@ router.get('/chatter/:id', async (req, res) => {
       .from('chatter_daily_metrics')
       .select('*')
       .eq('chatter_id', req.params.id)
+      .eq('organisation_id', req.user.organisationId)
       .order('report_date', { ascending: false })
       .limit(limit);
 
@@ -141,7 +143,7 @@ router.get('/selling-patterns', async (req, res) => {
 });
 
 // POST /api/metrics/compute - Trigger Tier 1 computation
-router.post('/compute', async (req, res) => {
+router.post('/compute', requireMinRole('va'), async (req, res) => {
   try {
     const { date } = req.body; // optional: compute for specific date only
     const result = await computeMetricsForOrg(req.user.organisationId, date || null);
@@ -153,7 +155,7 @@ router.post('/compute', async (req, res) => {
 });
 
 // POST /api/metrics/populate - Populate metrics from employee stats
-router.post('/populate', async (req, res) => {
+router.post('/populate', requireMinRole('va'), async (req, res) => {
   try {
     const { populateMetricsFromEmployeeStats } = require('../utils/computeMetrics');
     const result = await populateMetricsFromEmployeeStats(req.user.organisationId);

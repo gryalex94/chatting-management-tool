@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { requireMinRole } = require('../middleware/auth');
 const { supabaseAdmin } = require('../utils/supabase');
 const { runDailyCheck } = require('../utils/dailyCheck');
 const { evaluateChatterDay } = require('../ai/evaluateChatterDay');
@@ -25,7 +26,7 @@ async function buildAllChatterTasks(orgId, reportDate, chatterId) {
  * Body: { report_date: "YYYY-MM-DD" }
  * Computes flags from stored facts, persists them, returns the page-grouped list.
  */
-router.post('/run', async (req, res) => {
+router.post('/run', requireMinRole('va'), async (req, res) => {
   try {
     const { report_date, recompute } = req.body;
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });
@@ -178,7 +179,7 @@ router.patch('/flag/:id', async (req, res) => {
  * Body: { chatter_id, report_date, creator_id? }
  * On-demand AI evaluation of a chatter's conversation quality (opinion layer).
  */
-router.post('/evaluate', async (req, res) => {
+router.post('/evaluate', requireMinRole('va'), async (req, res) => {
   try {
     const { chatter_id, report_date, creator_id, model, prompt_version, eval_type, creator_name, metrics, flags } = req.body;
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });

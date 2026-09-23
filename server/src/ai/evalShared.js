@@ -28,7 +28,7 @@ function extractQuote(detail) {
  * chatter by NAME (sender_name) — there is no sender_name_id column.
  */
 async function loadChatterMessages(orgId, chatterId, reportDate, creatorId = null) {
-  const { data: ch } = await supabaseAdmin.from('chatters').select('name').eq('id', chatterId).maybeSingle();
+  const { data: ch } = await supabaseAdmin.from('chatters').select('name').eq('id', chatterId).eq('organisation_id', orgId).maybeSingle();
   if (!ch?.name) return { ok: false, reason: 'Chatter not found.' };
 
   let q = supabaseAdmin
