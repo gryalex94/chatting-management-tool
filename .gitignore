@@ -33,3 +33,7 @@ CREATOR_REPORT_DUMP.md
 pc-guard/config.ini
 pc-guard/state.json
 pc-guard/guard.log
+
+# Python bytecode
+__pycache__/
+*.pyc
