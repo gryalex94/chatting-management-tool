@@ -1,9 +1,10 @@
-import { useState } from 'react';
-import { createPortal } from 'react-dom';
-import { DISMISS_REASONS } from '../../utils/taskMeta';
-
-const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '6px 14px', fontSize: 12, fontWeight: 700 };
-const ghost = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-1)', borderRadius: 'var(--r-btn)', padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+import { useState } from 'react'
+import { DISMISS_REASONS } from '@/utils/taskMeta'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 
 // Picking a reason dismisses IMMEDIATELY — one click, same as Complete.
 // Dismissing used to cost four actions while completing cost one, so the cheap
@@ -14,46 +15,41 @@ const ghost = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', colo
 // have for correcting the AI, so they have to be effortless to give.
 // 'other' still needs a note, so it keeps the confirm button.
 export default function DismissModal({ task, onClose, onConfirm }) {
-  const [code, setCode] = useState(null);
-  const [note, setNote] = useState('');
-  const needNote = code === 'other';
-  const canConfirm = code && (!needNote || note.trim());
+  const [code, setCode] = useState(null)
+  const [note, setNote] = useState('')
+  const needNote = code === 'other'
+  const canConfirm = code && (!needNote || note.trim())
   const pick = (key) => {
-    setCode(key);
-    if (key !== 'other') onConfirm(key, note.trim());   // one click, done
-  };
-  // Portal to body — a transformed ancestor (.animate-in) would otherwise break
-  // position:fixed and push the modal off-screen.
-  return createPortal((
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 20, width: 'min(520px, 92vw)' }}>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>Why dismiss this?</div>
-        <div style={{ fontSize: 12, color: 'var(--fg-3)', marginBottom: 12 }}>
-          Pick a reason — it dismisses straight away. {task.creator_name || ''}{task.chatter_name ? ` · ${task.chatter_name}` : ''}
-        </div>
-        <div style={{ fontSize: 12.5, color: 'var(--fg-2)', background: 'var(--bg-2)', borderRadius: 8, padding: '8px 10px', marginBottom: 14, lineHeight: 1.5 }}>{task.detail}</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+    setCode(key)
+    if (key !== 'other') onConfirm(key, note.trim())   // one click, done
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>Why dismiss this?</DialogTitle>
+          <DialogDescription>
+            Pick a reason. It dismisses straight away.
+            {task.creator_name || task.chatter_name
+              ? ` ${[task.creator_name, task.chatter_name].filter(Boolean).join(' · ')}` : ''}
+          </DialogDescription>
+        </DialogHeader>
+        <p className='rounded-md bg-muted px-3 py-2 text-sm leading-relaxed text-muted-foreground'>{task.detail}</p>
+        <div className='flex flex-wrap gap-2'>
           {DISMISS_REASONS.map(r => (
-            <button key={r.key} onClick={() => pick(r.key)}
-              style={{ padding: '7px 12px', fontSize: 12.5, fontWeight: 700, borderRadius: 'var(--r-btn)', cursor: 'pointer',
-                border: `1.5px solid ${code === r.key ? 'var(--indigo)' : 'var(--fg-4)'}`,
-                background: code === r.key ? 'var(--indigo-soft)' : 'var(--bg-3)', color: 'var(--fg-0)' }}>
+            <Button key={r.key} variant={code === r.key ? 'default' : 'outline'} size='sm' onClick={() => pick(r.key)}>
               {r.label}
-            </button>
+            </Button>
           ))}
         </div>
-        <textarea value={note} onChange={e => setNote(e.target.value)}
-          autoFocus={needNote}
-          placeholder={needNote ? 'Required — explain why…' : 'Adding detail? Type it here first, then pick a reason above.'}
-          style={{ width: '100%', minHeight: 60, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg-0)', fontSize: 12.5, padding: 8, fontFamily: 'var(--ff-sans)', resize: 'vertical' }} />
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-          <button onClick={onClose} style={ghost}>Cancel</button>
-          {needNote && (
-            <button disabled={!canConfirm} onClick={() => onConfirm(code, note.trim())}
-              style={{ ...primary, opacity: canConfirm ? 1 : 0.5 }}>Dismiss task</button>
-          )}
-        </div>
-      </div>
-    </div>
-  ), document.body);
+        <Textarea id='dismiss-note' value={note} onChange={e => setNote(e.target.value)} autoFocus={needNote}
+          placeholder={needNote ? 'Required: explain why…' : 'Adding detail? Type it here first, then pick a reason above.'} />
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Cancel</Button>
+          {needNote && <Button disabled={!canConfirm} onClick={() => onConfirm(code, note.trim())}>Dismiss task</Button>}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }

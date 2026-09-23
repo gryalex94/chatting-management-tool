@@ -1,12 +1,33 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import api from '../../services/api';
-import { useAuth } from '../../context/AuthContext';
-import { Chip } from '../../components/shared';
-import DismissModal from '../../components/shared/DismissModal';
-import { isDemoMode } from '../../utils/privacy';
-import { TIER, reasonLabel, fmtSentAt, areaMeta } from '../../utils/taskMeta';
+import {
+  Archive, Bookmark, BookmarkCheck, ChevronRight, CircleCheck, CircleX, Clock, Copy,
+  Inbox, MoreHorizontal, Plus, RotateCcw, Star, X,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import api from '@/services/api';
+import { useAuth } from '@/context/AuthContext';
+import { isDemoMode } from '@/utils/privacy';
+import { TIER, reasonLabel, fmtSentAt, areaMeta } from '@/utils/taskMeta';
+import { cn } from '@/lib/utils';
+import DismissModal from '@/components/shared/DismissModal';
+import { FacetedFilter } from '@/components/data-table/FacetedFilter';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDay = (d) => { if (!d || d === 'unknown') return 'Undated'; const [y, m, day] = d.split('-'); return `${+day} ${MONTHS[+m - 1]} ${y}`; };
@@ -28,7 +49,7 @@ const TABS = [
   { key: 'archived', label: 'Archived', statuses: ['archived'] },
 ];
 
-const GROUPS = [['none', 'All'], ['page', 'By page'], ['chatter', 'By chatter']];
+const GROUPS = [['none', 'No grouping'], ['page', 'Group by page'], ['chatter', 'Group by chatter']];
 
 // Bucket the already-priority-sorted list by page or chatter. Groups are ordered
 // by their most urgent task (lowest priority number), so the spirit of the AI
@@ -53,11 +74,12 @@ function fmtActioned(iso) {
 
 // Tag for a kept-waiting fan (matches the tier vocabulary from computeChatterMetrics).
 function tierTag(s) {
-  if (s.tier === 'new_sub') return { label: 'NEW SUB', c: '#ec4899' };
-  if (s.tier === 'whale') return { label: `WHALE $${s.spend}`, c: '#a78bfa' };
-  if (s.tier === 'spender') return { label: `SPENDER $${s.spend}`, c: '#60a5fa' };
-  return { label: (s.tier || 'fan').toUpperCase(), c: 'var(--fg-3)' };
+  if (s.tier === 'new_sub') return { label: 'New sub', c: '#ec4899' };
+  if (s.tier === 'whale') return { label: `Whale $${s.spend}`, c: '#8b5cf6' };
+  if (s.tier === 'spender') return { label: `Spender $${s.spend}`, c: '#3b82f6' };
+  return { label: s.tier ? s.tier.replace('_', ' ') : 'Fan', c: 'var(--muted-foreground)' };
 }
+const tint = (c) => ({ color: c, background: `color-mix(in oklch, ${c} 12%, transparent)`, borderColor: `color-mix(in oklch, ${c} 30%, transparent)` });
 
 // Per-task checklist: which sub-rows the manager has reviewed. Persisted in
 // localStorage keyed by the task id, so ticks survive navigation.
@@ -72,187 +94,320 @@ function useChecklist(storeKey) {
   return [done, toggle];
 }
 
-// Reply-time tasks carry a per-subscriber breakdown in context.subs. Render each
-// fan as its own reviewable, checkable row: username (click-to-copy), tier, PAGE
-// (a chatter's subs span several pages), worst wait, when, and the message.
+/* ─── Small building blocks ─────────────────────────────────────────────── */
+
+function PriorityBadge({ priority }) {
+  const t = TIER[priority] || TIER[7];
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant='outline' className='gap-1.5 font-mono'>
+          <span className='size-2 rounded-full' style={{ background: t.c }} />{t.label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>{t.name}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const SEVERITY_CLASS = {
+  critical: 'border-bad/40 bg-bad/10 text-bad',
+  high: 'border-bad/30 text-bad',
+  medium: 'border-warn/40 text-warn',
+  low: 'text-muted-foreground',
+};
+function SeverityBadge({ severity }) {
+  if (!severity) return null;
+  return <Badge variant='outline' className={cn('capitalize', SEVERITY_CLASS[severity])}>{severity}</Badge>;
+}
+
+function AreaBadge({ area }) {
+  if (!area) return null;
+  const am = areaMeta(area);
+  return (
+    <Badge variant='secondary' className='gap-1.5 font-normal'>
+      <span className='size-1.5 rounded-full' style={{ background: am.c }} />{am.label}
+    </Badge>
+  );
+}
+
+// A fan's username: click copies it (the nickname shows on hover).
+function FanChip({ username, nickname, className }) {
+  const value = username || nickname;
+  if (!value) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type='button' onClick={() => copy(value)}
+          className={cn('inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 font-mono text-xs text-foreground transition-colors hover:bg-accent', className)}>
+          {value}<Copy className='size-3 opacity-40' />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{nickname && username ? `${nickname} · click to copy` : 'Click to copy'}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const TimeStamp = ({ children }) => (
+  <span className='inline-flex items-center gap-1 text-xs font-medium text-link'><Clock className='size-3' />{children}</span>
+);
+
+// Collapsible, checkable list of sub-rows (fans kept waiting / AFK gaps).
+function ReviewList({ label, doneLabel, count, defaultOpen, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className='mt-3'>
+      <CollapsibleTrigger asChild>
+        <Button variant='ghost' size='sm' className='-ms-2 h-7 px-2 text-muted-foreground'>
+          <ChevronRight className={cn('transition-transform', open && 'rotate-90')} />
+          {doneLabel || label}
+          <span className='text-xs opacity-70'>({count})</span>
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className='mt-1.5 space-y-1.5'>{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ReviewRow({ done, onToggle, children }) {
+  return (
+    <div className={cn('flex gap-3 rounded-md border bg-muted/40 px-3 py-2', done && 'opacity-50')}>
+      <Checkbox checked={done} onCheckedChange={onToggle} className='mt-0.5' aria-label='Mark reviewed' />
+      <div className='min-w-0 flex-1 space-y-1'>{children}</div>
+    </div>
+  );
+}
+
+// Reply-time tasks carry a per-subscriber breakdown in context.subs. Each fan is
+// its own reviewable, checkable row: username (click-to-copy), tier, PAGE (a
+// chatter's subs span several pages), worst wait, when, and the message.
 function ReplyTimeSubs({ subs, workload, taskId }) {
-  const [open, setOpen] = useState(subs.length <= 4);
   const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
-        {open ? '▾' : '▸'} {done.size ? `${done.size}/${subs.length} reviewed` : `${subs.length} fan${subs.length === 1 ? '' : 's'} kept waiting`}{workload ? ` · workload: ${workload}` : ''}
-      </button>
-      {open && (
-        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {subs.map((s, i) => {
-            const tag = tierTag(s);
-            const key = s.fan_username || String(i);
-            const isDone = done.has(key);
-            return (
-              <div key={key} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px', display: 'flex', gap: 8, opacity: isDone ? 0.45 : 1 }}>
-                <input type="checkbox" checked={isDone} onChange={() => toggle(key)} title="Mark reviewed" style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <button onClick={() => copy(s.fan_username)} title="click to copy username" style={{ ...userBtn, textDecoration: isDone ? 'line-through' : 'none' }}>{s.fan_username || s.fan_nickname}</button>
-                    <span style={{ fontSize: 9.5, fontWeight: 800, color: '#fff', background: tag.c, borderRadius: 4, padding: '1px 5px' }}>{tag.label}</span>
-                    {s.page && <span style={{ fontSize: 9.5, color: 'var(--fg-2)', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{s.page}</span>}
-                    <span style={{ fontSize: 11, color: '#f87171', fontWeight: 700 }}>{s.worst_reply_min}m wait</span>
-                    {s.worst_time && <span style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {s.worst_time}</span>}
-                    {s.count > 1 && <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>×{s.count} times</span>}
-                  </div>
-                  {s.worst_fan_message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 3 }}>fan: “{s.worst_fan_message}”</div>}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    <ReviewList count={subs.length} defaultOpen={subs.length <= 4}
+      label={`Fans kept waiting${workload ? ` · workload: ${workload}` : ''}`}
+      doneLabel={done.size ? `${done.size} of ${subs.length} reviewed` : null}>
+      {subs.map((s, i) => {
+        const tag = tierTag(s);
+        const key = s.fan_username || String(i);
+        return (
+          <ReviewRow key={key} done={done.has(key)} onToggle={() => toggle(key)}>
+            <div className='flex flex-wrap items-center gap-2'>
+              <FanChip username={s.fan_username} nickname={s.fan_nickname} className={done.has(key) ? 'line-through' : ''} />
+              <Badge variant='outline' className='capitalize' style={tint(tag.c)}>{tag.label}</Badge>
+              {s.page && <Badge variant='secondary' className='font-normal'>{s.page}</Badge>}
+              <span className='text-xs font-semibold text-bad'>{s.worst_reply_min}m wait</span>
+              {s.worst_time && <TimeStamp>{s.worst_time}</TimeStamp>}
+              {s.count > 1 && <span className='text-xs text-muted-foreground'>×{s.count} times</span>}
+            </div>
+            {s.worst_fan_message && <p className='text-xs italic text-muted-foreground'>Fan: “{s.worst_fan_message}”</p>}
+          </ReviewRow>
+        );
+      })}
+    </ReviewList>
   );
 }
 
 // AFK tasks carry context.incidents — each gap with its bracketing times, who the
 // chatter resumed with, and the fans left waiting. Point the manager to the spot.
 function AfkIncidents({ incidents, taskId }) {
-  const [open, setOpen] = useState(incidents.length <= 3);
   const [done, toggle] = useChecklist(`afkDone:${taskId}`);
   return (
-    <div style={{ marginTop: 8 }}>
-      <button onClick={() => setOpen(o => !o)} style={{ ...ghost, fontSize: 11, padding: '3px 9px' }}>
-        {open ? '▾' : '▸'} {done.size ? `${done.size}/${incidents.length} reviewed` : `${incidents.length} AFK gap${incidents.length === 1 ? '' : 's'} — where to look`}
-      </button>
-      {open && (
-        <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {incidents.map((g, i) => (
-            <div key={i} style={{ background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px', display: 'flex', gap: 8, opacity: done.has(String(i)) ? 0.45 : 1 }}>
-              <input type="checkbox" checked={done.has(String(i))} onChange={() => toggle(String(i))} title="Mark reviewed" style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 11 }}>
-                <span style={{ color: '#f87171', fontWeight: 700 }}>{g.gap_minutes}m gap</span>
-                <span style={{ color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {g.from_time} → {g.to_time}</span>
-                {g.page && <span style={{ fontSize: 9.5, color: 'var(--fg-2)', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 5px' }}>{g.page}</span>}
-              </div>
-              {g.before_message && (
-                <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 4, display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--fg-3)' }}>before gap</span>
-                  {g.before_username && <button onClick={() => copy(g.before_username)} title="click to copy" style={userBtn}>{g.before_username}</button>}
-                  <span style={{ fontStyle: 'italic' }}>“{g.before_message}”</span>
-                </div>
-              )}
-              {g.resumed_message && (
-                <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 3, display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--fg-3)' }}>resumed</span>
-                  {g.resumed_username && <button onClick={() => copy(g.resumed_username)} title="click to copy" style={userBtn}>{g.resumed_username}</button>}
-                  <span style={{ fontStyle: 'italic' }}>“{g.resumed_message}”</span>
-                </div>
-              )}
-              {Array.isArray(g.waiting_fans) && g.waiting_fans.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4, alignItems: 'center' }}>
-                  <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>waiting:</span>
-                  {g.waiting_fans.map((f, j) => (
-                    <span key={j} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                      <button onClick={() => copy(f.username || f.fan)} title={f.fan && f.username ? `${f.fan} — click to copy` : 'click to copy'} style={userBtn}>{f.username || f.fan}</button>
-                      <span style={{ fontSize: 10, color: '#f87171', fontWeight: 700 }}>{f.waited_min}m</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-              </div>
+    <ReviewList count={incidents.length} defaultOpen={incidents.length <= 3} label='AFK gaps, where to look'
+      doneLabel={done.size ? `${done.size} of ${incidents.length} reviewed` : null}>
+      {incidents.map((g, i) => (
+        <ReviewRow key={i} done={done.has(String(i))} onToggle={() => toggle(String(i))}>
+          <div className='flex flex-wrap items-center gap-2'>
+            <span className='text-xs font-semibold text-bad'>{g.gap_minutes}m gap</span>
+            <TimeStamp>{g.from_time} → {g.to_time}</TimeStamp>
+            {g.page && <Badge variant='secondary' className='font-normal'>{g.page}</Badge>}
+          </div>
+          {g.before_message && (
+            <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
+              <span>Before the gap</span><FanChip username={g.before_username} />
+              <span className='italic'>“{g.before_message}”</span>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+          )}
+          {g.resumed_message && (
+            <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
+              <span>Resumed</span><FanChip username={g.resumed_username} />
+              <span className='italic'>“{g.resumed_message}”</span>
+            </div>
+          )}
+          {Array.isArray(g.waiting_fans) && g.waiting_fans.length > 0 && (
+            <div className='flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
+              <span>Waiting:</span>
+              {g.waiting_fans.map((f, j) => (
+                <span key={j} className='inline-flex items-center gap-1'>
+                  <FanChip username={f.username} nickname={f.fan} />
+                  <span className='font-semibold text-bad'>{f.waited_min}m</span>
+                </span>
+              ))}
+            </div>
+          )}
+        </ReviewRow>
+      ))}
+    </ReviewList>
   );
 }
 
-function Row({ task, onAction }) {
+/* ─── One task ──────────────────────────────────────────────────────────── */
+
+const ACTIONED = {
+  completed: { icon: CircleCheck, verb: 'Completed' },
+  dismissed: { icon: CircleX, verb: 'Dismissed' },
+  archived: { icon: Inbox, verb: 'Archived' },
+};
+
+function TaskRow({ task, onAction }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
-  const important = ctx.important;
-  const t = TIER[task.priority] || TIER[7];
+  const live = task.status === 'open' || task.status === 'taken';
   const dismissed = task.status === 'dismissed';
-  const actionedAt = (task.status === 'completed' || task.status === 'dismissed' || task.status === 'archived') ? task.completed_at : null;
+  const actioned = ACTIONED[task.status];
   // Every fan the task refers to, each with their own username + time.
   const fans = (ctx.fans && ctx.fans.length) ? ctx.fans
     : (task.fan_username ? [{ username: task.fan_username, sent_at: ctx.sent_at }] : []);
+  const where = [task.creator_name, task.chatter_name].filter(Boolean).join(' · ');
+
   return (
-    <div style={{ background: isCustom ? 'rgba(245,158,11,0.07)' : 'var(--bg-2)', border: `1.5px solid ${isCustom ? '#f59e0b' : 'var(--border)'}`, borderRadius: 'var(--r-card)', padding: '11px 13px', marginBottom: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {isCustom
-          ? <span style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', background: '#f59e0b', borderRadius: 5, padding: '2px 7px' }}>{important ? '★ ' : ''}CUSTOM</span>
-          : <span style={{ fontSize: 10.5, fontWeight: 800, color: '#fff', background: t.c, borderRadius: 5, padding: '2px 6px' }}>{t.label}</span>}
-        {!isCustom && <Chip tone={task.severity === 'critical' || task.severity === 'high' ? 'bad' : task.severity === 'medium' ? 'warn' : 'info'} style={{ fontSize: 9.5 }}>{task.severity}</Chip>}
-        {!isCustom && task.area && (() => { const am = areaMeta(task.area); return (
-          <span style={{ fontSize: 10, fontWeight: 700, color: am.c, background: `${am.c}1f`, borderRadius: 5, padding: '2px 6px', letterSpacing: 0.2 }}>{am.label}</span>
-        ); })()}
-        {(task.creator_name || task.chatter_name) && <span style={{ fontSize: 11, color: 'var(--fg-2)', fontWeight: 600 }}>{task.creator_name || ''}{task.creator_name && task.chatter_name ? ' · ' : ''}{task.chatter_name || ''}</span>}
-        {isCustom && ctx.assigned_to_name && <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>for <b style={{ color: 'var(--fg-1)' }}>{ctx.assigned_to_name}</b></span>}
-        {fans.map((f, fi) => (
-          <span key={f.username || f.nickname || fi} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <button onClick={() => copy(f.username || f.nickname)} title={f.nickname && f.username ? `${f.nickname} — click to copy` : 'click to copy'} style={userBtn}>{f.username || f.nickname}</button>
-            {f.spend != null && <span title="Recorded spend" style={{ fontSize: 10.5, color: f.spend >= 1000 ? '#a78bfa' : f.spend > 0 ? '#4ade80' : 'var(--fg-3)', fontWeight: 700 }}>${f.spend}</span>}
-            {f.sent_at && <span title="When this fan's message was sent" style={{ fontSize: 10.5, color: 'var(--indigo-bright)', fontWeight: 700 }}>🕐 {fmtSentAt(f.sent_at)}</span>}
-          </span>
-        ))}
-        {!isCustom && task.days_open > 1 && <Chip tone="warn" style={{ fontSize: 9.5 }}>{task.days_open}d</Chip>}
-        {actionedAt && <span style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--fg-3)', fontWeight: 600 }}>{task.status === 'completed' ? '✓ done' : task.status === 'archived' ? '📥 archived' : '✕ dismissed'} {fmtActioned(actionedAt)}</span>}
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.5, marginTop: 6 }}>{task.detail}</div>
-
-      {/* reply-time / AFK: per-fan reviewable rows */}
-      {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
-        <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} />
-      )}
-      {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
-        <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
-      )}
-
-      {task.status === 'archived' && task.priority_reason && (
-        <div style={{ marginTop: 7 }}><Chip tone="neutral" style={{ fontSize: 10 }}>📥 {task.priority_reason}</Chip></div>
-      )}
-
-      {/* dismissed → show the reasoning (the calibration signal) */}
-      {dismissed && (
-        <div style={{ marginTop: 7, fontSize: 11.5, color: 'var(--fg-2)' }}>
-          <Chip tone="neutral" style={{ fontSize: 10 }}>dismissed: {reasonLabel[task.dismiss_reason_code] || task.dismiss_reason_code || '—'}</Chip>
-          {task.dismiss_reason && <span style={{ marginLeft: 8, fontStyle: 'italic', color: 'var(--fg-3)' }}>“{task.dismiss_reason}”</span>}
+    <div className={cn('flex flex-col gap-3 p-4 sm:flex-row sm:gap-6', isCustom && 'border-l-2 border-l-warn bg-warn/5')}>
+      <div className='min-w-0 flex-1'>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          {isCustom ? (
+            <Badge className='gap-1 bg-warn text-white'>{ctx.important && <Star className='fill-current' />}Custom</Badge>
+          ) : (
+            <>
+              <PriorityBadge priority={task.priority} />
+              <SeverityBadge severity={task.severity} />
+              <AreaBadge area={task.area} />
+            </>
+          )}
+          {!isCustom && task.days_open > 1 && (
+            <Badge variant='outline' className='border-warn/40 text-warn'>{task.days_open} days open</Badge>
+          )}
         </div>
-      )}
-      {ctx.message && !dismissed && (
-        <div onClick={() => copy(ctx.message)} title="Click to copy"
-          style={{ marginTop: 5, fontSize: 11.5, color: 'var(--fg-2)', fontStyle: 'italic', background: 'var(--bg-3)', borderRadius: 6, padding: '6px 8px', lineHeight: 1.5, cursor: 'pointer' }}>
-          "{ctx.message}"
-        </div>
-      )}
 
-      <div style={{ display: 'flex', gap: 6, marginTop: 9 }}>
-        {task.status === 'open' && <button onClick={() => onAction(task, 'take')} style={primary}>Take</button>}
-        {task.status === 'taken' && <button onClick={() => onAction(task, 'complete')} style={primary}>Complete</button>}
-        {task.status === 'taken' && <button onClick={() => onAction(task, 'reopen')} style={ghost}>Release</button>}
-        {(task.status === 'open' || task.status === 'taken') && <button onClick={() => onAction(task, 'dismiss')} style={ghost}>Dismiss</button>}
-        {(task.status === 'open' || task.status === 'taken') && <button onClick={() => onAction(task, 'archive')} style={ghost} title="File away without actioning">Archive</button>}
-        {task.status === 'open' && <button onClick={() => onAction(task, 'complete')} style={subtle} title="Mark done without taking it first">Complete</button>}
-        {(task.status === 'dismissed' || task.status === 'completed' || task.status === 'archived') && <button onClick={() => onAction(task, 'reopen')} style={ghost}>Reopen</button>}
-        {task.chatter_id && (
-          task.coach_flag
-            ? <button onClick={() => onAction(task, 'uncoach')} style={{ ...ghost, borderColor: '#f59e0b', color: '#f59e0b' }} title="Remove from this chatter's coaching log">📌 Saved</button>
-            : <button onClick={() => onAction(task, 'coach')} style={ghost} title="Save for this chatter's coaching session">📌 Coach</button>
+        {(where || fans.length > 0 || (isCustom && ctx.assigned_to_name)) && (
+          <div className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm'>
+            {where && <span className='font-medium'>{where}</span>}
+            {isCustom && ctx.assigned_to_name && <span className='text-muted-foreground'>for <span className='font-medium text-foreground'>{ctx.assigned_to_name}</span></span>}
+            {fans.map((f, fi) => (
+              <span key={f.username || f.nickname || fi} className='inline-flex items-center gap-1.5'>
+                <FanChip username={f.username} nickname={f.nickname} />
+                {f.spend != null && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className={cn('text-xs font-semibold tabular-nums', f.spend >= 1000 ? 'text-violet-500' : f.spend > 0 ? 'text-good' : 'text-muted-foreground')}>${f.spend}</span>
+                    </TooltipTrigger>
+                    <TooltipContent>Recorded spend</TooltipContent>
+                  </Tooltip>
+                )}
+                {f.sent_at && <TimeStamp>{fmtSentAt(f.sent_at)}</TimeStamp>}
+              </span>
+            ))}
+          </div>
         )}
+
+        <p className='mt-2 text-sm leading-relaxed text-foreground/90'>{task.detail}</p>
+
+        {ctx.message && !dismissed && (
+          <button type='button' onClick={() => copy(ctx.message)} title='Click to copy'
+            className='mt-2 block w-full rounded-md border-l-2 bg-muted/50 px-3 py-2 text-start text-sm italic leading-relaxed text-muted-foreground transition-colors hover:bg-muted'>
+            “{ctx.message}”
+          </button>
+        )}
+
+        {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
+          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} />
+        )}
+        {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
+          <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
+        )}
+
+        {task.status === 'archived' && task.priority_reason && (
+          <p className='mt-2 flex items-center gap-1.5 text-xs text-muted-foreground'><Inbox className='size-3.5' />{task.priority_reason}</p>
+        )}
+        {/* dismissed → show the reasoning (the calibration signal) */}
+        {dismissed && (
+          <div className='mt-2 flex flex-wrap items-center gap-2 text-xs'>
+            <Badge variant='outline' className='font-normal'>Reason: {reasonLabel[task.dismiss_reason_code] || task.dismiss_reason_code || 'none given'}</Badge>
+            {task.dismiss_reason && <span className='italic text-muted-foreground'>“{task.dismiss_reason}”</span>}
+          </div>
+        )}
+      </div>
+
+      <div className='flex shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-end sm:justify-start'>
+        {actioned && task.completed_at && (
+          <span className='inline-flex items-center gap-1 text-xs text-muted-foreground'>
+            <actioned.icon className='size-3.5' />{actioned.verb} {fmtActioned(task.completed_at)}
+          </span>
+        )}
+        <div className='flex items-center gap-1.5'>
+          {task.status === 'open' && <Button size='sm' onClick={() => onAction(task, 'take')}>Take</Button>}
+          {task.status === 'taken' && <Button size='sm' onClick={() => onAction(task, 'complete')}>Complete</Button>}
+          {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'dismiss')}>Dismiss</Button>}
+          {!live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'reopen')}><RotateCcw />Reopen</Button>}
+          {task.chatter_id && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button size='icon-sm' variant={task.coach_flag ? 'secondary' : 'ghost'}
+                  className={cn(task.coach_flag && 'text-warn')}
+                  onClick={() => onAction(task, task.coach_flag ? 'uncoach' : 'coach')}
+                  aria-label={task.coach_flag ? 'Remove from coaching log' : 'Save for coaching'}>
+                  {task.coach_flag ? <BookmarkCheck /> : <Bookmark />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{task.coach_flag ? "Saved to this chatter's coaching log. Click to remove." : "Save for this chatter's coaching session"}</TooltipContent>
+            </Tooltip>
+          )}
+          {live && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size='icon-sm' variant='ghost' aria-label='More actions'><MoreHorizontal /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end'>
+                {task.status === 'open' && (
+                  <DropdownMenuItem onClick={() => onAction(task, 'complete')}><CircleCheck />Complete without taking</DropdownMenuItem>
+                )}
+                {task.status === 'taken' && (
+                  <DropdownMenuItem onClick={() => onAction(task, 'reopen')}><RotateCcw />Release</DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={() => onAction(task, 'archive')}><Archive />Archive (file away)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function CustomTaskModal({ meta, onClose, onCreate }) {
+// A bordered block of tasks, optionally with a heading (group / day).
+function TaskSection({ title, count, tasks, onAction }) {
+  return (
+    <section className='overflow-hidden rounded-lg border bg-card'>
+      {title && (
+        <div className='flex items-center gap-2 border-b bg-muted/40 px-4 py-2.5 text-sm font-medium'>
+          {title}<Badge variant='secondary' className='h-5 rounded-full px-1.5 font-mono text-xs'>{count}</Badge>
+        </div>
+      )}
+      <div className='divide-y'>{tasks.map(t => <TaskRow key={t.id} task={t} onAction={onAction} />)}</div>
+    </section>
+  );
+}
+
+/* ─── New custom task ───────────────────────────────────────────────────── */
+
+const ANYONE = '__anyone';
+function CustomTaskDialog({ meta, onClose, onCreate }) {
   const [title, setTitle] = useState('');
   const [detail, setDetail] = useState('');
   const [important, setImportant] = useState(false);
   const [attach, setAttach] = useState('none');     // none | page | chatter
   const [creatorId, setCreatorId] = useState('');
   const [chatterId, setChatterId] = useState('');
-  const [assignee, setAssignee] = useState('');
+  const [assignee, setAssignee] = useState(ANYONE);
   const [saving, setSaving] = useState(false);
 
   const canSave = title.trim() && (attach !== 'page' || creatorId) && (attach !== 'chatter' || chatterId);
@@ -262,62 +417,79 @@ function CustomTaskModal({ meta, onClose, onCreate }) {
       title: title.trim(), detail: detail.trim(), important,
       creator_id: attach === 'page' ? creatorId : null,
       chatter_id: attach === 'chatter' ? chatterId : null,
-      assigned_to_name: assignee || null,
+      assigned_to_name: assignee === ANYONE ? null : assignee,
     });
     setSaving(false);
   };
-  const sel = { ...inputStyle, width: '100%' };
-  return createPortal((
-    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 20, width: 'min(520px, 94vw)', maxHeight: '88vh', overflow: 'auto' }}>
-        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 14 }}>New custom task</div>
 
-        <label style={lbl}>Title</label>
-        <input value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Review Maurice's discount habit" autoFocus style={{ ...inputStyle, width: '100%', marginBottom: 12 }} />
+  const Choice = ({ on, onClick, children }) => (
+    <Button type='button' variant={on ? 'secondary' : 'outline'} className={cn('flex-1', on && 'ring-1 ring-ring')} onClick={onClick}>{children}</Button>
+  );
 
-        <label style={lbl}>Details (optional)</label>
-        <textarea value={detail} onChange={e => setDetail(e.target.value)} rows={3} placeholder="What to do, context…" style={{ ...inputStyle, width: '100%', resize: 'vertical', marginBottom: 12, fontFamily: 'var(--ff-sans)' }} />
-
-        <label style={lbl}>Importance</label>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-          {[[false, 'Normal'], [true, '★ Important']].map(([v, l]) => (
-            <button key={l} onClick={() => setImportant(v)} style={{ ...groupBtn, flex: 1, padding: '8px 0', borderColor: important === v ? '#f59e0b' : 'var(--border)', background: important === v ? 'rgba(245,158,11,0.12)' : 'var(--bg-2)', color: important === v ? '#f59e0b' : 'var(--fg-2)' }}>{l}</button>
-          ))}
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>New custom task</DialogTitle>
+          <DialogDescription>A task written by you. It's pinned above the AI tasks.</DialogDescription>
+        </DialogHeader>
+        <div className='grid gap-4'>
+          <div className='grid gap-2'>
+            <Label htmlFor='ct-title'>Title</Label>
+            <Input id='ct-title' value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Review Maurice's discount habit" autoFocus />
+          </div>
+          <div className='grid gap-2'>
+            <Label htmlFor='ct-detail'>Details <span className='font-normal text-muted-foreground'>(optional)</span></Label>
+            <Textarea id='ct-detail' value={detail} onChange={e => setDetail(e.target.value)} rows={3} placeholder='What to do, context…' />
+          </div>
+          <div className='grid gap-2'>
+            <Label>Importance</Label>
+            <div className='flex gap-2'>
+              <Choice on={!important} onClick={() => setImportant(false)}>Normal</Choice>
+              <Choice on={important} onClick={() => setImportant(true)}><Star />Important</Choice>
+            </div>
+          </div>
+          <div className='grid gap-2'>
+            <Label>Attach to</Label>
+            <div className='flex gap-2'>
+              {[['none', 'Nothing'], ['page', 'A page'], ['chatter', 'A chatter']].map(([v, l]) => (
+                <Choice key={v} on={attach === v} onClick={() => setAttach(v)}>{l}</Choice>
+              ))}
+            </div>
+            {attach === 'page' && (
+              <Select value={creatorId} onValueChange={setCreatorId}>
+                <SelectTrigger className='w-full'><SelectValue placeholder='Select a page…' /></SelectTrigger>
+                <SelectContent>{(meta.creators || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {attach === 'chatter' && (
+              <Select value={chatterId} onValueChange={setChatterId}>
+                <SelectTrigger className='w-full'><SelectValue placeholder='Select a chatter…' /></SelectTrigger>
+                <SelectContent>{(meta.chatters || []).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+          </div>
+          <div className='grid gap-2'>
+            <Label>For <span className='font-normal text-muted-foreground'>(optional)</span></Label>
+            <Select value={assignee} onValueChange={setAssignee}>
+              <SelectTrigger className='w-full'><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ANYONE}>Anyone</SelectItem>
+                {(meta.members || []).map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-
-        <label style={lbl}>Attach to</label>
-        <div style={{ display: 'flex', gap: 8, marginBottom: attach === 'none' ? 12 : 8 }}>
-          {[['none', 'Nothing'], ['page', 'A page'], ['chatter', 'A chatter']].map(([v, l]) => (
-            <button key={v} onClick={() => setAttach(v)} style={{ ...groupBtn, flex: 1, padding: '8px 0', borderColor: attach === v ? 'var(--indigo)' : 'var(--border)', background: attach === v ? 'var(--indigo-soft)' : 'var(--bg-2)', color: attach === v ? 'var(--indigo-bright)' : 'var(--fg-2)' }}>{l}</button>
-          ))}
-        </div>
-        {attach === 'page' && (
-          <select value={creatorId} onChange={e => setCreatorId(e.target.value)} style={{ ...sel, marginBottom: 12 }}>
-            <option value="">Select a page…</option>
-            {(meta.creators || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
-        {attach === 'chatter' && (
-          <select value={chatterId} onChange={e => setChatterId(e.target.value)} style={{ ...sel, marginBottom: 12 }}>
-            <option value="">Select a chatter…</option>
-            {(meta.chatters || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        )}
-
-        <label style={lbl}>For (optional)</label>
-        <select value={assignee} onChange={e => setAssignee(e.target.value)} style={{ ...sel, marginBottom: 16 }}>
-          <option value="">Anyone</option>
-          {(meta.members || []).map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-        </select>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onClose} style={ghost}>Cancel</button>
-          <button onClick={submit} disabled={!canSave || saving} style={{ ...primary, opacity: canSave && !saving ? 1 : 0.5 }}>{saving ? 'Creating…' : 'Create task'}</button>
-        </div>
-      </div>
-    </div>
-  ), document.body);
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={!canSave || saving}>{saving ? 'Creating…' : 'Create task'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
+
+/* ─── Page ──────────────────────────────────────────────────────────────── */
 
 export default function TasksPage() {
   const { user } = useAuth();
@@ -331,7 +503,6 @@ export default function TasksPage() {
   const [groupBy, setGroupBy] = useState(saved.groupBy || 'none');
   const [selPages, setSelPages] = useState(saved.selPages || []);
   const [selChatters, setSelChatters] = useState(saved.selChatters || []);
-  const [showFilters, setShowFilters] = useState(saved.showFilters || false);
   const [dismiss, setDismiss] = useState(null);
   const [showCustom, setShowCustom] = useState(false);
   const [meta, setMeta] = useState({ creators: [], chatters: [], members: [] });
@@ -352,8 +523,8 @@ export default function TasksPage() {
   useEffect(() => { load(); }, [load]);
   // Persist filter/tab settings so they survive tab switches and navigation.
   useEffect(() => {
-    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters, showFilters })); } catch { /* ignore */ }
-  }, [tab, search, groupBy, selPages, selChatters, showFilters]);
+    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters })); } catch { /* ignore */ }
+  }, [tab, search, groupBy, selPages, selChatters]);
 
   const act = async (task, action, reason_code, reason) => {
     try {
@@ -363,7 +534,8 @@ export default function TasksPage() {
         if (action === 'coach') return { ...t, coach_flag: true };
         if (action === 'uncoach') return { ...t, coach_flag: false, coached_at: null };
         const next = action === 'take' ? 'taken' : action === 'complete' ? 'completed' : action === 'dismiss' ? 'dismissed' : action === 'archive' ? 'archived' : 'open';
-        return { ...t, status: next, dismiss_reason_code: reason_code || t.dismiss_reason_code, dismiss_reason: reason ?? t.dismiss_reason };
+        const done = next === 'completed' || next === 'dismissed' || next === 'archived';
+        return { ...t, status: next, completed_at: done ? new Date().toISOString() : t.completed_at, dismiss_reason_code: reason_code || t.dismiss_reason_code, dismiss_reason: reason ?? t.dismiss_reason };
       }));
       toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : 'Updated');
     } catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
@@ -375,16 +547,21 @@ export default function TasksPage() {
   };
 
   const counts = Object.fromEntries(TABS.map(tb => [tb.key, tasks.filter(t => tb.statuses.includes(t.status)).length]));
-  const cur = TABS.find(tb => tb.key === tab);
+  const cur = TABS.find(tb => tb.key === tab) || TABS[0];
 
-  // chip options come from this tab's tasks, UNION the currently-selected values so
-  // a selected chip never vanishes after you action its last task (that made the
-  // whole list look empty with no way to tell why — issue #4).
+  // Filter options come from this tab's tasks, UNION the currently-selected values
+  // so a selected option never vanishes after you action its last task (that made
+  // the whole list look empty with no way to tell why).
   const base = tasks.filter(t => cur.statuses.includes(t.status));
-  const pageOpts = [...new Set([...base.map(t => t.creator_name).filter(Boolean), ...selPages])].sort();
-  const chatterOpts = [...new Set([...base.map(t => t.chatter_name).filter(Boolean), ...selChatters])].sort();
+  const optionsFor = (field, selected) => {
+    const n = {};
+    base.forEach(t => { if (t[field]) n[t[field]] = (n[t[field]] || 0) + 1; });
+    return [...new Set([...Object.keys(n), ...selected])].sort().map(v => ({ value: v, label: v, count: n[v] || 0 }));
+  };
+  const pageOpts = optionsFor('creator_name', selPages);
+  const chatterOpts = optionsFor('chatter_name', selChatters);
   const activeFilters = selPages.length + selChatters.length;
-  const clearFilters = () => { setSelPages([]); setSelChatters([]); };
+  const clearFilters = () => { setSelPages([]); setSelChatters([]); setSearch(''); };
 
   let list = base;
   if (selPages.length) list = list.filter(t => selPages.includes(t.creator_name));
@@ -405,123 +582,90 @@ export default function TasksPage() {
     ? Object.entries(list.reduce((m, t) => { const k = t.dismiss_reason_code || 'other'; m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1])
     : [];
 
-  if (loading) return <div style={{ paddingTop: 80, textAlign: 'center', color: 'var(--fg-3)' }}>Loading…</div>;
-
   return (
-    <div className="animate-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, gap: 12 }}>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div className='flex flex-wrap items-end justify-between gap-2'>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700 }}>Tasks</h1>
-          <p style={{ fontSize: 13, color: 'var(--fg-2)', marginTop: 4 }}>The full backlog. Open & taken are the live queue; completed & dismissed are the record.</p>
+          <h2 className='text-2xl font-bold tracking-tight'>Tasks</h2>
+          <p className='text-muted-foreground'>Open and taken tasks are the live queue. Completed, dismissed and archived tasks are the record.</p>
         </div>
-        {canCreate && <button onClick={() => setShowCustom(true)} style={primary}>+ Custom task</button>}
+        {canCreate && <Button onClick={() => setShowCustom(true)}><Plus />Custom task</Button>}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-        {TABS.map(tb => (
-          <button key={tb.key} onClick={() => setTab(tb.key)}
-            style={{ ...tabBtn, borderColor: tab === tb.key ? 'var(--indigo)' : 'var(--fg-4)', color: tab === tb.key ? 'var(--fg-0)' : 'var(--fg-2)' }}>
-            {tb.label} {counts[tb.key]}
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginRight: 4 }}>
-          {GROUPS.map(([k, l]) => (
-            <button key={k} onClick={() => setGroupBy(k)}
-              style={{ ...groupBtn, borderColor: groupBy === k ? 'var(--indigo)' : 'var(--border)', background: groupBy === k ? 'var(--indigo-soft)' : 'var(--bg-2)', color: groupBy === k ? 'var(--indigo-bright)' : 'var(--fg-3)' }}>
-              {l}
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setShowFilters(v => !v)}
-          style={{ ...groupBtn, marginRight: 4, borderColor: (showFilters || activeFilters) ? 'var(--indigo)' : 'var(--border)', background: activeFilters ? 'var(--indigo-soft)' : 'var(--bg-2)', color: activeFilters ? 'var(--indigo-bright)' : 'var(--fg-3)' }}>
-          Filter{activeFilters ? ` · ${activeFilters}` : ''}
-        </button>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
-          style={{ ...inputStyle, width: 180 }} />
+      <div className='-mx-1 overflow-x-auto px-1'>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>
+            {TABS.map(tb => (
+              <TabsTrigger key={tb.key} value={tb.key} className='gap-1.5'>
+                {tb.label}
+                <span className='rounded-full bg-background/60 px-1.5 font-mono text-xs text-muted-foreground'>{counts[tb.key]}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </div>
 
-      {showFilters && (
-        <div style={filterPanel}>
-          {pageOpts.length > 0 && (
-            <div style={filterRow}>
-              <span style={filterLabel}>Pages</span>
-              {pageOpts.map(p => (
-                <button key={p} onClick={() => setSelPages(a => a.includes(p) ? a.filter(x => x !== p) : [...a, p])} style={chipStyle(selPages.includes(p))}>{p}</button>
-              ))}
-            </div>
-          )}
-          {chatterOpts.length > 0 && (
-            <div style={filterRow}>
-              <span style={filterLabel}>Chatters</span>
-              {chatterOpts.map(c => (
-                <button key={c} onClick={() => setSelChatters(a => a.includes(c) ? a.filter(x => x !== c) : [...a, c])} style={chipStyle(selChatters.includes(c))}>{c}</button>
-              ))}
-            </div>
-          )}
-          {activeFilters > 0 && (
-            <div><button onClick={() => { setSelPages([]); setSelChatters([]); }} style={{ ...groupBtn, color: 'var(--bad)', borderColor: 'var(--border)' }}>Clear filters</button></div>
-          )}
-        </div>
-      )}
+      <div className='flex flex-wrap items-center gap-2'>
+        <Input value={search} onChange={e => setSearch(e.target.value)} placeholder='Search tasks…' className='h-8 w-full sm:w-56 lg:w-64' />
+        <FacetedFilter title='Page' options={pageOpts} selected={selPages} onChange={setSelPages} />
+        <FacetedFilter title='Chatter' options={chatterOpts} selected={selChatters} onChange={setSelChatters} />
+        {(activeFilters > 0 || search) && (
+          <Button variant='ghost' size='sm' className='h-8 px-2 lg:px-3' onClick={clearFilters}>Reset<X /></Button>
+        )}
+        {!isHistory && (
+          <div className='ms-auto'>
+            <Select value={groupBy} onValueChange={setGroupBy}>
+              <SelectTrigger size='sm' className='h-8 w-44'><SelectValue /></SelectTrigger>
+              <SelectContent>{GROUPS.map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+        )}
+      </div>
 
       {tab === 'dismissed' && dismissBreakdown.length > 0 && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14, padding: '10px 12px', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-card)' }}>
-          <span style={{ fontSize: 11.5, color: 'var(--fg-3)', fontWeight: 700 }}>Why dismissed (calibration):</span>
+        <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm'>
+          <span className='font-medium'>Why tasks were dismissed</span>
+          <span className='text-muted-foreground'>(what the AI gets calibrated on)</span>
           {dismissBreakdown.map(([code, n]) => (
-            <span key={code} style={{ fontSize: 11.5, color: 'var(--fg-1)' }}>{reasonLabel[code] || code}: <strong>{n}</strong></span>
+            <Badge key={code} variant='secondary' className='font-normal'>{reasonLabel[code] || code}: <span className='font-semibold'>{n}</span></Badge>
           ))}
         </div>
       )}
 
-      {list.length === 0 ? (
-        <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', padding: 50, textAlign: 'center', color: 'var(--fg-3)' }}>
-          {activeFilters > 0 ? (
-            <>No tasks match the current filters. <button onClick={clearFilters} style={{ ...subtle, color: 'var(--indigo-bright)', marginLeft: 0, textDecoration: 'underline' }}>Clear filters</button></>
+      {loading ? (
+        <div className='overflow-hidden rounded-lg border bg-card'>
+          {[0, 1, 2, 3, 4].map(i => (
+            <div key={i} className='space-y-2.5 border-b p-4 last:border-b-0'>
+              <div className='flex gap-1.5'><Skeleton className='h-5 w-10' /><Skeleton className='h-5 w-14' /><Skeleton className='h-5 w-20' /></div>
+              <Skeleton className='h-4 w-1/3' />
+              <Skeleton className='h-4 w-4/5' />
+            </div>
+          ))}
+        </div>
+      ) : list.length === 0 ? (
+        <div className='flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground'>
+          {activeFilters > 0 || search ? (
+            <>No tasks match the current filters.<Button variant='link' size='sm' onClick={clearFilters}>Clear filters</Button></>
           ) : (
-            <>Nothing here. Build the queue from Home{canCreate ? ', or add a custom task' : ''}.</>
+            <>Nothing here. Build the queue from the Dashboard{canCreate ? ', or add a custom task' : ''}.</>
           )}
         </div>
       ) : isHistory ? (
-        // completed / dismissed → grouped by the day they were actioned
-        groupByDay(list).map(g => (
-          <div key={g.day} style={{ marginBottom: 18 }}>
-            <div style={dayHeader}><span style={{ fontWeight: 700, fontSize: 13.5 }}>{fmtDay(g.day)}</span><Chip tone="neutral" style={{ fontSize: 10 }}>{g.ts.length}</Chip></div>
-            {g.ts.map(t => <Row key={t.id} task={t} onAction={onAction} />)}
-          </div>
-        ))
+        // completed / dismissed / archived → grouped by the day they were actioned
+        groupByDay(list).map(g => <TaskSection key={g.day} title={fmtDay(g.day)} count={g.ts.length} tasks={g.ts} onAction={onAction} />)
       ) : (
         <>
           {/* custom tasks always pinned on top */}
-          {customTasks.map(t => <Row key={t.id} task={t} onAction={onAction} />)}
+          {customTasks.length > 0 && <TaskSection title='Custom tasks' count={customTasks.length} tasks={customTasks} onAction={onAction} />}
           {groupBy === 'none'
-            ? aiTasks.map(t => <Row key={t.id} task={t} onAction={onAction} />)
-            : buildGroups(aiTasks, groupBy).map(g => (
-              <div key={g.name} style={{ marginBottom: 18 }}>
-                <div style={dayHeader}><span style={{ fontWeight: 700, fontSize: 13.5 }}>{g.name}</span><Chip tone="neutral" style={{ fontSize: 10 }}>{g.ts.length}</Chip></div>
-                {g.ts.map(t => <Row key={t.id} task={t} onAction={onAction} />)}
-              </div>
-            ))}
+            ? aiTasks.length > 0 && <TaskSection tasks={aiTasks} onAction={onAction} />
+            : buildGroups(aiTasks, groupBy).map(g => <TaskSection key={g.name} title={g.name} count={g.ts.length} tasks={g.ts} onAction={onAction} />)}
         </>
       )}
 
       {dismiss && <DismissModal task={dismiss} onClose={() => setDismiss(null)}
         onConfirm={(code, note) => { act(dismiss, 'dismiss', code, note); setDismiss(null); }} />}
-      {showCustom && <CustomTaskModal meta={meta} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
+      {showCustom && <CustomTaskDialog meta={meta} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
     </div>
   );
 }
-
-const inputStyle = { background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-0)', borderRadius: 'var(--r-btn)', padding: '8px 10px', fontSize: 13, fontFamily: 'var(--ff-sans)' };
-const tabBtn = { background: 'var(--bg-3)', border: '1.5px solid var(--fg-4)', borderRadius: 'var(--r-btn)', padding: '6px 12px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer' };
-const groupBtn = { border: '1px solid var(--border)', borderRadius: 'var(--r-btn)', padding: '5px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' };
-const dayHeader = { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 2px 8px', borderBottom: '1px solid var(--border)', marginBottom: 10 };
-const lbl = { display: 'block', fontSize: 10.5, fontWeight: 700, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 5 };
-const filterPanel = { background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-card)', padding: '10px 12px', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 8 };
-const filterRow = { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' };
-const filterLabel = { fontSize: 10.5, fontWeight: 700, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.4, width: 58, flexShrink: 0 };
-const chipStyle = (active) => ({ border: `1px solid ${active ? 'var(--indigo)' : 'var(--border)'}`, background: active ? 'var(--indigo-soft)' : 'var(--bg-2)', color: active ? 'var(--indigo-bright)' : 'var(--fg-2)', borderRadius: 'var(--r-btn)', padding: '4px 9px', fontSize: 11, fontWeight: 600, cursor: 'pointer' });
-const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '6px 14px', fontSize: 12, fontWeight: 700 };
-const ghost = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-1)', borderRadius: 'var(--r-btn)', padding: '6px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
-const userBtn = { background: 'var(--bg-3)', border: '1px solid var(--fg-4)', color: 'var(--fg-0)', borderRadius: 'var(--r-btn)', padding: '2px 7px', fontSize: 10.5, fontWeight: 700, fontFamily: 'var(--ff-mono)', cursor: 'pointer' };
-const subtle = { background: 'transparent', border: 'none', color: 'var(--fg-3)', borderRadius: 'var(--r-btn)', padding: '6px 8px', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', marginLeft: 'auto' };
