@@ -36,7 +36,7 @@ task queue** the manager works through — plus per-chatter **coaching** and per
 | **Backend** | Node + Express 5, `@anthropic-ai/sdk`, `xlsx` (spreadsheet parse), multer (uploads), helmet/cors/morgan |
 | **Database** | Supabase (Postgres). `supabaseAdmin` (service-role key, bypasses RLS) is used for all backend ops. |
 | **Auth** | Supabase Auth. Frontend authenticates against Supabase, sends the auth token; backend resolves it to a `users` row (`auth_id`). |
-| **AI** | Anthropic. Models: Sonnet `claude-sonnet-4-6` (default), Haiku `claude-haiku-4-5`, Opus `claude-opus-4-8`. (`openai`/`GROK_API_KEY` deps exist but the evaluation path is Anthropic via `ai/agentRunner.js`.) |
+| **AI** | Anthropic. Models: Sonnet `claude-sonnet-5` (default), Haiku `claude-haiku-4-5`, Opus `claude-opus-5-5`. (`openai`/`GROK_API_KEY` deps exist but the evaluation path is Anthropic via `ai/agentRunner.js`.) |
 | **Deploy** | Railway — two services: **backend** (root `server`) + **frontend** (root `client`). `CLIENT_URL` sets CORS; `VITE_API_URL` points the client at the backend. Both need `https://`. |
 
 Repo layout: `client/`, `server/`, `supabase/migrations/`, plus a stale `backup/`

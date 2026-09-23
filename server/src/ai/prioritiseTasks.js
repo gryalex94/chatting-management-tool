@@ -1,7 +1,7 @@
 const { runAgentDetailed } = require('./agentRunner');
 const { supabaseAdmin } = require('../utils/supabase');
 const { PROTECTED_AREAS, defaultPriority } = require('../utils/taskGenerator');
-const { oneLine } = require('./evalShared');
+const { oneLine, MODELS } = require('./evalShared');
 
 // Titles are AI-written and may quote fans: one line, capped, JSON-quoted.
 const TITLE_CAP = 120;
@@ -79,7 +79,7 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
 
   const { result } = await runAgentDetailed({
     systemPrompt: PRIORITISER_PROMPT, userContent,
-    model: model === 'opus' ? 'claude-opus-4-8' : model === 'haiku' ? 'claude-haiku-4-5' : 'claude-sonnet-4-6',
+    model: MODELS[model] || MODELS.sonnet,
     maxTokens: 4000,
   });
 

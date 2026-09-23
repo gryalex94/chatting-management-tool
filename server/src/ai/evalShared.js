@@ -3,8 +3,8 @@ const { supabaseAdmin } = require('../utils/supabase');
 // Short model keys (from the UI) -> real model IDs.
 const MODELS = {
   haiku: 'claude-haiku-4-5',
-  sonnet: 'claude-sonnet-4-6',
-  opus: 'claude-opus-4-8',
+  sonnet: 'claude-sonnet-5',
+  opus: 'claude-opus-5-5',
 };
 
 function stripTags(s) { return String(s || '').replace(/<[^>]+>/g, '').trim(); }

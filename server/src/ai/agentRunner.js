@@ -64,19 +64,40 @@ function salvageJson(text) {
   return null;
 }
 
+// Per-model request settings. The newer models think before answering;
+// thinking eats into max_tokens, so those calls get extra headroom.
+// Picked from a blind side-by-side on real chatter days (Sep 2026):
+//   Sonnet 5 - thinking on at "low" effort. With thinking off it was the least
+//              accurate of all setups; at low it beat Sonnet 4.6 for less money.
+//   Opus 5.5 - thinking can't be turned off; "medium" is its default, set
+//              explicitly so it doesn't drift if the default changes.
+const MODEL_SETTINGS = {
+  'claude-sonnet-5': { thinking: { type: 'adaptive' }, effort: 'low', thinkingHeadroom: 16000 },
+  'claude-opus-5-5': { thinking: { type: 'adaptive' }, effort: 'medium', thinkingHeadroom: 16000 },
+};
+
 /**
  * Run one agent call and return the parsed JSON plus run metadata
  * (model used + token usage) so callers can compare cost/speed across models.
+ * `settings` overrides MODEL_SETTINGS (used by model comparison scripts).
  */
-async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000 }) {
+async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-sonnet-5', maxTokens = 16000, settings }) {
   console.log(`[AI Agent] Running with ${model}, input ~${Math.round(userContent.length / 4)} tokens...`);
 
-  const response = await client.messages.create({
+  const cfg = settings || MODEL_SETTINGS[model] || {};
+  const params = {
     model,
-    max_tokens: maxTokens,
+    max_tokens: maxTokens + (cfg.thinkingHeadroom || 0),
     system: systemPrompt + '\n\nCRITICAL: Your entire response must be ONLY valid JSON. No preamble, no markdown fences, no explanation. Start your response with { and end with }.',
     messages: [{ role: 'user', content: userContent }],
-  });
+  };
+  if (cfg.thinking) params.thinking = cfg.thinking;
+  if (cfg.effort) params.output_config = { effort: cfg.effort };
+
+  // Streamed so a large max_tokens (thinking + answer) never hits the HTTP timeout.
+  const response = await client.messages.stream(params).finalMessage();
+
+  if (response.stop_reason === 'refusal') throw new Error('AI declined to review this content');
 
   const text = response.content
     .filter(block => block.type === 'text')
@@ -87,7 +108,7 @@ async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-son
     ? { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens }
     : null;
 
-  return { result: parseJson(text), usage, model };
+  return { result: parseJson(text), usage, model, stop_reason: response.stop_reason };
 }
 
 // Backward-compatible wrapper: returns just the parsed JSON.
