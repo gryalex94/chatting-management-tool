@@ -10,7 +10,7 @@ const { importSubscriberSpend } = require('../parsers/subscriberSpend');
 // Configure multer for file uploads (store in memory)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB max
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB — real Infloww exports are under 1MB; files are held in memory
   fileFilter: (req, file, cb) => {
     const allowed = [
       'text/csv',

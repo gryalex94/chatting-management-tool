@@ -2,6 +2,11 @@ const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 
+// Org settings are readable by every role (the app needs e.g. the time offset for
+// everyone), so they must never hold a credential. API keys — including the
+// Infloww key — live only in the server's environment variables.
+const SECRET_KEY_RE = /(api[_-]?key|secret|token|password|credential|private)/i;
+
 // GET /api/organisations/config - org-wide preferences (key/value), e.g. the
 // manual Infloww time offset used to align task timestamps with the chat screen.
 router.get('/config', async (req, res) => {
@@ -12,7 +17,7 @@ router.get('/config', async (req, res) => {
       .eq('organisation_id', req.user.organisationId);
     if (error) return res.status(500).json({ error: error.message });
     const config = {};
-    (data || []).forEach(r => { config[r.key] = r.value; });
+    (data || []).forEach(r => { if (!SECRET_KEY_RE.test(r.key)) config[r.key] = r.value; });
     res.json({ config });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch config' });
@@ -24,6 +29,9 @@ router.put('/config', requireMinRole('admin'), async (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: 'key is required' });
+    if (SECRET_KEY_RE.test(key)) {
+      return res.status(400).json({ error: "Credentials can't be stored in settings — they belong in the server's environment variables." });
+    }
     const orgId = req.user.organisationId;
     const { data: existing } = await supabaseAdmin
       .from('daily_check_config').select('id')

@@ -25,6 +25,22 @@ app.use(cors({
   credentials: true,
 }));
 
+// Many route handlers answer `{ error: error.message }` straight from the database.
+// For server-side failures (5xx) that would show table names and query details
+// to the browser, so the real message is logged here and the browser gets a
+// generic one. Client errors (4xx) keep their text — those are written for users.
+app.use((req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode >= 500 && body && typeof body === 'object' && 'error' in body) {
+      console.error(`[${req.method} ${req.originalUrl}] ${res.statusCode}:`, body.error);
+      body = { error: 'Something went wrong on our side. Please try again — details are in the server log.' };
+    }
+    return json(body);
+  };
+  next();
+});
+
 // ---------------------
 // RATE LIMITS
 // ---------------------
