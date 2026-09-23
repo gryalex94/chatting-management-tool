@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('./supabase');
+const { reportDateOf } = require('../ai/evalShared');
 
 /**
  * Compute chatter_daily_metrics from the messages table.
@@ -31,8 +32,10 @@ const HIGH_VOL_PER_HOUR = 40;  // >= this msgs/active-hour = high volume
 const HIGH_VOL_TOTAL = 250;    // OR >= this total messages/day = high volume regardless of rate
 const SLOW_DAY_RT_SEC = 150;   // day avg reply slower than this = "slow"
 
-async function computeChatterDailyMetrics(organisationId, tzOffsetHours = 1) {
-  console.log(`[Metrics] Computing chatter daily metrics (merged-day model, tz +${tzOffsetHours}h)...`);
+// Report days use the same DST-aware CET/CEST window as the AI review
+// (dayWindow in ai/evalShared.js) — a fixed +1h put winter days an hour off.
+async function computeChatterDailyMetrics(organisationId) {
+  console.log('[Metrics] Computing chatter daily metrics (merged-day model, Amsterdam day)...');
 
   const { data: chatters } = await supabaseAdmin
     .from('chatters').select('id, name').eq('organisation_id', organisationId);
@@ -84,7 +87,7 @@ async function computeChatterDailyMetrics(organisationId, tzOffsetHours = 1) {
   for (const m of all) {
     const cid = chatterMap[m.sender_name?.toLowerCase().trim()];
     if (!cid || !m.creator_id || !m.sent_datetime) continue;
-    tagged.push({ ...m, _cid: cid, _date: shiftDate(m.sent_datetime, tzOffsetHours), _ts: new Date(m.sent_datetime).getTime() });
+    tagged.push({ ...m, _cid: cid, _date: reportDateOf(m.sent_datetime), _ts: new Date(m.sent_datetime).getTime() });
   }
 
   // ---- DAY level: group by chatter|date (ALL pages merged) ----
@@ -373,14 +376,6 @@ function classifyWorkload(msgsPerHour, fans) {
   return { status, score: Math.min(100, Math.round((msgsPerHour / 60) * 100)) };
 }
 
-function shiftDate(datetimeStr, offsetH) {
-  const m = String(datetimeStr).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!m) return String(datetimeStr).slice(0, 10);
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)));
-  d.setUTCHours(d.getUTCHours() + offsetH);
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
-}
 function pctile(sorted, p) {
   if (!sorted.length) return 0;
   const idx = Math.ceil((p / 100) * sorted.length) - 1;

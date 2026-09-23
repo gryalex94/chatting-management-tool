@@ -1,4 +1,6 @@
 const { supabaseAdmin } = require('./supabase');
+const { dayWindow } = require('../ai/evalShared');
+const { matchOffPlatform, matchAge, knownPlatforms, clean } = require('./keywordScan');
 
 /**
  * Daily Check engine.
@@ -196,6 +198,20 @@ async function runDailyCheck(orgId, reportDate) {
     }
   }
 
+  // ============ KEYWORD SAFETY NET ============
+  // Deterministic off-platform / under-18 scan of the day's messages, so the most
+  // serious risks never depend only on the AI (which fan text can try to steer).
+  for (const f of await keywordFlags(orgId, reportDate, chatters)) {
+    if (f.creator_id) {
+      const page = pages[f.creator_id] ||= {
+        creator_id: f.creator_id, creator_name: creators[f.creator_id] || 'Unknown',
+        is_free: null, metrics: null, flags: [], chatters: {},
+      };
+      (page.chatters[f.chatter_id]?.flags || page.flags).push(f);
+    }
+    flags.push(f);
+  }
+
   // ---- score & rank ----
   for (const f of flags) f.score = scoreFlag(f);
   flags.sort((a, b) => b.score - a.score);
@@ -292,9 +308,61 @@ function computeLtvWindow(history, date, windowDays, netFactor) {
   return rev / subCount;
 }
 
+// ─── keyword safety net ─────────────────────────────
+// One flag per (chatter, page, type) for the day. Off-platform: CHATTER text,
+// skipping platforms the page legitimately has (ai_context.known_platforms).
+// Age: FAN text. Evidence names the keyword; details.hits carry the messages.
+const KW_HIT_CAP = 10;
+async function keywordFlags(orgId, reportDate, chatterNames) {
+  const { start, end } = dayWindow(reportDate);   // same day window as the metrics + AI review
+  const chatterIdByName = {};
+  for (const [id, name] of Object.entries(chatterNames)) chatterIdByName[String(name).toLowerCase().trim()] = id;
+  const known = {};
+  const { data: crs, error: crErr } = await supabaseAdmin.from('creators').select('id, ai_context').eq('organisation_id', orgId);
+  if (!crErr) (crs || []).forEach(c => { known[c.id] = knownPlatforms(c.ai_context?.known_platforms); });
+
+  const groups = {};
+  const add = (type, m, matched, text) => {
+    const chatterId = chatterIdByName[String(m.sender_name || '').toLowerCase().trim()] || null;
+    const g = groups[`${type}|${m.creator_id || ''}|${chatterId || ''}`] ||= { type, creator_id: m.creator_id || null, chatter_id: chatterId, count: 0, keywords: new Set(), hits: [] };
+    g.count++; g.keywords.add(matched);
+    if (g.hits.length < KW_HIT_CAP) {
+      g.hits.push({ fan_username: m.sent_to_username || m.sent_to_nickname || null, sent_at: m.sent_datetime, matched, message: clean(text).slice(0, 280) });
+    }
+  };
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin.from('messages')
+      .select('sender_name, creator_id, sent_datetime, sent_to_username, sent_to_nickname, fan_message_text, creator_message_text')
+      .eq('organisation_id', orgId).gte('sent_datetime', start).lt('sent_datetime', end)
+      .order('sent_datetime', { ascending: true }).order('id', { ascending: true })
+      .range(from, from + 999);
+    // a failed page must not silently drop (and so un-flag) a real hit
+    if (error) throw new Error(`keyword scan failed at row ${from}: ${error.message}`);
+    for (const m of (data || [])) {
+      const off = m.creator_message_text && matchOffPlatform(m.creator_message_text, known[m.creator_id]);
+      if (off) add('keyword_offplatform', m, off, m.creator_message_text);
+      const age = m.fan_message_text && matchAge(m.fan_message_text);
+      if (age) add('keyword_age', m, age, m.fan_message_text);
+    }
+    if (!data || data.length < 1000) break;
+  }
+
+  return Object.values(groups).map(g => {
+    const kw = [...g.keywords].slice(0, 5).map(k => `"${k.slice(0, 40)}"`).join(', ');
+    const n = `${g.count} message${g.count === 1 ? '' : 's'}`;
+    const evidence = g.type === 'keyword_offplatform'
+      ? `Chatter mentioned off-platform contact/payment (${kw}) in ${n} — open the dialogue and check`
+      : `Fan said they may be under 18 (${kw}) in ${n} — open the dialogue and check the fan's age`;
+    // A fan saying they're under 18 is the most serious thing this tool can find → P1.
+    return mkFlag(g.chatter_id ? 'chatter' : 'page', g.creator_id, g.chatter_id, reportDate, g.type,
+      g.type === 'keyword_age' ? 'critical' : 'high',
+      evidence, orgId, { hits: g.hits, total: g.count, keywords: [...g.keywords] });
+  });
+}
+
 // ─── scoring: severity × confidence (+ page weight) ──
 function scoreFlag(f) {
-  const sev = { high: 100, medium: 50, low: 20 }[f.severity] || 10;
+  const sev = { critical: 150, high: 100, medium: 50, low: 20 }[f.severity] || 10;
   // page flags weigh slightly higher (business-wide), chatter flags scaled
   const scope = f.scope === 'page' ? 1.2 : 1.0;
   return Math.round(sev * scope);

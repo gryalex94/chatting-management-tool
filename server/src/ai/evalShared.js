@@ -49,6 +49,18 @@ const oneLine = (s) => String(s || '')
   .replace(/\s+/g, ' ').trim();
 const cleanName = (s) => oneLine(String(s || '').replace(/[[\]()]/g, ' '));
 
+// Only buildThreadList writes "[PPV $X SOLD]" tags, from real sale data. A chatter
+// (or fan) could type one to fake a sale, so any bracketed "PPV ..." in the TEXT
+// is removed — any bracket style, compat forms folded (NFKC), zero-width chars
+// dropped — and a stray opening bracket before "ppv" loses its bracket.
+const PPV_OPEN = '[\\[({<【〔〖〘〚「『⟦⟨]';
+const PPV_CLOSE = '[\\])}>】〕〗〙〛」』⟧⟩]';
+const FORGED_PPV = new RegExp(`${PPV_OPEN}\\s*p\\s*p\\s*v\\b[^\\])}>】〕〗〙〛」』⟧⟩]{0,80}${PPV_CLOSE}`, 'giu');
+const STRAY_PPV = new RegExp(`${PPV_OPEN}(\\s*p\\s*p\\s*v\\b)`, 'giu');
+const stripPpvTags = (s) => String(s || '').normalize('NFKC')
+  .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
+  .replace(FORGED_PPV, ' ').replace(STRAY_PPV, '$1');
+
 // The day window the metrics use (same as runDailyAnalysis.js): the DB stores CET,
 // the manager's day is Amsterdam local, so in summer (CEST) it starts 23:00 the
 // previous day.
@@ -58,6 +70,19 @@ function dayWindow(reportDate) {
   const off = (am - d.getUTCHours()) - 1;          // 1 in summer, 0 in winter
   const start = Date.parse(reportDate + 'T00:00:00Z') - off * 3600000;
   return { start: new Date(start).toISOString(), end: new Date(start + 86400000).toISOString() };
+}
+
+// The report day a stored timestamp belongs to, by the same dayWindow — so the
+// metrics and the AI review always put a message on the same day. Try the
+// summer (+1h) day first; if its window starts after the message, it's winter.
+const _winStart = {};
+function reportDateOf(datetime) {
+  const s = String(datetime);
+  const ts = Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z');   // no zone = stored as UTC
+  if (!Number.isFinite(ts)) return s.slice(0, 10);
+  const cand = new Date(ts + 3600000).toISOString().slice(0, 10);
+  const start = (_winStart[cand] ??= Date.parse(dayWindow(cand).start));
+  return ts >= start ? cand : new Date(ts).toISOString().slice(0, 10);
 }
 
 /**
@@ -105,7 +130,7 @@ function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false
     (threads[key] ||= { fan: m.sent_to_nickname || username || 'unknown', username, creator_id: m.creator_id || null, lines: [], ppvSent: 0, ppvSold: 0, ppvUnsold: 0, ppvRevenue: 0 });
     const t = threads[key];
     if (!t.creator_id && m.creator_id) t.creator_id = m.creator_id;
-    if (m.fan_message_text) t.lines.push(`FAN: ${oneLine(stripTags(m.fan_message_text))}`);
+    if (m.fan_message_text) t.lines.push(`FAN: ${oneLine(stripPpvTags(stripTags(m.fan_message_text)))}`);
     if (m.creator_message_text) {
       const price = parseFloat(m.price) || 0;
       let tag = '';
@@ -114,7 +139,7 @@ function buildThreadList(msgs, { lineCap = 40, threadCap = 25, withSpend = false
         if (m.purchased) { t.ppvSold++; t.ppvRevenue += price; } else t.ppvUnsold++;
         tag = ` [PPV $${m.price}${m.purchased ? ' SOLD' : ' not bought'}]`;
       }
-      t.lines.push(`CHATTER: ${oneLine(stripTags(m.creator_message_text))}${tag}`);
+      t.lines.push(`CHATTER: ${oneLine(stripPpvTags(stripTags(m.creator_message_text)))}${tag}`);
     }
   }
 
@@ -360,4 +385,4 @@ function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}
   return `PER-PAGE CONTEXT — these are FACTS about specific pages, set by the manager. They OVERRIDE your general assumptions for that page's conversations. Apply each page's context only to conversations on that page:\n${blocks.join('\n')}\n\n`;
 }
 
-module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, UNTRUSTED_RULE };
+module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, reportDateOf, stripPpvTags, UNTRUSTED_RULE };

@@ -251,6 +251,27 @@ function AfkIncidents({ incidents, taskId }) {
   );
 }
 
+// Safety-net flags (off-platform / under-18 keywords) carry context.hits — the exact
+// messages that matched, so the manager can open each one and judge it.
+function KeywordHits({ hits, taskId }) {
+  const [done, toggle] = useChecklist(`hitsDone:${taskId}`);
+  return (
+    <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label='Messages to check'
+      doneLabel={done.size ? `${done.size} of ${hits.length} reviewed` : null}>
+      {hits.map((h, i) => (
+        <ReviewRow key={i} done={done.has(String(i))} onToggle={() => toggle(String(i))}>
+          <div className='flex flex-wrap items-center gap-2'>
+            <FanChip username={h.fan_username} />
+            <Badge variant='outline' className='border-bad/30 text-bad'>{h.matched}</Badge>
+            {h.sent_at && <TimeStamp>{fmtSentAt(h.sent_at)}</TimeStamp>}
+          </div>
+          {h.message && <p className='text-xs italic text-muted-foreground'>“{h.message}”</p>}
+        </ReviewRow>
+      ))}
+    </ReviewList>
+  );
+}
+
 /* ─── One task ──────────────────────────────────────────────────────────── */
 
 const ACTIONED = {
@@ -323,6 +344,9 @@ function TaskRow({ task, onAction }) {
         )}
         {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
           <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
+        )}
+        {Array.isArray(ctx.hits) && ctx.hits.length > 0 && !dismissed && (
+          <KeywordHits hits={ctx.hits} taskId={task.id} />
         )}
 
         {task.status === 'archived' && task.priority_reason && (

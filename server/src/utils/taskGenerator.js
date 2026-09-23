@@ -8,7 +8,8 @@ const SOURCE = { compliance: 'compliance', sales_quality: 'sales', creator: 'cre
 
 const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders'];
 // Engine flags default to 'work_ethic'; these ones carry a real area of their own.
-const FLAG_AREA = { chargeback: 'chargeback' };
+// Keyword safety-net flags map to protected ToS areas: never archived or capped.
+const FLAG_AREA = { chargeback: 'chargeback', keyword_offplatform: 'offplatform', keyword_age: 'age' };
 
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
 // capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
@@ -196,12 +197,13 @@ async function buildTasksForDate(orgId, reportDate) {
       severity: f.severity || 'medium',
       title: shortTitle((f.flag_type || '').replace(/_/g, ' ') + ' — ' + (f.evidence || '')),
       detail: f.evidence || (f.flag_type || '').replace(/_/g, ' '),
-      // carry the per-subscriber breakdown so reply-time / AFK tasks render as
-      // individually-reviewable sub-rows (username, worst wait, when, message).
+      // carry the per-subscriber breakdown so reply-time / AFK / keyword tasks render
+      // as individually-reviewable sub-rows (username, worst wait, when, message).
       context: {
         flag_type: f.flag_type,
         subs: f.details?.subs || [],
         incidents: f.details?.incidents || [],
+        hits: f.details?.hits || [],           // keyword flags: the matched messages
         workload: f.details?.workload || null,
       },
     });

@@ -88,7 +88,7 @@ export function AuthProvider({ children }) {
     // them behind on a shared computer. Theme and time offset are harmless.
     try {
       Object.keys(localStorage)
-        .filter(k => k === 'tasksFilters' || k.startsWith('replyDone:') || k.startsWith('afkDone:'))
+        .filter(k => k === 'tasksFilters' || k.startsWith('replyDone:') || k.startsWith('afkDone:') || k.startsWith('hitsDone:'))
         .forEach(k => localStorage.removeItem(k));
     } catch { /* storage blocked */ }
   }
