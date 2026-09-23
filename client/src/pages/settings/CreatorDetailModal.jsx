@@ -1,16 +1,20 @@
 import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
-import api from '../../services/api';
-import { Avatar } from '../../components/shared';
-import PageContextFields, { cleanContext } from '../../components/shared/PageContextFields';
-import { Trash2, AlertTriangle } from 'lucide-react';
+import { Trash2, TriangleAlert } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-const inp = {
-  width:'100%', padding:'8px 10px', fontSize:13, background:'var(--bg-2)',
-  border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)',
-  outline:'none', fontFamily:'inherit',
-};
+import api from '@/services/api';
+import { Avatar } from '@/components/shared';
+import PageContextFields, { cleanContext } from '@/components/shared/PageContextFields';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 
 /**
  * Everything about one creator page in one place: identity, the AI context used
@@ -71,72 +75,81 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
     } catch (err) { toast.error(err.response?.data?.error || 'Failed'); }
   }
 
-  return createPortal((
-    <div onClick={onClose} style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:20 }}>
-      <div onClick={e => e.stopPropagation()} style={{ width:'min(580px, 96vw)', maxHeight:'88vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', display:'flex', flexDirection:'column' }}>
-
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'14px 16px', borderBottom:'1px solid var(--border)' }}>
-          <Avatar name={creator.name} size={32}/>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontWeight:700, fontSize:15 }}>{creator.name}</div>
-            <div style={{ fontSize:11.5, color:'var(--fg-3)' }}>
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-xl'>
+        <DialogHeader className='flex-row items-center gap-3 space-y-0 border-b py-4 ps-6 pe-12 text-left'>
+          <Avatar name={creator.name} size={36} />
+          <div className='min-w-0 flex-1'>
+            <DialogTitle className='truncate'>{creator.name}</DialogTitle>
+            <DialogDescription className='tabular-nums'>
               {usage
                 ? `${usage.messages.toLocaleString()} messages · ${usage.daily_stats} stat days · ${usage.tasks} tasks`
-                : 'loading history…'}
-            </div>
+                : 'Loading history…'}
+            </DialogDescription>
           </div>
-        </div>
+        </DialogHeader>
 
-        <div style={{ padding:16, overflow:'auto' }}>
-          <div style={{ fontSize:12, fontWeight:600, color:'var(--fg-1)', marginBottom:5 }}>Page name</div>
-          <input value={name} onChange={e => setName(e.target.value)} disabled={!isAdmin} style={{ ...inp, marginBottom:18 }}/>
+        <div className='grid gap-6 overflow-y-auto px-6 py-5'>
+          <div className='grid gap-2'>
+            <Label htmlFor='creator-name'>Page name</Label>
+            <Input id='creator-name' value={name} onChange={e => setName(e.target.value)} disabled={!isAdmin} />
+          </div>
 
-          <div style={{ fontSize:13, fontWeight:700, color:'var(--fg-0)', marginBottom:2 }}>AI page context</div>
-          <div style={{ height:1, background:'var(--border)', margin:'8px 0 12px' }}/>
-          <PageContextFields ctx={ctx} setCtx={setCtx} text={text} setText={setText} disabled={!isAdmin}/>
+          <section className='grid gap-3'>
+            <div>
+              <h3 className='text-sm font-semibold'>AI page context</h3>
+              <Separator className='mt-2' />
+            </div>
+            <PageContextFields ctx={ctx} setCtx={setCtx} text={text} setText={setText} disabled={!isAdmin} />
+          </section>
 
           {isAdmin && (
-            <>
-              <div style={{ height:1, background:'var(--border)', margin:'20px 0 12px' }}/>
-              <div style={{ fontSize:13, fontWeight:700, color:'var(--bad)', marginBottom:8 }}>Danger zone</div>
+            <section className='grid gap-3'>
+              <div>
+                <h3 className='text-sm font-semibold text-bad'>Danger zone</h3>
+                <Separator className='mt-2' />
+              </div>
               {usage && !usage.deletable ? (
-                <div style={{ display:'flex', gap:8, alignItems:'flex-start', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', padding:'10px 12px' }}>
-                  <AlertTriangle size={14} style={{ color:'var(--warn, #f59e0b)', flexShrink:0, marginTop:1 }}/>
-                  <div style={{ fontSize:11.5, color:'var(--fg-2)', lineHeight:1.5 }}>
-                    This page carries history, so it can't be deleted — every message, stat and task
-                    points back at it. Deactivating hides it everywhere and keeps the history intact.
-                    <div style={{ marginTop:8 }}>
-                      <button className="btn sm ghost" onClick={deactivate}>Deactivate page</button>
-                    </div>
-                  </div>
-                </div>
-              ) : confirmDelete ? (
-                <div style={{ background:'var(--bg-2)', border:'1px solid var(--bad)', borderRadius:'var(--r-tile)', padding:'10px 12px' }}>
-                  <div style={{ fontSize:11.5, color:'var(--fg-1)', marginBottom:8 }}>
-                    Delete <b>{creator.name}</b> permanently? It has no messages, stats or tasks, so nothing is lost.
-                  </div>
-                  <div style={{ display:'flex', gap:8 }}>
-                    <button className="btn sm ghost" onClick={() => setConfirmDelete(false)}>Cancel</button>
-                    <button className="btn sm" style={{ background:'var(--bad)', color:'#fff' }} onClick={remove}>Yes, delete</button>
+                <div className='flex gap-3 rounded-lg border bg-muted/40 p-3'>
+                  <TriangleAlert className='mt-0.5 size-4 shrink-0 text-warn' />
+                  <div className='grid gap-3 text-sm leading-relaxed text-muted-foreground'>
+                    <p>
+                      This page carries history, so it can't be deleted — every message, stat and task
+                      points back at it. Deactivating hides it everywhere and keeps the history intact.
+                    </p>
+                    <Button variant='outline' size='sm' className='w-fit' onClick={deactivate}>Deactivate page</Button>
                   </div>
                 </div>
               ) : (
-                <button className="btn sm ghost" style={{ color:'var(--bad)', display:'inline-flex', alignItems:'center', gap:6 }}
-                  onClick={() => setConfirmDelete(true)}><Trash2 size={13}/> Delete this page</button>
+                <Button variant='outline' size='sm' className='w-fit text-bad hover:text-bad'
+                  onClick={() => setConfirmDelete(true)}><Trash2 />Delete this page</Button>
               )}
-            </>
+            </section>
           )}
         </div>
 
-        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--border)', display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button className="btn sm ghost" onClick={onClose}>Close</button>
+        <DialogFooter className='border-t px-6 py-4'>
+          <Button variant='ghost' onClick={onClose}>Close</Button>
           {isAdmin && (
-            <button className="btn sm" disabled={!dirty || saving}
-              style={{ background:'var(--indigo)', color:'#fff', opacity: (!dirty || saving) ? 0.5 : 1 }}
-              onClick={save}>{saving ? 'Saving…' : 'Save changes'}</button>
+            <Button disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</Button>
           )}
-        </div>
-      </div>
-    </div>
-  ), document.body);
+        </DialogFooter>
+
+        {/* Only reachable when the page has no history (or history hasn't loaded) */}
+        <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {creator.name} permanently?</AlertDialogTitle>
+              <AlertDialogDescription>It has no messages, stats or tasks, so nothing is lost.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant='destructive' onClick={remove}>Yes, delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </DialogContent>
+    </Dialog>
+  );
 }

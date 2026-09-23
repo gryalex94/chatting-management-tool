@@ -1,23 +1,37 @@
 import { useState, useEffect } from 'react';
-import api from '../../services/api';
-import { X, Plus, Minus } from 'lucide-react';
+import { Check, PenLine } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { createPortal } from 'react-dom';
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 
 const PRIORITIES = [
-  { value: 1, label: 'Urgent', color: '#ef4444' },
-  { value: 2, label: 'High', color: '#f97316' },
-  { value: 3, label: 'Medium', color: '#f59e0b' },
-  { value: 4, label: 'Low', color: '#8888a0' },
+  { value: 1, label: 'Urgent', dot: 'bg-red-500', on: 'border-red-500/50 bg-red-500/10 text-red-600 dark:text-red-400' },
+  { value: 2, label: 'High', dot: 'bg-orange-500', on: 'border-orange-500/50 bg-orange-500/10 text-orange-600 dark:text-orange-400' },
+  { value: 3, label: 'Medium', dot: 'bg-amber-500', on: 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
+  { value: 4, label: 'Low', dot: 'bg-zinc-400', on: 'border-zinc-400/60 bg-zinc-400/10 text-foreground' },
 ];
 
 const DEFAULT_TEMPLATE = { label: 'Custom task', icon: '📝', title: '', description: '', priority: 3 };
 
-const inp = {
-  width: '100%', padding: '8px 12px', borderRadius: 'var(--r-btn)',
-  fontSize: 12.5, outline: 'none', background: 'var(--bg-2)',
-  border: '1px solid var(--border)', color: 'var(--fg-0)',
-};
+// A toggleable pill used for templates and the creator / chatter pickers.
+function Pill({ on, onClick, children, className }) {
+  return (
+    <button type='button' onClick={onClick}
+      className={cn('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+        on ? 'border-primary/40 bg-primary/10 text-foreground' : 'bg-background text-muted-foreground hover:bg-accent hover:text-foreground', className)}>
+      {on && <Check className='size-3' />}{children}
+    </button>
+  );
+}
 
 export default function CreateTaskModal({ onClose, onCreated, defaultCreatorId, defaultChatterId }) {
   const [form, setForm] = useState({
@@ -101,139 +115,102 @@ export default function CreateTaskModal({ onClose, onCreated, defaultCreatorId, 
     } finally { setSaving(false); }
   }
 
-  return createPortal(
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ width: 520, maxHeight: '85vh', background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>New Task</span>
-          <button className="btn sm ghost" onClick={onClose}><X size={14} /></button>
-        </div>
+  const multi = form.creator_ids.length > 1 || form.chatter_ids.length > 1;
 
-        <div style={{ overflow: 'auto', flex: 1 }}>
-          {/* Templates */}
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-            <div className="label" style={{ marginBottom: 8 }}>Quick templates</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {[DEFAULT_TEMPLATE, ...templates].map((t, i) => (
-                <button key={i} type="button" onClick={() => applyTemplate(i)}
-                  style={{
-                    padding: '6px 10px', borderRadius: 'var(--r-btn)', fontSize: 11.5, fontWeight: 500,
-                    border: `1px solid ${selectedTemplate === i ? 'var(--indigo-line)' : 'var(--border)'}`,
-                    background: selectedTemplate === i ? 'var(--indigo-soft)' : 'var(--bg-2)',
-                    color: selectedTemplate === i ? 'var(--indigo-bright)' : 'var(--fg-2)',
-                    cursor: 'pointer', transition: 'all .12s',
-                  }}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-xl'>
+        <DialogHeader className='border-b py-4 ps-6 pe-12'>
+          <DialogTitle>New task</DialogTitle>
+          <DialogDescription>Pick a template or write your own. One task is created per creator and chatter you select.</DialogDescription>
+        </DialogHeader>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Title</label>
-              <input value={form.title} onChange={e => u('title', e.target.value)} required style={inp} placeholder="Task title" />
+        <form onSubmit={handleSubmit} className='flex min-h-0 flex-1 flex-col'>
+          <div className='grid gap-5 overflow-y-auto px-6 py-4'>
+            <div className='grid gap-2'>
+              <Label>Quick templates</Label>
+              <div className='flex flex-wrap gap-1.5'>
+                {[DEFAULT_TEMPLATE, ...templates].map((t, i) => (
+                  <Pill key={i} on={selectedTemplate === i} onClick={() => applyTemplate(i)} className='rounded-md'>
+                    {i === 0 ? <PenLine className='size-3' /> : <span aria-hidden>{t.icon}</span>}{t.label}
+                  </Pill>
+                ))}
+              </div>
             </div>
 
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Description</label>
-              <textarea value={form.description} onChange={e => u('description', e.target.value)} rows={2} style={{ ...inp, resize: 'vertical' }} placeholder="What needs to be done..." />
+            <div className='grid gap-2'>
+              <Label htmlFor='nt-title'>Title</Label>
+              <Input id='nt-title' value={form.title} onChange={e => u('title', e.target.value)} required placeholder='Task title' />
             </div>
 
-            {/* Priority */}
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Priority</label>
-              <div style={{ display: 'flex', gap: 6 }}>
+            <div className='grid gap-2'>
+              <Label htmlFor='nt-desc'>Description</Label>
+              <Textarea id='nt-desc' value={form.description} onChange={e => u('description', e.target.value)} rows={2} placeholder='What needs to be done…' />
+            </div>
+
+            <div className='grid gap-2'>
+              <Label>Priority</Label>
+              <div className='grid grid-cols-2 gap-1.5 sm:grid-cols-4'>
                 {PRIORITIES.map(p => (
-                  <button key={p.value} type="button" onClick={() => u('priority', p.value)}
-                    style={{
-                      flex: 1, padding: '8px 0', borderRadius: 'var(--r-btn)', fontSize: 11.5, fontWeight: 500,
-                      border: `1px solid ${form.priority === p.value ? p.color : 'var(--border)'}`,
-                      background: form.priority === p.value ? `${p.color}20` : 'var(--bg-2)',
-                      color: form.priority === p.value ? p.color : 'var(--fg-2)',
-                      cursor: 'pointer', transition: 'all .12s', textAlign: 'center',
-                    }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, display: 'inline-block', marginRight: 6 }} />
-                    {p.label}
+                  <button key={p.value} type='button' onClick={() => u('priority', p.value)}
+                    className={cn('inline-flex h-9 items-center justify-center gap-2 rounded-md border text-xs font-medium transition-colors',
+                      form.priority === p.value ? p.on : 'bg-background text-muted-foreground hover:bg-accent')}>
+                    <span className={cn('size-2 rounded-full', p.dot)} />{p.label}
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Creators — multi select chips */}
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Creators <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional, select multiple)</span></label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {creators.map(c => {
-                  const sel = form.creator_ids.includes(c.id);
-                  return (
-                    <button key={c.id} type="button" onClick={() => toggleCreator(c.id)}
-                      style={{
-                        padding: '5px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 500,
-                        border: `1px solid ${sel ? 'var(--indigo-line)' : 'var(--border)'}`,
-                        background: sel ? 'var(--indigo-soft)' : 'var(--bg-2)',
-                        color: sel ? 'var(--indigo-bright)' : 'var(--fg-2)',
-                        cursor: 'pointer', transition: 'all .12s',
-                      }}>
-                      {sel ? '✓ ' : ''}{c.name}
-                    </button>
-                  );
-                })}
+            <div className='grid gap-2'>
+              <Label>Creators <span className='font-normal text-muted-foreground'>(optional, select multiple)</span></Label>
+              <div className='flex flex-wrap gap-1.5'>
+                {creators.map(c => (
+                  <Pill key={c.id} on={form.creator_ids.includes(c.id)} onClick={() => toggleCreator(c.id)}>{c.name}</Pill>
+                ))}
               </div>
             </div>
 
-            {/* Chatters — multi select chips */}
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 6 }}>Chatters <span style={{ textTransform: 'none', fontWeight: 400 }}>(optional, select multiple)</span></label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxHeight: 120, overflow: 'auto' }}>
-                {chatters.map(c => {
-                  const sel = form.chatter_ids.includes(c.id);
-                  return (
-                    <button key={c.id} type="button" onClick={() => toggleChatter(c.id)}
-                      style={{
-                        padding: '5px 10px', borderRadius: 999, fontSize: 11.5, fontWeight: 500,
-                        border: `1px solid ${sel ? 'var(--indigo-line)' : 'var(--border)'}`,
-                        background: sel ? 'var(--indigo-soft)' : 'var(--bg-2)',
-                        color: sel ? 'var(--indigo-bright)' : 'var(--fg-2)',
-                        cursor: 'pointer', transition: 'all .12s',
-                      }}>
-                      {sel ? '✓ ' : ''}{c.name}
-                    </button>
-                  );
-                })}
+            <div className='grid gap-2'>
+              <Label>Chatters <span className='font-normal text-muted-foreground'>(optional, select multiple)</span></Label>
+              <div className='flex max-h-30 flex-wrap gap-1.5 overflow-y-auto'>
+                {chatters.map(c => (
+                  <Pill key={c.id} on={form.chatter_ids.includes(c.id)} onClick={() => toggleChatter(c.id)}>{c.name}</Pill>
+                ))}
               </div>
             </div>
 
-            {/* Toggles */}
-            <div style={{ display: 'flex', gap: 16 }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--fg-2)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.requires_screenshots} onChange={e => u('requires_screenshots', e.target.checked)} />
-                Screenshots required
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--fg-2)', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.is_recurring} onChange={e => u('is_recurring', e.target.checked)} />
-                Recurring
-              </label>
+            <div className='flex flex-wrap items-center gap-x-5 gap-y-3'>
+              <div className='flex items-center gap-2'>
+                <Checkbox id='nt-shots' checked={form.requires_screenshots} onCheckedChange={v => u('requires_screenshots', v === true)} />
+                <Label htmlFor='nt-shots' className='font-normal'>Screenshots required</Label>
+              </div>
+              <div className='flex items-center gap-2'>
+                <Checkbox id='nt-rec' checked={form.is_recurring} onCheckedChange={v => u('is_recurring', v === true)} />
+                <Label htmlFor='nt-rec' className='font-normal'>Recurring</Label>
+              </div>
               {form.is_recurring && (
-                <select value={form.recurrence_pattern} onChange={e => u('recurrence_pattern', e.target.value)} style={{ ...inp, width: 100 }}>
-                  <option value="daily">Daily</option>
-                  <option value="weekly">Weekly</option>
-                  <option value="per_cycle">Per cycle</option>
-                </select>
+                <Select value={form.recurrence_pattern} onValueChange={v => u('recurrence_pattern', v)}>
+                  <SelectTrigger size='sm' className='w-32'><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='daily'>Daily</SelectItem>
+                    <SelectItem value='weekly'>Weekly</SelectItem>
+                    <SelectItem value='per_cycle'>Per cycle</SelectItem>
+                  </SelectContent>
+                </Select>
               )}
             </div>
+          </div>
 
-            <button type="submit" disabled={saving} className="btn primary" style={{ width: '100%', height: 36, justifyContent: 'center', marginTop: 4 }}>
-              {saving ? 'Creating...' : form.creator_ids.length > 1 || form.chatter_ids.length > 1
+          <DialogFooter className='border-t px-6 py-4'>
+            <Button type='button' variant='ghost' onClick={onClose}>Cancel</Button>
+            <Button type='submit' disabled={saving}>
+              {saving ? 'Creating…' : multi
                 ? `Create ${Math.max(form.creator_ids.length, 1) * Math.max(form.chatter_ids.length, 1)} tasks`
                 : 'Create task'}
-            </button>
-          </form>
-        </div>
-      </div>
-    </div>,
-    document.body
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

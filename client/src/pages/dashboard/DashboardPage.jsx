@@ -1,25 +1,40 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
-import { Avatar, Chip } from '../../components/shared';
-import { TIER } from '../../utils/taskMeta';
+import {
+  ArrowDown, ArrowRight, ArrowUp, ArrowUpDown, BarChart3, ChevronRight, ListChecks, Sparkles,
+} from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '@/context/AuthContext';
+import api from '@/services/api';
+import { Avatar, Chip } from '@/components/shared';
+import { TIER } from '@/utils/taskMeta';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
+const Dash = ({ children = '—' }) => <span className='text-xs text-muted-foreground/60'>{children}</span>;
+
 function Delta({ v, lowerBetter, money: m, suffix = '' }) {
-  if (v == null || v === 0) return <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>·</span>;
+  if (v == null || v === 0) return <Dash>·</Dash>;
   const good = lowerBetter ? v < 0 : v > 0;
   const val = m ? `$${Math.abs(Math.round(v)).toLocaleString()}` : `${Math.abs(Math.round(v * 10) / 10)}${suffix}`;
-  return <span style={{ color: good ? '#4ade80' : '#f87171', fontSize: 10, fontWeight: 700 }}>{v > 0 ? '▲' : '▼'}{val}</span>;
+  const Icon = v > 0 ? ArrowUp : ArrowDown;
+  return (
+    <span className={cn('inline-flex items-center gap-0.5 text-[11px] font-semibold tabular-nums', good ? 'text-good' : 'text-bad')}>
+      <Icon className='size-3' />{val}
+    </span>
+  );
 }
 
 function Cell({ val, delta, money: m, suffix = '', lowerBetter }) {
   return (
-    <div>
-      <div style={{ fontWeight: 700, fontSize: 13 }}>{m ? money(val) : `${val}${suffix}`}</div>
+    <div className='leading-tight'>
+      <div className='font-semibold tabular-nums'>{m ? money(val) : `${val}${suffix}`}</div>
       <Delta v={delta} money={m} suffix={suffix} lowerBetter={lowerBetter} />
     </div>
   );
@@ -30,40 +45,45 @@ function Donut({ counts }) {
   const pct = total ? counts.completed / total : 0;
   const r = 30, circ = 2 * Math.PI * r;
   return (
-    <svg viewBox="0 0 80 80" width={78} height={78}>
-      <circle cx={40} cy={40} r={r} fill="none" stroke="var(--bg-3)" strokeWidth={9} />
-      <circle cx={40} cy={40} r={r} fill="none" stroke="#4ade80" strokeWidth={9} strokeLinecap="round"
-        strokeDasharray={`${circ * pct} ${circ}`} transform="rotate(-90 40 40)" />
-      <text x={40} y={45} textAnchor="middle" fontSize={17} fontWeight={700} fill="var(--fg-0)">{Math.round(pct * 100)}%</text>
+    <svg viewBox='0 0 80 80' width={78} height={78} className='shrink-0'>
+      <circle cx={40} cy={40} r={r} fill='none' strokeWidth={9} className='stroke-muted' />
+      <circle cx={40} cy={40} r={r} fill='none' strokeWidth={9} strokeLinecap='round' className='stroke-good'
+        strokeDasharray={`${circ * pct} ${circ}`} transform='rotate(-90 40 40)' />
+      <text x={40} y={45} textAnchor='middle' fontSize={17} fontWeight={700} className='fill-foreground tabular-nums'>{Math.round(pct * 100)}%</text>
     </svg>
   );
 }
 
-function Sparkline({ data, w = 74, h = 24, color = 'var(--indigo-bright)' }) {
+// Line sparkline with gaps for missing days. Colour comes from the text colour class.
+function Sparkline({ data, w = 74, h = 24, className = 'text-link' }) {
   const vals = (data || []);
   const nums = vals.filter(v => v != null);
-  if (nums.length < 2) return <span style={{ color: 'var(--fg-4)', fontSize: 10 }}>—</span>;
+  if (nums.length < 2) return <Dash />;
   const max = Math.max(...nums, 1), min = Math.min(...nums, 0), range = (max - min) || 1, n = vals.length;
   const x = i => (i / (n - 1)) * w, y = v => h - 2 - ((v - min) / range) * (h - 4);
   const segs = []; let cur = [];
   vals.forEach((v, i) => { if (v != null) cur.push(`${x(i)},${y(v)}`); else { if (cur.length) segs.push(cur); cur = []; } });
   if (cur.length) segs.push(cur);
   return (
-    <svg width={w} height={h} style={{ display: 'block' }}>
-      {segs.map((s, si) => s.length > 1 && <polyline key={si} points={s.join(' ')} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />)}
-      {vals.map((v, i) => v != null ? <circle key={i} cx={x(i)} cy={y(v)} r={i === n - 1 ? 2.4 : 1.4} fill={color} /> : null)}
+    <svg width={w} height={h} className={cn('block', className)}>
+      {segs.map((s, si) => s.length > 1 && <polyline key={si} points={s.join(' ')} fill='none' stroke='currentColor' strokeWidth='1.5' strokeLinejoin='round' />)}
+      {vals.map((v, i) => v != null ? <circle key={i} cx={x(i)} cy={y(v)} r={i === n - 1 ? 2.4 : 1.4} fill='currentColor' /> : null)}
     </svg>
   );
 }
 
-const WL = { overloaded: { l: 'Overloaded', c: '#f87171' }, healthy: { l: 'Healthy', c: '#4ade80' }, light: { l: 'Light', c: '#60a5fa' } };
+const WL = { overloaded: { l: 'Overloaded', tone: 'bad' }, healthy: { l: 'Healthy', tone: 'good' }, light: { l: 'Light', tone: 'info' } };
 function WorkloadChip({ s }) {
-  const m = WL[s] || { l: s, c: 'var(--fg-3)' };
-  return <span style={{ fontSize: 10, fontWeight: 700, color: m.c, background: `${m.c}1e`, borderRadius: 5, padding: '2px 7px', whiteSpace: 'nowrap' }}>{m.l}</span>;
+  const m = WL[s] || { l: s, tone: 'neutral' };
+  return <Chip tone={m.tone}>{m.l}</Chip>;
 }
 
+const concernTone = (c) => c >= 12 ? 'bad' : c >= 5 ? 'warn' : 'info';
+
 /* ─── Generic sortable, sticky-header, expandable table ─── */
-function DataTable({ rows, columns, getKey, renderExpand, maxHeight = 380 }) {
+// A raw <table> (not the shadcn wrapper) so the header can stick inside the
+// scroll box; the shadcn wrapper adds its own overflow container.
+function DataTable({ rows, columns, getKey, renderExpand }) {
   const [sort, setSort] = useState(null);
   const [exp, setExp] = useState(null);
   let data = rows;
@@ -75,60 +95,88 @@ function DataTable({ rows, columns, getKey, renderExpand, maxHeight = 380 }) {
     });
   }
   const toggleSort = key => setSort(s => (s && s.key === key) ? (s.dir === 'desc' ? { key, dir: 'asc' } : null) : { key, dir: 'desc' });
-  const th = { position: 'sticky', top: 0, background: 'var(--bg-2)', zIndex: 2, padding: '8px 11px', fontSize: 10.5, fontWeight: 700, color: 'var(--fg-3)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', textTransform: 'uppercase', letterSpacing: 0.3 };
+  const alignCls = (a) => a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left';
   return (
-    <div style={{ overflow: 'auto', maxHeight, border: '1px solid var(--border)', borderRadius: 'var(--r-panel)' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-        <thead>
-          <tr>
-            <th style={{ ...th, width: 26 }} />
-            {columns.map(c => (
-              <th key={c.key} onClick={() => c.sortVal && toggleSort(c.key)} style={{ ...th, textAlign: c.align || 'left', cursor: c.sortVal ? 'pointer' : 'default' }}>
-                {c.label}{sort?.key === c.key ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : ''}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
+    <div className='max-h-[380px] overflow-auto rounded-lg border bg-card'>
+      <table className='w-full caption-bottom text-sm'>
+        <TableHeader className='sticky top-0 z-10 bg-muted shadow-[inset_0_-1px_0_var(--border)] [&_tr]:border-b-0'>
+          <TableRow className='hover:bg-transparent'>
+            <TableHead className='w-8'><span className='sr-only'>Expand</span></TableHead>
+            {columns.map(c => {
+              const sorted = sort?.key === c.key ? sort.dir : null;
+              const SortIcon = sorted === 'desc' ? ArrowDown : sorted === 'asc' ? ArrowUp : ArrowUpDown;
+              return (
+                <TableHead key={c.key} className={cn('px-3 text-xs font-medium text-muted-foreground', alignCls(c.align))}
+                  aria-sort={sorted === 'desc' ? 'descending' : sorted === 'asc' ? 'ascending' : undefined}>
+                  {c.sortVal ? (
+                    <button type='button' onClick={() => toggleSort(c.key)}
+                      className={cn('group inline-flex items-center gap-1 hover:text-foreground', sorted && 'text-foreground')}>
+                      {c.label}
+                      <SortIcon className={cn('size-3', !sorted && 'opacity-0 group-hover:opacity-50')} />
+                    </button>
+                  ) : c.label}
+                </TableHead>
+              );
+            })}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {data.map(row => {
             const k = getKey(row), isExp = exp === k;
             return (
               <Fragment key={k}>
-                <tr style={{ borderBottom: '1px solid var(--border-soft)', background: isExp ? 'var(--bg-1)' : 'transparent' }}>
-                  <td onClick={() => setExp(isExp ? null : k)} style={{ padding: '9px 8px', cursor: 'pointer', color: 'var(--fg-3)', fontSize: 11, textAlign: 'center' }}>{isExp ? '▾' : '▸'}</td>
+                <TableRow data-state={isExp ? 'selected' : undefined}>
+                  <TableCell className='w-8 cursor-pointer text-center' onClick={() => setExp(isExp ? null : k)}>
+                    <ChevronRight className={cn('mx-auto size-4 text-muted-foreground transition-transform', isExp && 'rotate-90')} aria-label={isExp ? 'Collapse' : 'Expand'} />
+                  </TableCell>
                   {columns.map(c => (
-                    <td key={c.key} onClick={c.onClick ? () => c.onClick(row) : undefined} style={{ padding: '6px 11px', textAlign: c.align || 'left', whiteSpace: 'nowrap', cursor: c.onClick ? 'pointer' : 'default' }}>
+                    <TableCell key={c.key} onClick={c.onClick ? () => c.onClick(row) : undefined}
+                      className={cn('px-3 py-1.5', alignCls(c.align), c.onClick && 'cursor-pointer')}>
                       {c.render(row)}
-                    </td>
+                    </TableCell>
                   ))}
-                </tr>
-                {isExp && <tr><td colSpan={columns.length + 1} style={{ padding: 0, background: 'var(--bg-1)', borderBottom: '1px solid var(--border)' }}>{renderExpand(row)}</td></tr>}
+                </TableRow>
+                {isExp && (
+                  <TableRow className='bg-muted/30 hover:bg-muted/30'>
+                    <TableCell colSpan={columns.length + 1} className='p-0 whitespace-normal'>{renderExpand(row)}</TableCell>
+                  </TableRow>
+                )}
               </Fragment>
             );
           })}
-        </tbody>
+        </TableBody>
       </table>
     </div>
   );
 }
 
 function TaskList({ tasks }) {
-  if (!tasks?.length) return <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No open tasks.</div>;
+  if (!tasks?.length) return <p className='text-sm text-muted-foreground'>No open tasks.</p>;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+    <div className='grid gap-1.5'>
       {tasks.slice(0, 8).map((t, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5 }}>
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: (TIER[t.priority] || {}).c || 'var(--fg-4)', flexShrink: 0 }} />
-          <span style={{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+        <div key={i} className='flex items-center gap-2 text-sm'>
+          {/* tier colour is data */}
+          <span className='size-1.5 shrink-0 rounded-full bg-muted-foreground' style={{ background: (TIER[t.priority] || {}).c }} />
+          <span className='truncate'>{t.title}</span>
         </div>
       ))}
-      {tasks.length > 8 && <div style={{ fontSize: 10.5, color: 'var(--fg-4)' }}>+{tasks.length - 8} more</div>}
+      {tasks.length > 8 && <p className='text-xs text-muted-foreground'>+{tasks.length - 8} more</p>}
     </div>
   );
 }
 
-const expandWrap = { display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 16, padding: '12px 16px' };
-const expandLabel = { fontSize: 10, fontWeight: 700, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 6 };
+const ExpandLabel = ({ children }) => <p className='mb-2 text-xs font-medium text-muted-foreground'>{children}</p>;
+const ExpandWrap = ({ children }) => <div className='grid gap-4 px-4 py-3 sm:grid-cols-[1fr_1.4fr]'>{children}</div>;
+
+function SectionTitle({ title, hint }) {
+  return (
+    <div className='flex flex-wrap items-baseline gap-x-2'>
+      <h3 className='font-semibold'>{title}</h3>
+      <span className='text-sm text-muted-foreground'>{hint}</span>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -164,157 +212,183 @@ export default function DashboardPage() {
   const tt = data?.team_totals;
   const hasData = data && ((data.chatters || []).some(c => c.has_data) || (data.pages || []).length > 0);
 
+  const tasksCell = r => r.task_count > 0 ? <Chip tone={concernTone(r.concern)} className='tabular-nums'>{r.task_count}</Chip> : <Dash>·</Dash>;
+
   // ─── column definitions ───
   const chatterCols = [
     { key: 'name', label: 'Chatter', sortVal: r => r.name?.toLowerCase(), onClick: r => navigate(`/chatters/${r.chatter_id}`),
       render: r => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className='flex items-center gap-2'>
           <Avatar name={r.name} size={24} />
-          <span style={{ fontWeight: 600, fontSize: 12.5, color: r.has_data ? 'var(--fg-0)' : 'var(--fg-3)' }}>{r.name}</span>
-          {!r.has_data && <span style={{ fontSize: 10, color: 'var(--fg-4)' }}>day off</span>}
+          <span className={cn('font-medium hover:underline', !r.has_data && 'text-muted-foreground')}>{r.name}</span>
+          {!r.has_data && <span className='text-xs text-muted-foreground'>day off</span>}
         </div>
       ) },
-    { key: 'sales', label: 'Sales', align: 'right', sortVal: r => r.metrics?.sales ?? -1, render: r => r.has_data ? <Cell val={r.metrics.sales} delta={r.vs_prev?.sales} money /> : <span style={dash}>—</span> },
-    { key: 'ppvs', label: 'PPVs', align: 'right', sortVal: r => r.metrics?.ppvs ?? -1, render: r => r.has_data ? <Cell val={r.metrics.ppvs} delta={r.vs_prev?.ppvs} /> : <span style={dash}>—</span> },
-    { key: 'unlock', label: 'Unlock', align: 'right', sortVal: r => r.metrics?.unlock ?? -1, render: r => r.has_data ? <Cell val={r.metrics.unlock} delta={r.vs_prev?.unlock} suffix="%" /> : <span style={dash}>—</span> },
-    { key: 'golden', label: 'Golden', align: 'right', sortVal: r => r.metrics?.golden ?? -1, render: r => r.has_data ? <Cell val={r.metrics.golden} delta={r.vs_prev?.golden} suffix="%" /> : <span style={dash}>—</span> },
-    { key: 'messages', label: 'Msgs', align: 'right', sortVal: r => r.metrics?.messages ?? -1, render: r => r.has_data ? <Cell val={r.metrics.messages} delta={r.vs_prev?.messages} /> : <span style={dash}>—</span> },
-    { key: 'reply', label: 'Reply', align: 'right', sortVal: r => r.metrics?.reply ?? 1e9, render: r => r.has_data ? <Cell val={r.metrics.reply} delta={r.vs_prev?.reply} suffix="s" lowerBetter /> : <span style={dash}>—</span> },
-    { key: 'workload', label: 'Load', align: 'center', sortVal: r => ({ overloaded: 3, healthy: 2, light: 1 }[r.metrics?.workload] || 0), render: r => r.has_data && r.metrics?.workload ? <WorkloadChip s={r.metrics.workload} /> : <span style={dash}>—</span> },
+    { key: 'sales', label: 'Sales', align: 'right', sortVal: r => r.metrics?.sales ?? -1, render: r => r.has_data ? <Cell val={r.metrics.sales} delta={r.vs_prev?.sales} money /> : <Dash /> },
+    { key: 'ppvs', label: 'PPVs', align: 'right', sortVal: r => r.metrics?.ppvs ?? -1, render: r => r.has_data ? <Cell val={r.metrics.ppvs} delta={r.vs_prev?.ppvs} /> : <Dash /> },
+    { key: 'unlock', label: 'Unlock', align: 'right', sortVal: r => r.metrics?.unlock ?? -1, render: r => r.has_data ? <Cell val={r.metrics.unlock} delta={r.vs_prev?.unlock} suffix='%' /> : <Dash /> },
+    { key: 'golden', label: 'Golden', align: 'right', sortVal: r => r.metrics?.golden ?? -1, render: r => r.has_data ? <Cell val={r.metrics.golden} delta={r.vs_prev?.golden} suffix='%' /> : <Dash /> },
+    { key: 'messages', label: 'Msgs', align: 'right', sortVal: r => r.metrics?.messages ?? -1, render: r => r.has_data ? <Cell val={r.metrics.messages} delta={r.vs_prev?.messages} /> : <Dash /> },
+    { key: 'reply', label: 'Reply', align: 'right', sortVal: r => r.metrics?.reply ?? 1e9, render: r => r.has_data ? <Cell val={r.metrics.reply} delta={r.vs_prev?.reply} suffix='s' lowerBetter /> : <Dash /> },
+    { key: 'workload', label: 'Load', align: 'center', sortVal: r => ({ overloaded: 3, healthy: 2, light: 1 }[r.metrics?.workload] || 0), render: r => r.has_data && r.metrics?.workload ? <WorkloadChip s={r.metrics.workload} /> : <Dash /> },
     { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} /> },
-    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: r => r.task_count > 0 ? <Chip tone={r.concern >= 12 ? 'bad' : r.concern >= 5 ? 'warn' : 'info'} style={{ fontSize: 10 }}>{r.task_count}</Chip> : <span style={dash}>·</span> },
+    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: tasksCell },
   ];
   const renderChatterExpand = r => (
-    <div style={expandWrap}>
+    <ExpandWrap>
       <div>
-        <div style={expandLabel}>Sales by page today</div>
+        <ExpandLabel>Sales by page today</ExpandLabel>
         {r.breakdown?.length ? r.breakdown.map(b => (
-          <div key={b.creator_id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0' }}><span>{b.name}</span><b className="mono">{money(b.sales)}</b></div>
-        )) : <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No sales recorded.</div>}
+          <div key={b.creator_id} className='flex justify-between gap-4 py-0.5 text-sm'><span>{b.name}</span><span className='font-mono font-semibold tabular-nums'>{money(b.sales)}</span></div>
+        )) : <p className='text-sm text-muted-foreground'>No sales recorded.</p>}
       </div>
-      <div><div style={expandLabel}>Open tasks ({r.task_count})</div><TaskList tasks={r.tasks} /></div>
-    </div>
+      <div><ExpandLabel>Open tasks ({r.task_count})</ExpandLabel><TaskList tasks={r.tasks} /></div>
+    </ExpandWrap>
   );
 
   const pageCols = [
     { key: 'name', label: 'Page', sortVal: r => r.name?.toLowerCase(),
-      render: r => <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Avatar name={r.name} size={24} /><span style={{ fontWeight: 600, fontSize: 12.5 }}>{r.name}</span></div> },
+      render: r => <div className='flex items-center gap-2'><Avatar name={r.name} size={24} /><span className='font-medium'>{r.name}</span></div> },
     { key: 'daily', label: 'Daily rev', align: 'right', sortVal: r => r.metrics?.revenue_net ?? -1,
       render: r => <Cell val={r.metrics?.revenue_net} delta={(r.metrics?.revenue_net != null && r.metrics?.revenue_baseline_net != null) ? r.metrics.revenue_net - r.metrics.revenue_baseline_net : null} money /> },
     { key: 'wk', label: '7-day rev', align: 'right', sortVal: r => r.metrics?.revenue_7d ?? -1,
       render: r => <Cell val={r.metrics?.revenue_7d} delta={(r.metrics?.revenue_7d != null && r.metrics?.revenue_7d_prior != null) ? r.metrics.revenue_7d - r.metrics.revenue_7d_prior : null} money /> },
     { key: 'ratio', label: 'Ratio', align: 'right', sortVal: r => r.metrics?.ratio ?? -1,
-      render: r => <span style={{ fontWeight: 700, fontSize: 13, color: r.metrics?.ratio == null ? 'var(--fg-4)' : r.metrics.ratio >= 5 ? '#4ade80' : r.metrics.ratio >= 3 ? '#fbbf24' : '#f87171' }}>{r.metrics?.ratio != null ? Number(r.metrics.ratio).toFixed(1) : '—'}</span> },
-    { key: 'ltv', label: 'LTV', align: 'right', sortVal: r => r.metrics?.ltv_7day ?? -1, render: r => <span style={{ fontSize: 13, color: 'var(--fg-2)' }}>{r.metrics?.ltv_7day != null ? money(r.metrics.ltv_7day) : '—'}</span> },
+      render: r => <span className={cn('font-semibold tabular-nums', r.metrics?.ratio == null ? 'text-muted-foreground/60' : r.metrics.ratio >= 5 ? 'text-good' : r.metrics.ratio >= 3 ? 'text-warn' : 'text-bad')}>{r.metrics?.ratio != null ? Number(r.metrics.ratio).toFixed(1) : '—'}</span> },
+    { key: 'ltv', label: 'LTV', align: 'right', sortVal: r => r.metrics?.ltv_7day ?? -1, render: r => <span className='tabular-nums text-muted-foreground'>{r.metrics?.ltv_7day != null ? money(r.metrics.ltv_7day) : '—'}</span> },
     { key: 'worked', label: 'Worked by', sortVal: r => r.chatters?.length || 0, render: r => r.chatters?.length
-      ? <div style={{ display: 'flex', alignItems: 'center' }}>{r.chatters.slice(0, 4).map((c, i) => <span key={c.chatter_id} title={`${c.name} · ${money(c.sales)}`} style={{ marginLeft: i ? -6 : 0, border: '1.5px solid var(--bg-1)', borderRadius: '50%', display: 'inline-flex' }}><Avatar name={c.name} size={20} /></span>)}{r.chatters.length > 4 && <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 4 }}>+{r.chatters.length - 4}</span>}</div>
-      : <span style={dash}>—</span> },
-    { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} color="#4ade80" /> },
-    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: r => r.task_count > 0 ? <Chip tone={r.concern >= 12 ? 'bad' : r.concern >= 5 ? 'warn' : 'info'} style={{ fontSize: 10 }}>{r.task_count}</Chip> : <span style={dash}>·</span> },
+      ? (
+        <div className='flex items-center'>
+          {r.chatters.slice(0, 4).map((c, i) => (
+            <span key={c.chatter_id} title={`${c.name} · ${money(c.sales)}`} className={cn('inline-flex rounded-full ring-2 ring-card', i && '-ms-1.5')}>
+              <Avatar name={c.name} size={20} />
+            </span>
+          ))}
+          {r.chatters.length > 4 && <span className='ms-1 text-xs text-muted-foreground'>+{r.chatters.length - 4}</span>}
+        </div>
+      )
+      : <Dash /> },
+    { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} className='text-good' /> },
+    { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: tasksCell },
   ];
   const renderPageExpand = r => (
-    <div style={expandWrap}>
+    <ExpandWrap>
       <div>
-        <div style={expandLabel}>Chatters on this page today</div>
+        <ExpandLabel>Chatters on this page today</ExpandLabel>
         {r.chatters?.length ? r.chatters.map(c => (
-          <div key={c.chatter_id} onClick={() => navigate(`/chatters/${c.chatter_id}`)} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', cursor: 'pointer' }}><span style={{ color: 'var(--indigo-bright)' }}>{c.name}</span><b className="mono">{money(c.sales)}</b></div>
-        )) : <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>No chatter sales recorded.</div>}
+          <button key={c.chatter_id} type='button' onClick={() => navigate(`/chatters/${c.chatter_id}`)}
+            className='flex w-full justify-between gap-4 py-0.5 text-left text-sm'>
+            <span className='text-link hover:underline'>{c.name}</span><span className='font-mono font-semibold tabular-nums'>{money(c.sales)}</span>
+          </button>
+        )) : <p className='text-sm text-muted-foreground'>No chatter sales recorded.</p>}
       </div>
-      <div><div style={expandLabel}>Open tasks ({r.task_count})</div><TaskList tasks={r.tasks} /></div>
-    </div>
+      <div><ExpandLabel>Open tasks ({r.task_count})</ExpandLabel><TaskList tasks={r.tasks} /></div>
+    </ExpandWrap>
+  );
+
+  const buildButton = (className) => (
+    <Button onClick={generate} disabled={generating} className={className}><ListChecks />{generating ? 'Building…' : 'Build tasks'}</Button>
   );
 
   return (
-    <div className="animate-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div className='flex flex-wrap items-end justify-between gap-3'>
         <div>
-          <h1 style={{ fontSize: 21, fontWeight: 700 }}>{greet}, {user?.name?.split(' ')[0]}.</h1>
-          <p style={{ fontSize: 12.5, color: 'var(--fg-2)', marginTop: 3 }}>Team overview for {date}. <b style={{ cursor: 'pointer', color: 'var(--indigo-bright)' }} onClick={() => navigate('/tasks')}>Tasks →</b></p>
+          <h2 className='text-2xl font-bold tracking-tight'>{greet}, {user?.name?.split(' ')[0]}.</h2>
+          <p className='text-muted-foreground'>
+            Team overview for <span className='tabular-nums'>{date}</span>.{' '}
+            <button type='button' onClick={() => navigate('/tasks')} className='inline-flex items-center gap-1 font-medium text-link hover:underline'>
+              Tasks<ArrowRight className='size-3.5' />
+            </button>
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <input type="date" value={date} onChange={e => { setDate(e.target.value); load(e.target.value); }} style={inputStyle} />
-          <button onClick={generate} disabled={generating} style={{ ...primary, opacity: generating ? 0.6 : 1 }}>{generating ? 'Building…' : 'Build tasks'}</button>
+        <div className='flex flex-wrap items-center gap-2'>
+          <Input type='date' aria-label='Report date' value={date} onChange={e => { setDate(e.target.value); load(e.target.value); }} className='w-auto tabular-nums' />
+          {buildButton()}
         </div>
       </div>
 
-      {loading ? <div style={{ paddingTop: 60, textAlign: 'center', color: 'var(--fg-3)' }}>Loading…</div>
-        : !hasData ? (
-          <div style={{ ...panel, padding: '44px 24px', textAlign: 'center', marginTop: 24 }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>📊</div>
-            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Nothing to show for {date} yet</div>
-            <p style={{ fontSize: 13, color: 'var(--fg-2)', marginBottom: 18 }}>Run the daily workflow and the team overview appears here:</p>
-            <div style={{ maxWidth: 480, margin: '0 auto', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {loading ? (
+        <div className='grid gap-4'>
+          <div className='grid gap-4 md:grid-cols-[auto_1fr]'><Skeleton className='h-26 md:w-64' /><Skeleton className='h-26' /></div>
+          <Skeleton className='h-20' />
+          <Skeleton className='h-72' />
+        </div>
+      ) : !hasData ? (
+        <div className='flex flex-col items-center rounded-lg border border-dashed px-6 py-12 text-center'>
+          <div className='grid size-12 place-items-center rounded-full bg-muted'><BarChart3 className='size-6 text-muted-foreground' /></div>
+          <h3 className='mt-4 text-lg font-semibold'>Nothing to show for {date} yet</h3>
+          <p className='mt-1 text-sm text-muted-foreground'>Run the daily workflow and the team overview appears here:</p>
+          <ol className='mt-6 grid w-full max-w-md gap-3 text-left text-sm'>
+            {[
+              ['1', <>Upload the <b>Message Dashboard</b> and <b>Creator Statistics</b> spreadsheets from Infloww.</>, '/reports', 'Go to Reports'],
+              ['2', <>In <b>Daily Check</b>, press <b>Run daily review</b> — the AI analyses every chatter. <span className='text-muted-foreground'>(Run the <b>creator review</b> once a week.)</span></>, '/daily', 'Go to Daily Check'],
+              ['3', <>Come back here and press <b>Build tasks</b> to build & rank the tasks and see the full overview.</>, null, null],
+            ].map(([n, text, link, cta]) => (
+              <li key={n} className='flex items-start gap-3'>
+                <span className='grid size-6 shrink-0 place-items-center rounded-full bg-muted text-xs font-semibold tabular-nums'>{n}</span>
+                <span className='flex-1 leading-relaxed'>
+                  {text}
+                  {link && <> <button type='button' onClick={() => navigate(link)} className='inline-flex items-center gap-1 font-medium text-link hover:underline'>{cta}<ArrowRight className='size-3.5' /></button></>}
+                </span>
+              </li>
+            ))}
+          </ol>
+          {buildButton('mt-6')}
+        </div>
+      ) : (
+        <>
+          {/* task progress + AI review */}
+          <div className='grid gap-4 md:grid-cols-[auto_1fr]'>
+            <div className='flex items-center gap-4 rounded-lg border bg-card p-4'>
+              <Donut counts={tc} />
+              <dl className='grid gap-0.5 text-sm tabular-nums'>
+                <div><span className='font-semibold text-good'>{tc.completed}</span> done</div>
+                <div><span className='font-semibold text-info'>{tc.taken}</span> in progress</div>
+                <div><span className='font-semibold'>{tc.open}</span> to do</div>
+                <div className='text-muted-foreground'>{tc.dismissed} dismissed</div>
+              </dl>
+            </div>
+            <div className='rounded-lg border bg-card p-4'>
+              <p className='mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground'><Sparkles className='size-3.5' />Today's review · AI</p>
+              {data.day_review
+                ? <p className='text-sm leading-relaxed'>{data.day_review}</p>
+                : <p className='text-sm text-muted-foreground'>Press <b className='text-foreground'>Build tasks</b> for the AI summary + task queue.</p>}
+            </div>
+          </div>
+
+          {/* team totals */}
+          {tt && (
+            <div className='grid grid-cols-2 gap-4 lg:grid-cols-5'>
               {[
-                ['1', <>Upload the <b>Message Dashboard</b> and <b>Creator Statistics</b> spreadsheets from Infloww.</>, '/reports', 'Go to Reports →'],
-                ['2', <>In <b>Daily Check</b>, press <b>Run daily review</b> — the AI analyses every chatter. <span style={{ color: 'var(--fg-3)' }}>(Run the <b>creator review</b> once a week.)</span></>, '/daily', 'Go to Daily Check →'],
-                ['3', <>Come back here and press <b>Build tasks</b> to build & rank the tasks and see the full overview.</>, null, null],
-              ].map(([n, text, link, cta]) => (
-                <div key={n} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 12.5 }}>
-                  <span style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--indigo-soft)', color: 'var(--indigo-bright)', fontWeight: 700, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>{n}</span>
-                  <span style={{ color: 'var(--fg-1)', flex: 1, lineHeight: 1.5 }}>{text}{link && <> <b onClick={() => navigate(link)} style={{ cursor: 'pointer', color: 'var(--indigo-bright)' }}>{cta}</b></>}</span>
+                { l: 'Team sales today', v: money(tt.sales), d: tt.sales_vs_prev_pct, suffix: '%' },
+                { l: 'PPVs sent', v: tt.ppvs?.toLocaleString() },
+                { l: 'Messages', v: tt.messages?.toLocaleString() },
+                { l: 'Avg unlock', v: `${tt.unlock_avg}%` },
+                { l: 'Working today', v: `${tt.working}/${tt.total}` },
+              ].map((s, i) => (
+                <div key={i} className={cn('rounded-lg border bg-card p-4', i === 0 && 'col-span-2 lg:col-span-1')}>
+                  <p className='text-sm text-muted-foreground'>{s.l}</p>
+                  <div className='mt-1 flex items-baseline gap-2'>
+                    <span className='text-2xl font-bold tabular-nums'>{s.v}</span>
+                    {s.d != null && <Delta v={s.d} suffix={s.suffix} />}
+                  </div>
                 </div>
               ))}
             </div>
-            <button onClick={generate} disabled={generating} style={{ ...primary, padding: '10px 18px', fontSize: 13, marginTop: 22 }}>{generating ? 'Building…' : 'Build tasks'}</button>
+          )}
+
+          <div className='grid gap-2'>
+            <SectionTitle title='Chatters' hint='Sorted by concern. Click a header to re-sort, the arrow to expand.' />
+            <DataTable rows={data.chatters || []} columns={chatterCols} getKey={r => r.chatter_id} renderExpand={renderChatterExpand} />
           </div>
-        ) : (
-          <>
-            {/* donut + AI review */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-              <div style={{ ...panel, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 14, minWidth: 230 }}>
-                <Donut counts={tc} />
-                <div style={{ fontSize: 11.5, lineHeight: 1.7 }}>
-                  <div><b style={{ color: '#4ade80' }}>{tc.completed}</b> done</div>
-                  <div><b style={{ color: '#60a5fa' }}>{tc.taken}</b> in progress</div>
-                  <div><b style={{ color: 'var(--fg-1)' }}>{tc.open}</b> to do</div>
-                  <div style={{ color: 'var(--fg-3)' }}>{tc.dismissed} dismissed</div>
-                </div>
-              </div>
-              <div style={{ ...panel, padding: '12px 14px', flex: 1, minWidth: 260 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#a78bfa', marginBottom: 5 }}>Today's review · AI</div>
-                {data.day_review
-                  ? <p style={{ fontSize: 12.5, color: 'var(--fg-1)', lineHeight: 1.55, margin: 0 }}>{data.day_review}</p>
-                  : <p style={{ fontSize: 12, color: 'var(--fg-3)', margin: 0 }}>Press <b>Build tasks</b> for the AI summary + task queue.</p>}
-              </div>
-            </div>
 
-            {/* team totals strip */}
-            {tt && (
-              <div style={{ ...panel, display: 'flex', gap: 0, marginBottom: 16, overflow: 'hidden' }}>
-                {[
-                  { l: 'Team sales today', v: money(tt.sales), d: tt.sales_vs_prev_pct, suffix: '%' },
-                  { l: 'PPVs sent', v: tt.ppvs?.toLocaleString() },
-                  { l: 'Messages', v: tt.messages?.toLocaleString() },
-                  { l: 'Avg unlock', v: `${tt.unlock_avg}%` },
-                  { l: 'Working today', v: `${tt.working}/${tt.total}` },
-                ].map((s, i) => (
-                  <div key={i} style={{ flex: 1, padding: '12px 16px', borderLeft: i ? '1px solid var(--border)' : 'none' }}>
-                    <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginBottom: 3 }}>{s.l}</div>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                      <span style={{ fontSize: 18, fontWeight: 700 }}>{s.v}</span>
-                      {s.d != null && <Delta v={s.d} suffix={s.suffix} />}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* chatters table */}
-            <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 2px 8px' }}>Chatters <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· sorted by concern · click a header to re-sort, ▸ to expand</span></div>
-            <div style={{ marginBottom: 22 }}>
-              <DataTable rows={data.chatters || []} columns={chatterCols} getKey={r => r.chatter_id} renderExpand={renderChatterExpand} />
-            </div>
-
-            {/* pages table */}
-            <div style={{ fontSize: 13, fontWeight: 700, margin: '4px 2px 8px' }}>Pages <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· sorted by biggest money drop</span></div>
+          <div className='grid gap-2'>
+            <SectionTitle title='Pages' hint='Sorted by biggest money drop.' />
             <DataTable rows={data.pages || []} columns={pageCols} getKey={r => r.creator_id} renderExpand={renderPageExpand} />
-          </>
-        )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
-
-const inputStyle = { background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-0)', borderRadius: 'var(--r-btn)', padding: '7px 10px', fontSize: 12.5, fontFamily: 'var(--ff-sans)' };
-const primary = { background: 'var(--indigo)', color: '#fff', border: 'none', cursor: 'pointer', borderRadius: 'var(--r-btn)', padding: '8px 14px', fontSize: 12.5, fontWeight: 700 };
-const panel = { background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)' };
-const dash = { color: 'var(--fg-4)', fontSize: 12 };

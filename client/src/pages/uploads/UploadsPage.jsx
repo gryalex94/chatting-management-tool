@@ -1,12 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import api from '../../services/api';
-import { Upload, FileSpreadsheet, Check, X, Loader2 } from 'lucide-react';
+import { Check, FileSpreadsheet, Loader2, MessagesSquare, Upload, UserRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const reportTypes = [
-  { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: '💬' },
-  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Creator-level revenue & ratios', icon: '👤' },
+  { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: MessagesSquare },
+  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Creator-level revenue & ratios', icon: UserRound },
 ];
 
 export default function UploadsPage() {
@@ -96,119 +100,102 @@ export default function UploadsPage() {
   }
 
   const statusIcon = {
-    processing: <Loader2 size={14} className="animate-spin" style={{ color: 'var(--warning)' }} />,
-    completed: <Check size={14} style={{ color: 'var(--success)' }} />,
-    failed: <X size={14} style={{ color: 'var(--danger)' }} />,
+    processing: <Loader2 className='size-4 animate-spin text-warn' aria-label='Processing' />,
+    completed: <Check className='size-4 text-good' aria-label='Completed' />,
+    failed: <X className='size-4 text-bad' aria-label='Failed' />,
   };
 
   return (
-    <div className="animate-fade-in">
-      <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--text-primary)' }}>Upload Reports</h1>
-      <p className="text-sm mb-6" style={{ color: 'var(--text-secondary)' }}>Import daily spreadsheets for analysis</p>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div>
+        <h2 className='text-2xl font-bold tracking-tight'>Upload reports</h2>
+        <p className='text-muted-foreground'>Import daily spreadsheets for analysis</p>
+      </div>
 
       {/* Step 1: Select report type */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-        {reportTypes.map(rt => (
-          <button
-            key={rt.key}
-            onClick={() => setSelectedType(rt.key)}
-            className="rounded-xl p-4 text-left transition-all duration-200"
-            style={{
-              background: selectedType === rt.key ? 'var(--accent)' : 'var(--bg-card)',
-              border: `1px solid ${selectedType === rt.key ? 'var(--accent)' : 'var(--border)'}`,
-              color: selectedType === rt.key ? '#fff' : 'var(--text-primary)',
-            }}
-          >
-            <span className="text-lg">{rt.icon}</span>
-            <h3 className="text-sm font-medium mt-2">{rt.label}</h3>
-            <p className="text-xs mt-0.5" style={{ opacity: 0.7 }}>{rt.desc}</p>
-          </button>
-        ))}
+      <div className='grid gap-3 sm:grid-cols-2'>
+        {reportTypes.map(rt => {
+          const on = selectedType === rt.key;
+          return (
+            <button key={rt.key} type='button' onClick={() => setSelectedType(rt.key)} aria-pressed={on}
+              className={cn('flex items-start gap-3 rounded-lg border bg-card p-4 text-left transition-colors hover:bg-accent',
+                on && 'border-primary ring-1 ring-primary')}>
+              <span className={cn('grid size-9 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground', on && 'bg-primary text-primary-foreground')}>
+                <rt.icon className='size-4' />
+              </span>
+              <span>
+                <span className='block text-sm font-medium'>{rt.label}</span>
+                <span className='mt-0.5 block text-sm text-muted-foreground'>{rt.desc}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Step 2: Date + File */}
       {selectedType && (
-        <div className="animate-fade-in">
-          <div className="mb-4">
-            <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--text-secondary)' }}>Report Date</label>
-            <input
-              type="date"
-              value={reportDate}
-              onChange={(e) => setReportDate(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-            />
+        <div className='grid gap-4'>
+          <div className='grid gap-2'>
+            <Label htmlFor='report-date'>Report date</Label>
+            <Input id='report-date' type='date' value={reportDate} onChange={(e) => setReportDate(e.target.value)} className='w-auto tabular-nums' />
           </div>
 
           <div
             {...getRootProps()}
-            className="rounded-xl p-8 text-center cursor-pointer transition-all duration-200"
-            style={{
-              background: isDragActive ? 'var(--accent)10' : 'var(--bg-card)',
-              border: `2px dashed ${isDragActive ? 'var(--accent)' : 'var(--border)'}`,
-            }}
+            className={cn('cursor-pointer rounded-lg border-2 border-dashed bg-card p-8 text-center transition-colors hover:bg-accent/50',
+              isDragActive && 'border-primary bg-primary/5')}
           >
             <input {...getInputProps()} />
             {file ? (
-              <div className="flex items-center justify-center gap-3">
-                <FileSpreadsheet size={24} style={{ color: 'var(--success)' }} />
-                <div>
-                  <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{file.name}</p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{(file.size / 1024).toFixed(1)} KB</p>
+              <div className='flex items-center justify-center gap-3'>
+                <FileSpreadsheet className='size-6 shrink-0 text-good' />
+                <div className='min-w-0 text-left'>
+                  <p className='truncate text-sm font-medium'>{file.name}</p>
+                  <p className='text-xs text-muted-foreground tabular-nums'>{(file.size / 1024).toFixed(1)} KB</p>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); setFile(null); }} className="p-1 rounded" style={{ color: 'var(--danger)' }}>
-                  <X size={16} />
-                </button>
+                <Button type='button' size='icon-sm' variant='ghost' className='text-muted-foreground hover:text-bad' aria-label='Remove file'
+                  onClick={(e) => { e.stopPropagation(); setFile(null); }}>
+                  <X />
+                </Button>
               </div>
             ) : (
               <div>
-                <Upload size={32} className="mx-auto mb-2" style={{ color: 'var(--text-muted)' }} />
-                <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Drop your spreadsheet here, or click to browse
-                </p>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>.xlsx or .csv</p>
+                <Upload className='mx-auto mb-2 size-8 text-muted-foreground' />
+                <p className='text-sm'>Drop your spreadsheet here, or click to browse</p>
+                <p className='mt-1 text-xs text-muted-foreground'>.xlsx or .csv</p>
               </div>
             )}
           </div>
 
           {file && (
-            <button
-              onClick={handleUpload}
-              disabled={uploading}
-              className="mt-4 w-full py-3 rounded-lg text-sm font-medium text-white transition-colors"
-              style={{ background: uploading ? 'var(--border)' : 'var(--accent)' }}
-            >
-              {uploading ? 'Uploading...' : 'Upload & Process'}
-            </button>
+            <Button onClick={handleUpload} disabled={uploading} size='lg' className='w-full'>
+              {uploading ? <><Loader2 className='animate-spin' />Uploading…</> : 'Upload and process'}
+            </Button>
           )}
         </div>
       )}
 
       {/* Upload history */}
       {imports.length > 0 && (
-        <div className="mt-8">
-          <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Recent Imports</h2>
-          <div className="flex flex-col gap-2">
+        <div className='grid gap-3'>
+          <h3 className='font-semibold'>Recent imports</h3>
+          <div className='divide-y overflow-hidden rounded-lg border bg-card'>
             {imports.slice(0, 20).map(imp => (
-              <div
-                key={imp.id}
-                className="flex items-center justify-between rounded-lg px-4 py-3"
-                style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-              >
-                <div className="flex items-center gap-3">
-                  {statusIcon[imp.status]}
-                  <div>
-                    <p className="text-sm" style={{ color: 'var(--text-primary)' }}>{imp.file_name}</p>
-                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {imp.report_type?.replace('_', ' ')} · {imp.report_date}
+              <div key={imp.id} className='flex items-center justify-between gap-3 px-4 py-3'>
+                <div className='flex min-w-0 items-center gap-3'>
+                  <span className='shrink-0'>{statusIcon[imp.status]}</span>
+                  <div className='min-w-0'>
+                    <p className='truncate text-sm'>{imp.file_name}</p>
+                    <p className='text-xs capitalize text-muted-foreground'>
+                      {imp.report_type?.replace('_', ' ')} · <span className='tabular-nums'>{imp.report_date}</span>
                     </p>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                <div className='shrink-0 text-right'>
+                  <p className='text-xs text-muted-foreground tabular-nums'>
                     {imp.row_count > 0 ? `${imp.row_count} rows` : imp.status}
                   </p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                  <p className='text-xs text-muted-foreground'>
                     {imp.users?.name}
                   </p>
                 </div>
