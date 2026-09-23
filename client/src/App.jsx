@@ -5,6 +5,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/layout/Layout';
 import LoginPage from './pages/auth/LoginPage';
 import SetupPage from './pages/auth/SetupPage';
+import AcceptInvitePage from './pages/auth/AcceptInvitePage';
 import DashboardPage from './pages/dashboard/DashboardPage';
 import DailyCheckPage from './pages/dailycheck/DailyCheckPage';
 import PulsePage from './pages/pulse/PulsePage';
@@ -39,6 +40,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
       <Route path="/setup" element={<SetupPage />} />
+      <Route path="/invite/:token" element={<AcceptInvitePage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
         <Route path="daily" element={<DailyCheckPage />} />

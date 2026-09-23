@@ -191,6 +191,9 @@ router.post('/accept-invite', async (req, res) => {
     if (!token || !password || !name) {
       return res.status(400).json({ error: 'Token, password, and name are required' });
     }
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'Choose a password of at least 8 characters.' });
+    }
 
     // Find the invitation
     const { data: invitation, error: invError } = await supabaseAdmin

@@ -260,7 +260,9 @@ export default function SettingsPage() {
     }catch{toast.error('Failed');}
   }
 
-  const copyToken = () => { try { navigator.clipboard?.writeText(inviteToken); toast.success('Copied'); } catch { /* ignore */ } };
+  // The person opens this link to choose a name and password (pages/auth/AcceptInvitePage).
+  const inviteLink = inviteToken ? `${window.location.origin}/invite/${inviteToken}` : '';
+  const copyToken = () => { try { navigator.clipboard?.writeText(inviteLink); toast.success('Invite link copied'); } catch { /* ignore */ } };
 
   const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles']];
 
@@ -510,7 +512,8 @@ export default function SettingsPage() {
           {isAdmin&&(
             <Section title='Add people' sub='Invite someone by email, or create their account directly with a password you choose.'>
               <div className='grid gap-3'>
-                <FormHeading>Invite by email</FormHeading>
+                <FormHeading>Invite someone</FormHeading>
+                <p className='-mt-1 text-xs text-muted-foreground'>Creates a one-time link to send them. It expires after 7 days, and you can revoke it below.</p>
                 <form onSubmit={sendInvite} className='grid gap-2 sm:grid-cols-[1fr_11rem_auto]'>
                   <Input value={inviteForm.email} onChange={e=>setInviteForm(p=>({...p,email:e.target.value}))} type='email' required placeholder='email@example.com' aria-label='Email'/>
                   <RoleSelect value={inviteForm.role} onChange={r=>setInviteForm(p=>({...p,role:r}))} roles={assignable}/>
@@ -518,9 +521,9 @@ export default function SettingsPage() {
                 </form>
                 {inviteToken && (
                   <div className='flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2'>
-                    <span className='text-xs text-muted-foreground'>Invite code</span>
-                    <code className='min-w-0 flex-1 truncate font-mono text-xs'>{inviteToken}</code>
-                    <Button size='icon-sm' variant='ghost' onClick={copyToken} aria-label='Copy invite code'><Copy/></Button>
+                    <span className='shrink-0 text-xs text-muted-foreground'>Send them this link</span>
+                    <code className='min-w-0 flex-1 truncate font-mono text-xs'>{inviteLink}</code>
+                    <Button size='icon-sm' variant='ghost' onClick={copyToken} aria-label='Copy invite link'><Copy/></Button>
                   </div>
                 )}
               </div>
