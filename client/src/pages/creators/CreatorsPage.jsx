@@ -1,16 +1,32 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
-import { Avatar, Chip, StatusDot } from '../../components/shared';
-import { STATUS_META, avatarColor, initials } from '../../utils/helpers';
-import { Plus, ArrowRight, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal, Clock, Trash2, Calendar } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import api from '@/services/api';
+import { STATUS_META, avatarColor, initials } from '@/utils/helpers';
+import {
+  Plus, ArrowRight, ArrowDown, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal,
+  Clock, Trash2, Calendar, Check, X,
+} from 'lucide-react';
 import {
   DndContext, DragOverlay, PointerSensor, useSensor, useSensors,
   pointerWithin, rectIntersection, useDraggable, useDroppable,
 } from '@dnd-kit/core';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
+import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 const DAY_NUMBERS = [1,2,3,4,5,6,7];
@@ -52,13 +68,29 @@ function collisionStrategy(args) {
   return hits.length ? hits : rectIntersection(scoped);
 }
 
-/* ─── Panel Header ───────────────────────────────── */
-function PanelHeader({ title, sub, right }) {
+/* ─── Small building blocks ──────────────────────── */
+
+// Initials on a colour derived from the name (the colour is data, not chrome).
+function PersonAvatar({ name, className }) {
   return (
-    <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-      <div><div style={{ fontWeight:600, fontSize:13.5 }}>{title}</div>{sub&&<div style={{ color:'var(--fg-3)', fontSize:11.5, marginTop:2 }}>{sub}</div>}</div>
-      <div style={{ flex:1 }}/>{right}
-    </div>
+    <Avatar className={cn('size-7', className)}>
+      <AvatarFallback className='text-[10px] font-semibold text-white' style={{ background: avatarColor(name) }}>
+        {initials(name)}
+      </AvatarFallback>
+    </Avatar>
+  );
+}
+
+// Coloured dot for a chatter's experience status, label on hover.
+function StatusDot({ status, withTooltip = true }) {
+  const meta = STATUS_META[status] || STATUS_META.new;
+  const dot = <span className='inline-block size-2 shrink-0 rounded-full' style={{ background: meta.color }} aria-label={meta.label} />;
+  if (!withTooltip) return dot;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{dot}</TooltipTrigger>
+      <TooltipContent>{meta.label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -70,7 +102,7 @@ function DraggableChatter({ chatter, uniqueId, children }) {
   });
   return (
     <div ref={setNodeRef} {...listeners} {...attributes}
-      style={{ opacity: isDragging ? 0.3 : 1, cursor: 'grab' }}>
+      className={cn('cursor-grab', isDragging && 'opacity-30')}>
       {children}
     </div>
   );
@@ -93,13 +125,11 @@ function DraggableCreatorWrap({ creator, draggingType, children }) {
   return (
     <div ref={node => { setDragRef(node); setDropRef(node); }}
       {...listeners} {...attributes}
-      style={{
-        opacity: isDragging ? 0.4 : 1,
-        outline: showMergeGlow ? '2px solid var(--indigo-bright)' : 'none',
-        outlineOffset: -2, borderRadius: 'var(--r-panel)',
-        boxShadow: showMergeGlow ? '0 0 20px rgba(99,102,241,0.25)' : 'none',
-        transition: 'outline .15s, box-shadow .15s, opacity .15s', cursor: 'grab',
-      }}>
+      className={cn(
+        'cursor-grab rounded-lg transition-[outline-color,box-shadow,opacity] duration-150',
+        isDragging && 'opacity-40',
+        showMergeGlow && 'shadow-lg outline-2 -outline-offset-2 outline-link',
+      )}>
       {children}
     </div>
   );
@@ -108,11 +138,12 @@ function DraggableCreatorWrap({ creator, draggingType, children }) {
 /* ─── Diagonal stripes SVG pattern ───────────────── */
 const STRIPE_ID = 'dayoff-stripes';
 function StripesPatternDef() {
+  // currentColor inside the pattern comes from this svg's text colour.
   return (
-    <svg width="0" height="0" style={{ position:'absolute' }}>
+    <svg width='0' height='0' className='absolute text-muted-foreground' aria-hidden='true'>
       <defs>
-        <pattern id={STRIPE_ID} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-          <rect width="3" height="8" fill="var(--fg-4, #888)" opacity="0.13"/>
+        <pattern id={STRIPE_ID} width='8' height='8' patternUnits='userSpaceOnUse' patternTransform='rotate(45)'>
+          <rect width='3' height='8' fill='currentColor' opacity='0.15'/>
         </pattern>
       </defs>
     </svg>
@@ -121,68 +152,63 @@ function StripesPatternDef() {
 
 /* ─── Chatter Row ────────────────────────────────── */
 function ChatterRow({ chatter, onClick, onRemove, isDayOff, isOvertime, coverHours }) {
-  const meta = STATUS_META[chatter.status] || STATUS_META.new;
   const isCover = coverHours != null;
   return (
     <div onClick={onClick}
-      style={{
-        display:'flex', alignItems:'center', gap:8, padding:'8px 10px',
-        background: isDayOff ? 'var(--bg-3)' : isCover ? 'var(--indigo-soft)' : 'var(--bg-2)',
-        border: isCover ? '1px solid var(--indigo-line)' : isOvertime ? '1px solid var(--warn)' : '1px solid var(--border)',
-        borderRadius:'var(--r-tile)', cursor:'pointer', transition:'border-color .12s',
-        position:'relative', overflow:'hidden',
-      }}
-      onMouseEnter={e => { if (!isDayOff) e.currentTarget.style.borderColor='var(--border-strong)'; }}
-      onMouseLeave={e => { if (!isDayOff) e.currentTarget.style.borderColor = isOvertime ? 'var(--warn)' : 'var(--border)'; }}>
+      className={cn(
+        'relative flex cursor-pointer items-center gap-2 overflow-hidden rounded-md border px-2.5 py-2 transition-colors',
+        isDayOff ? 'bg-muted'
+          : isCover ? 'border-link/40 bg-link/10 hover:border-link/60'
+          : isOvertime ? 'border-warn bg-muted/40'
+          : 'bg-muted/40 hover:border-foreground/25',
+      )}>
 
       {isDayOff && (
-        <svg style={{ position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none', zIndex:0 }}>
-          <rect width="100%" height="100%" fill={`url(#${STRIPE_ID})`}/>
+        <svg className='pointer-events-none absolute inset-0 size-full' aria-hidden='true'>
+          <rect width='100%' height='100%' fill={`url(#${STRIPE_ID})`}/>
         </svg>
       )}
 
-      <div style={{ display:'flex', alignItems:'center', gap:8, flex:1, minWidth:0, position:'relative', zIndex:1 }}>
-        <div style={{ position:'relative' }}>
-          <Avatar name={chatter.name} size={28}/>
+      <div className='relative z-[1] flex min-w-0 flex-1 items-center gap-2'>
+        <div className='relative shrink-0'>
+          <PersonAvatar name={chatter.name}/>
           {isDayOff && (
-            <div style={{
-              position:'absolute', bottom:-2, right:-4,
-              background:'var(--fg-3)', color:'#fff', fontSize:7, fontWeight:700,
-              borderRadius:6, padding:'1px 4px', border:'1.5px solid var(--bg-1)', whiteSpace:'nowrap',
-            }}>OFF</div>
+            <span className='absolute -right-1 -bottom-0.5 rounded bg-muted-foreground px-1 text-[7px] leading-tight font-bold whitespace-nowrap text-background ring-2 ring-card'>OFF</span>
           )}
           {isOvertime && !isDayOff && (
-            <div style={{
-              position:'absolute', bottom:-2, right:-4,
-              background:'var(--warn)', color:'#fff', fontSize:7, fontWeight:700,
-              borderRadius:6, padding:'1px 3px', border:'1.5px solid var(--bg-1)',
-            }}>OT</div>
+            <span className='absolute -right-1 -bottom-0.5 rounded bg-warn px-0.5 text-[7px] leading-tight font-bold text-white ring-2 ring-card'>OT</span>
           )}
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{
-            fontSize:12.5, fontWeight: isCover ? 700 : 500,
-            color: isDayOff ? 'var(--fg-3)' : isCover ? 'var(--indigo-bright)' : meta.nameColor,
-            textDecoration: isDayOff ? 'line-through' : 'none',
-          }}>{chatter.name}</div>
-          <div className="mono" style={{ fontSize:10.5, color: isCover ? 'var(--indigo-bright)' : 'var(--fg-3)', marginTop:1 }}>
+        <div className='min-w-0 flex-1'>
+          <div className='flex min-w-0 items-center gap-1.5'>
+            {!isCover && !isDayOff && <StatusDot status={chatter.status}/>}
+            <span className={cn(
+              'truncate text-[13px]',
+              isCover ? 'font-semibold text-link'
+                : isDayOff ? 'text-muted-foreground line-through'
+                : 'font-medium text-foreground',
+            )}>{chatter.name}</span>
+          </div>
+          <div className={cn('mt-0.5 truncate font-mono text-[11px] tabular-nums', isCover ? 'text-link' : 'text-muted-foreground')}>
             {isCover ? `Cover · ${coverHours}h` : isDayOff ? 'Day off' : isOvertime ? 'Overtime cover' : (chatter.email || '—')}
           </div>
         </div>
       </div>
 
-      <div style={{ display:'flex', alignItems:'center', gap:2, position:'relative', zIndex:1 }}>
+      <div className='relative z-[1] flex shrink-0 items-center'>
         {onRemove ? (
-          <button onClick={e => { e.stopPropagation(); onRemove(); }} title="Unassign"
-            style={{
-              background:'none', border:'none', cursor:'pointer', padding:4,
-              color:'var(--fg-3)', fontSize:14, lineHeight:1, borderRadius:4, transition:'color .12s, background .12s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color='var(--bad)'; e.currentTarget.style.background='var(--bg-3)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color='var(--fg-3)'; e.currentTarget.style.background='none'; }}>
-            ✕</button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant='ghost' size='icon-xs' aria-label={isCover ? 'Remove cover' : 'Unassign'}
+                className='text-muted-foreground hover:bg-muted hover:text-bad'
+                onClick={e => { e.stopPropagation(); onRemove(); }}>
+                <X/>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{isCover ? 'Remove cover' : 'Unassign'}</TooltipContent>
+          </Tooltip>
         ) : (
-          <ArrowRight size={12} style={{ color:'var(--fg-3)' }}/>
+          <ArrowRight className='size-3 text-muted-foreground'/>
         )}
       </div>
     </div>
@@ -221,24 +247,38 @@ function ShiftSlot({ shift, chatters, creatorId, onAssign, onAddCover, onClickCh
   const hasRows = regulars.length > 0 || covers.length > 0;
 
   return (
-    <div ref={setNodeRef} style={{ marginBottom: 8 }}>
-      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6, padding:'0 2px' }}>
-        <span className="label" style={{ fontSize:10 }}>{shift.name}</span>
-        <span className="mono" style={{ fontSize:10, color:'var(--fg-3)' }}>
+    <div ref={setNodeRef}>
+      <div className='mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 px-0.5'>
+        <span className='text-xs font-medium'>{shift.name}</span>
+        <span className='font-mono text-[11px] text-muted-foreground tabular-nums'>
           {shift.start_time?.slice(0,5)} – {shift.end_time?.slice(0,5)}
         </span>
-        {isActive && selectedDay === getTodayDayNumber() && <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--good)', marginLeft:2 }}/>}
-        {!covered && !dropActive && (
-          <span style={{ fontSize:10, color:'var(--bad)', marginLeft:'auto' }}>no one working!</span>
+        {isActive && selectedDay === getTodayDayNumber() && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className='size-1.5 rounded-full bg-good' aria-label='On shift now'/>
+            </TooltipTrigger>
+            <TooltipContent>On shift now</TooltipContent>
+          </Tooltip>
         )}
-        <button onClick={() => onAddCover(creatorId, shift.id)} title="Add a cover for this day"
-          style={{ marginLeft: covered ? 'auto' : 6, background:'none', border:'none', cursor:'pointer', color:'var(--indigo-bright)', fontSize:10.5, fontWeight:700, padding:'2px 4px', display:'flex', alignItems:'center', gap:3 }}>
-          <Plus size={11}/> cover
-        </button>
+        <div className='ms-auto flex items-center gap-1'>
+          {!covered && !dropActive && (
+            <span className='text-xs font-medium text-bad'>No one working</span>
+          )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant='ghost' size='xs' className='h-6 text-link hover:text-link'
+                onClick={() => onAddCover(creatorId, shift.id)}>
+                <Plus/>Cover
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Add a cover for this day</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       {hasRows && (
-        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+        <div className='flex flex-col gap-1.5'>
           {regulars.map(ch => {
             const isDayOff = !(ch.work_days || [1,2,3,4,5]).includes(selectedDay);
             return (
@@ -260,16 +300,16 @@ function ShiftSlot({ shift, chatters, creatorId, onAssign, onAddCover, onClickCh
       {(!hasRows || dropActive) && (
         <div
           onClick={() => !dropActive && onAssign(creatorId, shift.id)}
-          style={{
-            padding: dropActive ? '16px' : '12px', borderRadius: 'var(--r-tile)', cursor: 'pointer',
-            border: dropActive ? '2px dashed var(--indigo-bright)' : '1px dashed var(--border-strong)',
-            background: dropActive ? 'var(--indigo-soft)' : 'transparent',
-            color: dropActive ? 'var(--indigo-bright)' : 'var(--fg-3)',
-            fontSize: 11.5, textAlign: 'center', transition: 'all .15s ease',
-            marginTop: hasRows ? 6 : 0,
-            boxShadow: dropActive ? '0 0 12px rgba(99,102,241,0.15)' : 'none',
-          }}>
-          {dropActive ? '↓ Drop here to assign' : 'Drop a chatter (regular) — or “+ cover” above'}
+          className={cn(
+            'flex cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed text-center text-xs transition-all duration-150',
+            hasRows && 'mt-1.5',
+            dropActive
+              ? 'border-2 border-link bg-link/10 p-4 font-medium text-link'
+              : 'p-3 text-muted-foreground hover:bg-muted/40 hover:text-foreground',
+          )}>
+          {dropActive
+            ? <><ArrowDown className='size-3.5'/>Drop here to assign</>
+            : 'Drop a chatter here, or click to pick a regular'}
         </div>
       )}
     </div>
@@ -278,53 +318,29 @@ function ShiftSlot({ shift, chatters, creatorId, onAssign, onAddCover, onClickCh
 
 /* ─── Creator Card Menu ──────────────────────────── */
 function CreatorMenu({ creator, mergedCreators, onRename, onSplit, onDeactivate, onManageShifts }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false); }
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [open]);
-
-  const mi = {
-    display:'flex', alignItems:'center', gap:8, padding:'8px 12px', fontSize:12.5,
-    cursor:'pointer', transition:'background .1s', background:'transparent',
-    border:'none', width:'100%', textAlign:'left', color:'var(--fg-1)',
-  };
-
+  // modal={false} so opening a dialog from an item doesn't leave the page unclickable.
   return (
-    <div ref={menuRef} style={{ position:'relative' }}>
-      <button className="btn sm ghost" style={{ color:'var(--fg-3)', padding:4 }}
-        onClick={e => { e.stopPropagation(); setOpen(!open); }}>
-        <MoreHorizontal size={16}/>
-      </button>
-      {open && (
-        <div style={{
-          position:'absolute', top:'100%', right:0, marginTop:4,
-          background:'var(--bg-1)', border:'1px solid var(--border)',
-          borderRadius:'var(--r-tile)', boxShadow:'0 8px 24px rgba(0,0,0,0.2)',
-          minWidth:200, zIndex:50, overflow:'hidden',
-        }}>
-          <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-            onClick={e => { e.stopPropagation(); setOpen(false); onRename(creator); }}><Pencil size={13}/> Rename</button>
-          <button style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-            onClick={e => { e.stopPropagation(); setOpen(false); onManageShifts(); }}><Clock size={13}/> Manage Shifts</button>
-          {mergedCreators.length > 0 && (<>
-            <div style={{ height:1, background:'var(--border)', margin:'4px 0' }}/>
-            <div style={{ padding:'6px 12px', fontSize:10, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:0.5 }}>Split</div>
-            {mergedCreators.map(m => (
-              <button key={m.id} style={mi} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-                onClick={e => { e.stopPropagation(); setOpen(false); onSplit(m.id, m.name); }}><Scissors size={13}/> {m.name}</button>
-            ))}
-          </>)}
-          <div style={{ height:1, background:'var(--border)', margin:'4px 0' }}/>
-          <button style={{ ...mi, color:'var(--bad)' }} onMouseEnter={e => e.currentTarget.style.background='var(--bg-2)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}
-            onClick={e => { e.stopPropagation(); setOpen(false); onDeactivate(creator); }}><XCircle size={13}/> Deactivate</button>
-        </div>
-      )}
-    </div>
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button variant='ghost' size='icon-sm' className='shrink-0 text-muted-foreground' aria-label='Page actions'
+          onClick={e => e.stopPropagation()}>
+          <MoreHorizontal/>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='end' className='min-w-48'>
+        <DropdownMenuItem onClick={e => { e.stopPropagation(); onRename(creator); }}><Pencil/>Rename</DropdownMenuItem>
+        <DropdownMenuItem onClick={e => { e.stopPropagation(); onManageShifts(); }}><Clock/>Manage shifts</DropdownMenuItem>
+        {mergedCreators.length > 0 && (<>
+          <DropdownMenuSeparator/>
+          <DropdownMenuLabel className='text-xs font-normal text-muted-foreground'>Split off</DropdownMenuLabel>
+          {mergedCreators.map(m => (
+            <DropdownMenuItem key={m.id} onClick={e => { e.stopPropagation(); onSplit(m.id, m.name); }}><Scissors/>{m.name}</DropdownMenuItem>
+          ))}
+        </>)}
+        <DropdownMenuSeparator/>
+        <DropdownMenuItem variant='destructive' onClick={e => { e.stopPropagation(); onDeactivate(creator); }}><XCircle/>Deactivate</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -339,34 +355,30 @@ function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickC
   const pageCount = 1 + memberPages.length;
 
   return (
-    <div style={{
-      background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)',
-      overflow:'hidden', display:'flex', flexDirection:'column',
-    }}>
-      <div style={{ padding:'14px 16px', display:'flex', alignItems:'center', gap:10, borderBottom:'1px solid var(--border)' }}>
-        <div style={{ position:'relative' }}>
-          <Avatar name={creator.name} size={32}/>
+    <div className='flex flex-col overflow-hidden rounded-lg border bg-card'>
+      <div className='flex items-center gap-3 border-b px-4 py-3'>
+        <div className='relative shrink-0'>
+          <PersonAvatar name={creator.name} className='size-8'/>
           {isMerged && (
-            <div style={{
-              position:'absolute', bottom:-2, right:-6, background:'var(--indigo)', color:'#fff',
-              fontSize:9, fontWeight:700, borderRadius:10, padding:'1px 5px', border:'2px solid var(--bg-1)',
-            }}>+{memberPages.length}</div>
+            <span className='absolute -right-1.5 -bottom-0.5 rounded-full bg-primary px-1 text-[9px] leading-tight font-bold text-primary-foreground tabular-nums ring-2 ring-card'>
+              +{memberPages.length}
+            </span>
           )}
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontSize:14, fontWeight:600 }}>
+        <div className='min-w-0 flex-1'>
+          <div className='text-sm font-semibold break-words'>
             {creator.name}
-            {isMerged && <span style={{ color:'var(--fg-3)', fontWeight:500 }}> + {memberPages.map(m => m.name).join(' + ')}</span>}
+            {isMerged && <span className='font-normal text-muted-foreground'> + {memberPages.map(m => m.name).join(' + ')}</span>}
           </div>
-          <div style={{ display:'flex', gap:8, marginTop:2, fontSize:11, color:'var(--fg-3)' }}>
+          <div className='mt-0.5 flex gap-2 text-xs text-muted-foreground tabular-nums'>
             <span>{assignedChatters.length} chatters</span>
-            {isMerged && <span style={{ color:'var(--indigo-bright)' }}>{pageCount} pages</span>}
+            {isMerged && <span>· {pageCount} pages</span>}
           </div>
         </div>
         <CreatorMenu creator={creator} mergedCreators={mergedCreators}
           onRename={onRename} onSplit={onSplit} onDeactivate={onDeactivate} onManageShifts={onManageShifts}/>
       </div>
-      <div style={{ padding:'12px 14px', flex:1 }}>
+      <div className='flex flex-1 flex-col gap-3 p-3'>
         {shifts.map(shift => (
           <ShiftSlot key={shift.id} shift={shift} chatters={chatters} creatorId={creator.id}
             onAssign={onAssign} onAddCover={onAddCover} onClickChatter={onClickChatter} onRemove={onRemove}
@@ -377,39 +389,54 @@ function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickC
   );
 }
 
+// A selectable chatter row used in the assign / cover dialogs.
+function PickRow({ chatter, selected, onClick, trailing }) {
+  const meta = STATUS_META[chatter.status];
+  return (
+    <button type='button' onClick={onClick} aria-pressed={selected}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors',
+        selected ? 'border-link/40 bg-link/10' : 'bg-muted/40 hover:border-link/40 hover:bg-link/5',
+      )}>
+      <PersonAvatar name={chatter.name}/>
+      <div className='min-w-0 flex-1'>
+        <div className='truncate text-sm font-medium'>{chatter.name}</div>
+        <div className='mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground'>
+          <StatusDot status={chatter.status} withTooltip={false}/>{meta?.label}
+        </div>
+      </div>
+      {trailing}
+    </button>
+  );
+}
+
 /* ─── Assign Modal ───────────────────────────────── */
 function AssignModal({ chatters, shifts, targetCreatorId, targetShiftId, creators, onAssign, onClose }) {
   const unassigned = chatters.filter(ch => !ch.chatter_creator_assignments?.some(a => a.is_active));
   const creatorName = creators.find(c => c.id === targetCreatorId)?.name || '';
   const shiftName = shifts.find(s => s.id === targetShiftId)?.name || '';
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:400, maxHeight:'70vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title={`Assign to ${creatorName}`} sub={`${shiftName} shift`}/>
-        <div style={{ padding:12, maxHeight:400, overflow:'auto' }}>
-          {unassigned.length === 0 ? (
-            <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>All chatters are already assigned.</div>
-          ) : (
-            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              <div className="label" style={{ padding:'4px 4px' }}>Unassigned chatters</div>
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-md'>
+        <DialogHeader>
+          <DialogTitle>Assign to {creatorName}</DialogTitle>
+          <DialogDescription>{shiftName} shift</DialogDescription>
+        </DialogHeader>
+        {unassigned.length === 0 ? (
+          <div className='rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground'>All chatters are already assigned.</div>
+        ) : (
+          <div className='grid gap-2'>
+            <div className='text-xs font-medium text-muted-foreground'>Unassigned chatters</div>
+            <div className='-mx-1 flex max-h-[50vh] flex-col gap-1.5 overflow-y-auto px-1'>
               {unassigned.map(ch => (
-                <div key={ch.id} onClick={() => onAssign(ch.id, targetCreatorId, targetShiftId)}
-                  style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 12px', background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', cursor:'pointer', transition:'border-color .12s, background .12s' }}
-                  onMouseEnter={e => { e.currentTarget.style.borderColor='var(--indigo-line)'; e.currentTarget.style.background='var(--indigo-soft)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.borderColor='var(--border)'; e.currentTarget.style.background='var(--bg-2)'; }}>
-                  <Avatar name={ch.name} size={28}/>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:12.5, fontWeight:500 }}>{ch.name}</div>
-                    <div style={{ fontSize:10.5, color:'var(--fg-3)', marginTop:1 }}><StatusDot status={ch.status}/> {STATUS_META[ch.status]?.label}</div>
-                  </div>
-                  <Plus size={14} style={{ color:'var(--indigo-bright)' }}/>
-                </div>
+                <PickRow key={ch.id} chatter={ch} onClick={() => onAssign(ch.id, targetCreatorId, targetShiftId)}
+                  trailing={<Plus className='size-4 text-link'/>}/>
               ))}
             </div>
-          )}
-        </div>
-      </div>
-    </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -423,66 +450,79 @@ function CoverModal({ target, chatters, creators, shifts, onAdd, onClose }) {
   const dayLabel = DAY_LABELS[target.dayOfWeek - 1];
   const list = chatters.filter(c => c.name.toLowerCase().includes(q.trim().toLowerCase()));
   const canAdd = chatterId && hours > 0;
-  return createPortal((
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:420, maxHeight:'78vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', display:'flex', flexDirection:'column' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title={`Add cover — ${creatorName}`} sub={`${shiftName} · every ${dayLabel}`}/>
-        <div style={{ padding:12, overflow:'auto' }}>
-          <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Search chatter…"
-            style={{ width:'100%', padding:'8px 10px', fontSize:12.5, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none', marginBottom:10 }}/>
-          <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:300, overflow:'auto' }}>
+  return (
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-md'>
+        <DialogHeader>
+          <DialogTitle>Add cover for {creatorName}</DialogTitle>
+          <DialogDescription>{shiftName} · every {dayLabel}</DialogDescription>
+        </DialogHeader>
+        <div className='grid gap-3'>
+          <Input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder='Search chatter…' aria-label='Search chatter'/>
+          <div className='-mx-1 flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto px-1'>
             {list.map(ch => (
-              <div key={ch.id} onClick={() => setChatterId(ch.id)}
-                style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', borderRadius:'var(--r-tile)', cursor:'pointer',
-                  background: chatterId === ch.id ? 'var(--indigo-soft)' : 'var(--bg-2)',
-                  border: `1px solid ${chatterId === ch.id ? 'var(--indigo-line)' : 'var(--border)'}` }}>
-                <Avatar name={ch.name} size={26}/>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:12.5, fontWeight:500 }}>{ch.name}</div>
-                  <div style={{ fontSize:10.5, color:'var(--fg-3)' }}><StatusDot status={ch.status}/> {STATUS_META[ch.status]?.label}</div>
-                </div>
-                {chatterId === ch.id && <Plus size={14} style={{ color:'var(--indigo-bright)' }}/>}
-              </div>
+              <PickRow key={ch.id} chatter={ch} selected={chatterId === ch.id} onClick={() => setChatterId(ch.id)}
+                trailing={chatterId === ch.id ? <Check className='size-4 text-link'/> : null}/>
             ))}
           </div>
-        </div>
-        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--border)', display:'flex', gap:10, alignItems:'center', justifyContent:'flex-end' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginRight:'auto' }}>
-            <span className="label" style={{ fontSize:11 }}>Hours</span>
-            <input type="number" min={1} max={16} step={0.5} value={hours} onChange={e => setHours(parseFloat(e.target.value) || 0)}
-              style={{ width:64, padding:'7px 8px', fontSize:13, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none' }}/>
+          <div className='flex items-center gap-2'>
+            <Label htmlFor='cover-hours'>Hours</Label>
+            <Input id='cover-hours' type='number' min={1} max={16} step={0.5} value={hours}
+              onChange={e => setHours(parseFloat(e.target.value) || 0)} className='w-20 tabular-nums'/>
           </div>
-          <button className="btn sm ghost" onClick={onClose}>Cancel</button>
-          <button className="btn sm" disabled={!canAdd} style={{ background:'var(--indigo)', color:'#fff', opacity: canAdd ? 1 : 0.5 }}
-            onClick={() => onAdd(chatterId, target.creatorId, target.shiftId, target.dayOfWeek, hours)}>Add cover</button>
         </div>
-      </div>
-    </div>
-  ), document.body);
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Cancel</Button>
+          <Button disabled={!canAdd}
+            onClick={() => onAdd(chatterId, target.creatorId, target.shiftId, target.dayOfWeek, hours)}>Add cover</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /* ─── Rename Modal ───────────────────────────────── */
 function RenameModal({ creator, onSave, onClose }) {
   const [name, setName] = useState(creator.name);
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:380, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title="Rename Creator"/>
-        <div style={{ padding:16 }}>
-          <input value={name} onChange={e => setName(e.target.value)} autoFocus
-            style={{ width:'100%', padding:'10px 12px', fontSize:14, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none' }}
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-sm'>
+        <DialogHeader>
+          <DialogTitle>Rename creator</DialogTitle>
+        </DialogHeader>
+        <div className='grid gap-2'>
+          <Label htmlFor='rename-creator'>Name</Label>
+          <Input id='rename-creator' value={name} onChange={e => setName(e.target.value)} autoFocus
             onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onSave(creator.id, name.trim()); }}/>
-          <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:14 }}>
-            <button className="btn sm ghost" onClick={onClose}>Cancel</button>
-            <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => name.trim() && onSave(creator.id, name.trim())}>Save</button>
-          </div>
         </div>
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Cancel</Button>
+          <Button onClick={() => name.trim() && onSave(creator.id, name.trim())}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* ─── Manage Shifts Modal ────────────────────────── */
+const TIME_INPUT = 'tabular-nums dark:[color-scheme:dark]';
+
+function TimeRange({ idPrefix, start, end, onStart, onEnd }) {
+  return (
+    <div className='grid grid-cols-[1fr_auto_1fr] items-end gap-2'>
+      <div className='grid gap-1.5'>
+        <Label htmlFor={`${idPrefix}-start`} className='text-xs text-muted-foreground'>Start</Label>
+        <Input id={`${idPrefix}-start`} type='time' value={start} onChange={e => onStart(e.target.value)} className={TIME_INPUT}/>
+      </div>
+      <ArrowRight className='mb-2.5 size-4 text-muted-foreground'/>
+      <div className='grid gap-1.5'>
+        <Label htmlFor={`${idPrefix}-end`} className='text-xs text-muted-foreground'>End</Label>
+        <Input id={`${idPrefix}-end`} type='time' value={end} onChange={e => onEnd(e.target.value)} className={TIME_INPUT}/>
       </div>
     </div>
   );
 }
 
-/* ─── Manage Shifts Modal ────────────────────────── */
 function ShiftsModal({ shifts, creatorId, onSave, onDelete, onCreate, onClose }) {
   const [edited, setEdited] = useState(shifts.map(s => ({ ...s })));
   const [newShift, setNewShift] = useState({ name: '', start_time: '00:00', end_time: '08:00' });
@@ -490,63 +530,63 @@ function ShiftsModal({ shifts, creatorId, onSave, onDelete, onCreate, onClose })
   function updateField(idx, field, value) {
     setEdited(prev => { const copy = [...prev]; copy[idx] = { ...copy[idx], [field]: value }; return copy; });
   }
-  const is = { padding:'8px 10px', fontSize:13, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)', color:'var(--fg-0)', outline:'none' };
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:480, maxHeight:'80vh', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
-        <PanelHeader title="Manage Shifts" sub="Edit shift names and times, or add new ones"/>
-        <div style={{ padding:16, maxHeight:'60vh', overflow:'auto' }}>
-          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+    <Dialog open onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>Manage shifts</DialogTitle>
+          <DialogDescription>Edit shift names and times, or add new ones.</DialogDescription>
+        </DialogHeader>
+        <div className='-mx-1 max-h-[60vh] overflow-y-auto px-1'>
+          <div className='flex flex-col gap-3'>
             {edited.map((shift, idx) => (
-              <div key={shift.id} style={{ padding:12, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:'var(--r-tile)' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-                  <input value={shift.name} onChange={e => updateField(idx, 'name', e.target.value)} style={{ ...is, flex:1, fontWeight:600 }} placeholder="Shift name"/>
-                  <button onClick={() => { if (window.confirm(`Delete "${shift.name}"?`)) onDelete(shift.id); }}
-                    style={{ background:'none', border:'none', cursor:'pointer', padding:6, color:'var(--fg-3)', borderRadius:4 }}
-                    onMouseEnter={e => e.currentTarget.style.color='var(--bad)'} onMouseLeave={e => e.currentTarget.style.color='var(--fg-3)'}><Trash2 size={14}/></button>
+              <div key={shift.id} className='grid gap-2 rounded-lg border bg-muted/40 p-3'>
+                <div className='flex items-center gap-2'>
+                  <Input value={shift.name} onChange={e => updateField(idx, 'name', e.target.value)}
+                    className='flex-1 font-semibold' placeholder='Shift name' aria-label='Shift name'/>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant='ghost' size='icon-sm' aria-label='Delete shift'
+                        className='text-muted-foreground hover:text-bad'
+                        onClick={() => { if (window.confirm(`Delete "${shift.name}"?`)) onDelete(shift.id); }}>
+                        <Trash2/>
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete shift</TooltipContent>
+                  </Tooltip>
                 </div>
-                <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                  <div style={{ flex:1 }}><div className="label" style={{ fontSize:10, marginBottom:4 }}>Start</div>
-                    <input type="time" value={shift.start_time?.slice(0,5)||'00:00'} onChange={e => updateField(idx,'start_time',e.target.value+':00')} style={{ ...is, width:'100%' }}/></div>
-                  <div style={{ color:'var(--fg-3)', paddingTop:18 }}>→</div>
-                  <div style={{ flex:1 }}><div className="label" style={{ fontSize:10, marginBottom:4 }}>End</div>
-                    <input type="time" value={shift.end_time?.slice(0,5)||'08:00'} onChange={e => updateField(idx,'end_time',e.target.value+':00')} style={{ ...is, width:'100%' }}/></div>
-                </div>
+                <TimeRange idPrefix={`shift-${shift.id}`}
+                  start={shift.start_time?.slice(0,5)||'00:00'} end={shift.end_time?.slice(0,5)||'08:00'}
+                  onStart={v => updateField(idx,'start_time',v+':00')} onEnd={v => updateField(idx,'end_time',v+':00')}/>
               </div>
             ))}
           </div>
           {showNew ? (
-            <div style={{ padding:12, background:'var(--indigo-soft)', border:'1px solid var(--indigo-line)', borderRadius:'var(--r-tile)', marginTop:12 }}>
-              <div className="label" style={{ fontSize:10, marginBottom:8 }}>New Shift</div>
-              <input value={newShift.name} onChange={e => setNewShift(p => ({ ...p, name: e.target.value }))}
-                placeholder="e.g. Rotating, Night" autoFocus style={{ ...is, width:'100%', marginBottom:8 }}/>
-              <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                <div style={{ flex:1 }}><div className="label" style={{ fontSize:10, marginBottom:4 }}>Start</div>
-                  <input type="time" value={newShift.start_time} onChange={e => setNewShift(p => ({ ...p, start_time: e.target.value }))} style={{ ...is, width:'100%' }}/></div>
-                <div style={{ color:'var(--fg-3)', paddingTop:18 }}>→</div>
-                <div style={{ flex:1 }}><div className="label" style={{ fontSize:10, marginBottom:4 }}>End</div>
-                  <input type="time" value={newShift.end_time} onChange={e => setNewShift(p => ({ ...p, end_time: e.target.value }))} style={{ ...is, width:'100%' }}/></div>
-              </div>
-              <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:10 }}>
-                <button className="btn sm ghost" onClick={() => setShowNew(false)}>Cancel</button>
-                <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }}
+            <div className='mt-3 grid gap-2 rounded-lg border border-dashed bg-muted/40 p-3'>
+              <Label htmlFor='new-shift-name'>New shift</Label>
+              <Input id='new-shift-name' value={newShift.name} onChange={e => setNewShift(p => ({ ...p, name: e.target.value }))}
+                placeholder='e.g. Rotating, Night' autoFocus/>
+              <TimeRange idPrefix='new-shift' start={newShift.start_time} end={newShift.end_time}
+                onStart={v => setNewShift(p => ({ ...p, start_time: v }))} onEnd={v => setNewShift(p => ({ ...p, end_time: v }))}/>
+              <div className='mt-1 flex justify-end gap-2'>
+                <Button variant='ghost' size='sm' onClick={() => setShowNew(false)}>Cancel</Button>
+                <Button size='sm'
                   onClick={() => { if (!newShift.name.trim()) return toast.error('Name required');
                     onCreate(newShift.name.trim(), newShift.start_time+':00', newShift.end_time+':00', creatorId);
-                    setNewShift({ name:'', start_time:'00:00', end_time:'08:00' }); setShowNew(false); }}>Add</button>
+                    setNewShift({ name:'', start_time:'00:00', end_time:'08:00' }); setShowNew(false); }}>Add</Button>
               </div>
             </div>
           ) : (
-            <button className="btn sm ghost" style={{ marginTop:12, width:'100%', justifyContent:'center', display:'flex', alignItems:'center', gap:6 }}
-              onClick={() => setShowNew(true)}><Plus size={14}/> Add New Shift</button>
+            <Button variant='outline' className='mt-3 w-full' onClick={() => setShowNew(true)}><Plus/>Add shift</Button>
           )}
         </div>
-        <div style={{ padding:'12px 16px', borderTop:'1px solid var(--border)', display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button className="btn sm ghost" onClick={onClose}>Cancel</button>
-          <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={() => onSave(edited)}>Save Changes</button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Cancel</Button>
+          <Button onClick={() => onSave(edited)}>Save changes</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -555,25 +595,28 @@ function WeekBar({ selectedDay, onSelect }) {
   const today = getTodayDayNumber();
   const weekDates = getWeekDates();
   return (
-    <div style={{ display:'flex', gap:4, padding:'12px 0', marginBottom:16 }}>
+    <div className='flex gap-1'>
       {DAY_LABELS.map((label, i) => {
         const dayNum = DAY_NUMBERS[i];
         const isSelected = dayNum === selectedDay;
         const isToday = dayNum === today;
         const dateStr = weekDates[i].getDate();
         return (
-          <button key={dayNum} onClick={() => onSelect(dayNum)}
-            style={{
-              flex:1, padding:'8px 0', borderRadius:'var(--r-tile)', cursor:'pointer',
-              border: isSelected ? '2px solid var(--indigo-bright)' : '1px solid var(--border)',
-              background: isSelected ? 'var(--indigo-soft)' : 'var(--bg-1)',
-              color: isSelected ? 'var(--indigo-bright)' : 'var(--fg-2)',
-              fontWeight: isSelected ? 700 : 500, fontSize:12, textAlign:'center',
-              transition:'all .12s', position:'relative',
-            }}>
+          <button key={dayNum} type='button' onClick={() => onSelect(dayNum)} aria-pressed={isSelected}
+            className={cn(
+              'relative min-w-0 flex-1 rounded-md border py-2 text-center text-xs transition-colors',
+              isSelected
+                ? 'border-primary bg-primary font-semibold text-primary-foreground'
+                : 'bg-card font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+            )}>
             <div>{label}</div>
-            <div className="mono" style={{ fontSize:10, marginTop:2, opacity:0.7 }}>{dateStr}</div>
-            {isToday && <div style={{ position:'absolute', top:4, right:4, width:5, height:5, borderRadius:'50%', background: isSelected ? 'var(--indigo-bright)' : 'var(--good)' }}/>}
+            <div className='mt-0.5 font-mono text-[10px] tabular-nums opacity-70'>{dateStr}</div>
+            {isToday && (
+              <>
+                <span className={cn('absolute top-1 right-1 size-1.5 rounded-full', isSelected ? 'bg-primary-foreground' : 'bg-good')}/>
+                <span className='sr-only'>(today)</span>
+              </>
+            )}
           </button>
         );
       })}
@@ -583,6 +626,7 @@ function WeekBar({ selectedDay, onSelect }) {
 
 /* ─── Main Page ──────────────────────────────────── */
 export default function CreatorsPage() {
+  // eslint-disable-next-line no-unused-vars
   const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [creators, setCreators] = useState([]);
@@ -615,6 +659,7 @@ export default function CreatorsPage() {
     finally { setLoading(false); }
   }, []);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
   function handleOpenAssign(creatorId, shiftId) { setAssignTarget({ creatorId, shiftId }); }
@@ -732,41 +777,60 @@ export default function CreatorsPage() {
   const membersByPrimary = {};
   creators.forEach(c => { if (c.merged_into) (membersByPrimary[c.merged_into] ||= []).push(c); });
 
+  const header = (
+    <div className='flex flex-wrap items-end justify-between gap-x-4 gap-y-2'>
+      <div className='min-w-0 max-w-2xl'>
+        <h2 className='text-2xl font-bold tracking-tight'>Shifts overview</h2>
+        <p className='text-muted-foreground'>
+          Pick a day to see who's working. Drag chatters into shifts, or drag one page onto another to put them on the same team.
+        </p>
+      </div>
+      {!loading && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Badge variant='outline' className='tabular-nums'><Users/>{primaries.length} teams · {creators.length} pages</Badge>
+          <Badge variant='outline' className='border-good/30 text-good tabular-nums'>{assignedCount}/{chatters.length} assigned</Badge>
+          {offCount > 0 && <Badge variant='outline' className='border-warn/40 text-warn tabular-nums'><Calendar/>{offCount} off {DAY_LABELS[selectedDay - 1]}</Badge>}
+          {unassigned.length > 0 && <Badge variant='outline' className='border-bad/40 bg-bad/10 text-bad tabular-nums'><AlertTriangle/>{unassigned.length} unassigned</Badge>}
+        </div>
+      )}
+    </div>
+  );
+
   if (loading) return (
-    <div style={{ display:'flex', justifyContent:'center', paddingTop:80 }}>
-      <div style={{ width:24, height:24, border:'2px solid var(--indigo)', borderTopColor:'transparent', borderRadius:'50%', animation:'spin .6s linear infinite' }}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      {header}
+      <div className='flex gap-1'>{DAY_NUMBERS.map(d => <Skeleton key={d} className='h-12 flex-1'/>)}</div>
+      <div className='grid grid-cols-[repeat(auto-fill,minmax(min(100%,340px),1fr))] gap-4'>
+        {[0, 1, 2].map(i => (
+          <div key={i} className='overflow-hidden rounded-lg border bg-card'>
+            <div className='flex items-center gap-3 border-b px-4 py-3'>
+              <Skeleton className='size-8 rounded-full'/>
+              <div className='flex-1 space-y-1.5'><Skeleton className='h-4 w-1/2'/><Skeleton className='h-3 w-1/4'/></div>
+            </div>
+            <div className='space-y-2 p-3'>
+              <Skeleton className='h-3 w-1/3'/><Skeleton className='h-11 w-full'/><Skeleton className='h-11 w-full'/>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 
   return (
     <DndContext sensors={sensors} collisionDetection={collisionStrategy} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={clearDrag}>
     <StripesPatternDef/>
-    <div className="animate-in">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:700 }}>Shifts Overview</h1>
-          <p style={{ fontSize:13, color:'var(--fg-2)', marginTop:4 }}>
-            Select a day to see who's working. Drag chatters into shifts, or drag one page onto another to put them on the same team.
-          </p>
-        </div>
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', justifyContent:'flex-end' }}>
-          <Chip tone="indigo"><Users size={12}/> {primaries.length} teams · {creators.length} pages</Chip>
-          <Chip tone="good">{assignedCount}/{chatters.length} assigned</Chip>
-          {offCount > 0 && <Chip tone="warn"><Calendar size={12}/> {offCount} off {DAY_LABELS[selectedDay - 1]}</Chip>}
-          {unassigned.length > 0 && <Chip tone="bad"><AlertTriangle size={12}/> {unassigned.length} unassigned</Chip>}
-        </div>
-      </div>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      {header}
 
       <WeekBar selectedDay={selectedDay} onSelect={setSelectedDay}/>
 
       {creators.length === 0 ? (
-        <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:60, textAlign:'center' }}>
-          <p style={{ color:'var(--fg-3)', fontSize:14, marginBottom:12 }}>No creators yet</p>
-          <p style={{ color:'var(--fg-3)', fontSize:12 }}>Go to Settings → add your creators first.</p>
+        <div className='flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground'>
+          <p className='font-medium text-foreground'>No creators yet</p>
+          <p>Add your creators in Settings first.</p>
         </div>
       ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(340px, 1fr))', gap:16, marginBottom:24 }}>
+        <div className='grid grid-cols-[repeat(auto-fill,minmax(min(100%,340px),1fr))] gap-4'>
           {primaries.map(cr => (
             <DraggableCreatorWrap key={cr.id} creator={cr} draggingType={draggingType}>
               <CreatorCard creator={cr} chatters={chatters}
@@ -783,16 +847,20 @@ export default function CreatorsPage() {
       )}
 
       {unassigned.length > 0 && (
-        <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-          <PanelHeader title="Unassigned chatters" sub={`${unassigned.length} not assigned`} right={<Chip tone="warn">{unassigned.length}</Chip>}/>
-          <div style={{ padding:12, display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:8 }}>
+        <section className='overflow-hidden rounded-lg border bg-card'>
+          <div className='flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/40 px-4 py-2.5 text-sm font-medium'>
+            Unassigned chatters
+            <Badge variant='outline' className='h-5 rounded-full border-warn/40 px-1.5 font-mono text-xs text-warn'>{unassigned.length}</Badge>
+            <span className='text-xs font-normal text-muted-foreground'>{unassigned.length} not assigned. Drag one onto a shift to assign.</span>
+          </div>
+          <div className='grid grid-cols-[repeat(auto-fill,minmax(min(100%,240px),1fr))] gap-2 p-3'>
             {unassigned.map(ch => (
               <DraggableChatter key={ch.id} chatter={ch}>
                 <ChatterRow chatter={ch} onClick={() => handleClickChatter(ch)}/>
               </DraggableChatter>
             ))}
           </div>
-        </div>
+        </section>
       )}
 
       {assignTarget && <AssignModal chatters={chatters} shifts={shifts} creators={creators}
@@ -803,21 +871,22 @@ export default function CreatorsPage() {
         onAdd={handleAddCover} onClose={() => setCoverTarget(null)}/>}
 
       {mergePrompt && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={() => setMergePrompt(null)}>
-          <div style={{ width:420, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }} onClick={e => e.stopPropagation()}>
-            <PanelHeader title="Merge Creators" sub="Reversible via Split in the ··· menu"/>
-            <div style={{ padding:20 }}>
-              <p style={{ fontSize:13, color:'var(--fg-1)', marginBottom:16, lineHeight:1.5 }}>
-                Merge <strong>{creators.find(c => c.id === mergePrompt.sourceId)?.name}</strong> into{' '}
-                <strong>{creators.find(c => c.id === mergePrompt.targetId)?.name}</strong>?
-              </p>
-              <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-                <button className="btn sm ghost" onClick={() => setMergePrompt(null)}>Cancel</button>
-                <button className="btn sm" style={{ background:'var(--indigo)', color:'#fff' }} onClick={confirmMerge}>Merge</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <Dialog open onOpenChange={open => { if (!open) setMergePrompt(null); }}>
+          <DialogContent className='sm:max-w-md'>
+            <DialogHeader>
+              <DialogTitle>Merge creators</DialogTitle>
+              <DialogDescription>You can undo this later with Split in the card's menu.</DialogDescription>
+            </DialogHeader>
+            <p className='text-sm leading-relaxed'>
+              Merge <strong>{creators.find(c => c.id === mergePrompt.sourceId)?.name}</strong> into{' '}
+              <strong>{creators.find(c => c.id === mergePrompt.targetId)?.name}</strong>?
+            </p>
+            <DialogFooter>
+              <Button variant='ghost' onClick={() => setMergePrompt(null)}>Cancel</Button>
+              <Button onClick={confirmMerge}>Merge</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       {renameTarget && <RenameModal creator={renameTarget} onSave={handleRename} onClose={() => setRenameTarget(null)}/>}
@@ -832,20 +901,16 @@ export default function CreatorsPage() {
 
     <DragOverlay dropAnimation={null}>
       {activeChatter ? (
-        <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
-          background:'var(--bg-1)', border:'2px solid var(--indigo-bright)', borderRadius:'var(--r-tile)',
-          boxShadow:'0 12px 28px rgba(0,0,0,0.35)', cursor:'grabbing', width: 220, transform:'rotate(-1.5deg)' }}>
-          <Avatar name={activeChatter.name} size={28}/>
-          <div style={{ fontSize:12.5, fontWeight:600 }}>{activeChatter.name}</div>
+        <div className='flex w-[220px] -rotate-[1.5deg] cursor-grabbing items-center gap-2 rounded-md border-2 border-link bg-card px-3 py-2 shadow-xl'>
+          <PersonAvatar name={activeChatter.name}/>
+          <div className='truncate text-[13px] font-semibold'>{activeChatter.name}</div>
         </div>
       ) : activeCreator ? (
-        <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 16px', width: 300,
-          background:'var(--bg-1)', border:'2px solid var(--indigo-bright)', borderRadius:'var(--r-panel)',
-          boxShadow:'0 16px 36px rgba(0,0,0,0.4)', cursor:'grabbing', transform:'rotate(-1.5deg)' }}>
-          <Avatar name={activeCreator.name} size={32}/>
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:14, fontWeight:600 }}>{activeCreator.name}</div>
-            <div style={{ fontSize:11, color:'var(--indigo-bright)', fontWeight:600 }}>drop on a page to team up →</div>
+        <div className='flex w-[300px] -rotate-[1.5deg] cursor-grabbing items-center gap-3 rounded-lg border-2 border-link bg-card px-4 py-3 shadow-2xl'>
+          <PersonAvatar name={activeCreator.name} className='size-8'/>
+          <div className='min-w-0 flex-1'>
+            <div className='truncate text-sm font-semibold'>{activeCreator.name}</div>
+            <div className='flex items-center gap-1 text-xs font-medium text-link'>Drop on a page to team up<ArrowRight className='size-3'/></div>
           </div>
         </div>
       ) : null}

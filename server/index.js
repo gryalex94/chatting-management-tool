@@ -25,6 +25,7 @@ app.use(cors({
   credentials: true,
 }));
 
+const DB_ERROR_RE = /violates|duplicate key|relation "|column "|syntax error|invalid input (syntax|value)|foreign key|null value in column|PGRST\d|numeric field overflow|out of range for type/i;
 // Many route handlers answer `{ error: error.message }` straight from the database.
 // For server-side failures (5xx) that would show table names and query details
 // to the browser, so the real message is logged here and the browser gets a
@@ -35,6 +36,11 @@ app.use((req, res, next) => {
     if (res.statusCode >= 500 && body && typeof body === 'object' && 'error' in body) {
       console.error(`[${req.method} ${req.originalUrl}] ${res.statusCode}:`, body.error);
       body = { error: 'Something went wrong on our side. Please try again — details are in the server log.' };
+    } else if (res.statusCode >= 400 && body && typeof body === 'object' && DB_ERROR_RE.test(String(body.error || ''))) {
+      // A 4xx that is really a raw Postgres/PostgREST message (constraint names,
+      // columns, relations) — same treatment: log it, send something plain.
+      console.error(`[${req.method} ${req.originalUrl}] ${res.statusCode}:`, body.error);
+      body = { error: 'That request could not be saved. Check the values and try again.' };
     }
     return json(body);
   };

@@ -1,14 +1,7 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 
-// Which roles each role may give out, by invite or direct creation. Nobody can
-// grant `owner`, and only the owner can create admins — so an admin can never
-// mint an account more powerful than their own.
-const ASSIGNABLE = {
-  owner: ['admin', 'head_manager', 'manager', 'chatter', 'va'],
-  admin: ['head_manager', 'manager', 'chatter', 'va'],
-  head_manager: ['chatter', 'va'],
-};
+const { ASSIGNABLE } = require('../utils/roles');
 
 // These routes sit outside authMiddleware, so they verify the caller themselves —
 // including that the account hasn't been deactivated.

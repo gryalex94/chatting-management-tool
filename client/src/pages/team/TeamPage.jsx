@@ -1,13 +1,21 @@
 import { useState, useEffect } from 'react';
-import api from '../../services/api';
-import { Users, Plus } from 'lucide-react';
+import { Plus, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
+// Status dot colours are data colours (one per chatter status).
 const statusConfig = {
-  new: { label: 'New', color: 'var(--status-new)', bg: '#ef444420' },
-  new_monitoring: { label: 'Monitoring', color: 'var(--status-monitoring)', bg: '#f59e0b20' },
-  developing: { label: 'Developing', color: 'var(--status-developing)', bg: '#eab30820' },
-  experienced: { label: 'Experienced', color: 'var(--status-experienced)', bg: '#22c55e20' },
+  new: { label: 'New', color: '#ef4444' },
+  new_monitoring: { label: 'Monitoring', color: '#f97316' },
+  developing: { label: 'Developing', color: '#eab308' },
+  experienced: { label: 'Experienced', color: '#22c55e' },
 };
 
 export default function TeamPage() {
@@ -65,60 +73,44 @@ export default function TeamPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
-        <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      <div className='flex flex-col gap-4 sm:gap-6'>
+        <div className='space-y-2'><Skeleton className='h-8 w-32' /><Skeleton className='h-4 w-24' /></div>
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+          {[0, 1, 2, 3].map(i => <Skeleton key={i} className='h-28 rounded-lg' />)}
+        </div>
       </div>
     );
   }
 
+  const unassigned = chatters.filter(c => getShiftName(c) === 'Unassigned');
+
   return (
-    <div className="animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div className='flex flex-wrap items-end justify-between gap-2'>
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Team</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{chatters.length} chatters</p>
+          <h2 className='text-2xl font-bold tracking-tight'>Team</h2>
+          <p className='text-muted-foreground'>{chatters.length} chatters</p>
         </div>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
-          style={{ background: 'var(--accent)' }}
-        >
-          <Plus size={16} />
-          Add Chatter
-        </button>
+        <Button onClick={() => setShowAdd(!showAdd)} variant={showAdd ? 'outline' : 'default'}>
+          <Plus />Add chatter
+        </Button>
       </div>
 
       {/* Add chatter form */}
       {showAdd && (
-        <form
-          onSubmit={addChatter}
-          className="rounded-xl p-4 mb-6 flex items-end gap-3 animate-fade-in"
-          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-        >
-          <div className="flex-1">
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Name</label>
-            <input
-              value={newChatter.name}
-              onChange={(e) => setNewChatter(p => ({ ...p, name: e.target.value }))}
-              required
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              placeholder="Chatter name"
-            />
+        <form onSubmit={addChatter}
+          className='flex flex-col gap-3 rounded-lg border bg-card p-4 sm:flex-row sm:items-end'>
+          <div className='grid flex-1 gap-2'>
+            <Label htmlFor='team-name'>Name</Label>
+            <Input id='team-name' value={newChatter.name} required placeholder='Chatter name'
+              onChange={(e) => setNewChatter(p => ({ ...p, name: e.target.value }))} />
           </div>
-          <div className="flex-1">
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-secondary)' }}>Email</label>
-            <input
-              value={newChatter.email}
-              onChange={(e) => setNewChatter(p => ({ ...p, email: e.target.value }))}
-              className="w-full px-3 py-2 rounded-lg text-sm outline-none"
-              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
-              placeholder="Optional"
-            />
+          <div className='grid flex-1 gap-2'>
+            <Label htmlFor='team-email'>Email <span className='font-normal text-muted-foreground'>(optional)</span></Label>
+            <Input id='team-email' value={newChatter.email} placeholder='name@example.com'
+              onChange={(e) => setNewChatter(p => ({ ...p, email: e.target.value }))} />
           </div>
-          <button type="submit" className="px-4 py-2 rounded-lg text-sm font-medium text-white" style={{ background: 'var(--accent)' }}>
-            Add
-          </button>
+          <Button type='submit'>Add</Button>
         </form>
       )}
 
@@ -126,38 +118,39 @@ export default function TeamPage() {
       {shifts.map(shift => {
         const shiftChatters = chatters.filter(c => getShiftName(c) === shift.name);
         return (
-          <div key={shift.id} className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{shift.name}</h2>
-              <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}>
-                {shift.start_time?.slice(0, 5)} – {shift.end_time?.slice(0, 5)}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{shiftChatters.length} chatters</span>
+          <section key={shift.id} className='space-y-3'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <h3 className='text-sm font-semibold'>{shift.name}</h3>
+              <Badge variant='outline' className='gap-1 font-normal text-muted-foreground tabular-nums'>
+                <Clock />{shift.start_time?.slice(0, 5)} – {shift.end_time?.slice(0, 5)}
+              </Badge>
+              <span className='text-xs text-muted-foreground'>{shiftChatters.length} chatters</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {shiftChatters.map(chatter => (
-                <ChatterCard key={chatter.id} chatter={chatter} onStatusChange={updateStatus} />
-              ))}
-            </div>
-          </div>
+            <ChatterGrid chatters={shiftChatters} onStatusChange={updateStatus} />
+          </section>
         );
       })}
 
       {/* Unassigned chatters */}
-      {(() => {
-        const unassigned = chatters.filter(c => getShiftName(c) === 'Unassigned');
-        if (!unassigned.length) return null;
-        return (
-          <div className="mb-6">
-            <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-secondary)' }}>Unassigned</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {unassigned.map(chatter => (
-                <ChatterCard key={chatter.id} chatter={chatter} onStatusChange={updateStatus} />
-              ))}
-            </div>
+      {unassigned.length > 0 && (
+        <section className='space-y-3'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <h3 className='text-sm font-semibold text-muted-foreground'>Unassigned</h3>
+            <span className='text-xs text-muted-foreground'>{unassigned.length} chatters</span>
           </div>
-        );
-      })()}
+          <ChatterGrid chatters={unassigned} onStatusChange={updateStatus} />
+        </section>
+      )}
+    </div>
+  );
+}
+
+function ChatterGrid({ chatters, onStatusChange }) {
+  return (
+    <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'>
+      {chatters.map(chatter => (
+        <ChatterCard key={chatter.id} chatter={chatter} onStatusChange={onStatusChange} />
+      ))}
     </div>
   );
 }
@@ -170,41 +163,36 @@ function ChatterCard({ chatter, onStatusChange }) {
     ?.filter(Boolean) || [];
 
   return (
-    <div
-      className="rounded-xl p-4 transition-all duration-200 cursor-pointer"
-      style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-      onMouseEnter={(e) => e.currentTarget.style.borderColor = 'var(--border-light)'}
-      onMouseLeave={(e) => e.currentTarget.style.borderColor = 'var(--border)'}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{chatter.name}</h3>
-        <span
-          className="text-xs px-2 py-0.5 rounded-full font-medium"
-          style={{ background: config.bg, color: config.color }}
-        >
-          {config.label}
-        </span>
+    <div className='flex flex-col gap-2 rounded-lg border bg-card p-4 transition-colors hover:border-foreground/20'>
+      <div className='flex items-center justify-between gap-2'>
+        <h4 className='truncate text-sm font-medium'>{chatter.name}</h4>
+        <Badge variant='outline' className='shrink-0 gap-1.5 font-normal'>
+          <span className='size-2 rounded-full' style={{ background: config.color }} />{config.label}
+        </Badge>
       </div>
       {creators.length > 0 && (
-        <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-          {creators.join(', ')}
-        </p>
+        <p className='text-xs text-muted-foreground'>{creators.join(', ')}</p>
       )}
       {/* Status changer */}
-      <div className="flex gap-1 mt-2">
-        {Object.entries(statusConfig).map(([key, val]) => (
-          <button
-            key={key}
-            onClick={(e) => { e.stopPropagation(); onStatusChange(chatter.id, key); }}
-            className="w-3 h-3 rounded-full transition-transform"
-            style={{
-              background: val.color,
-              opacity: chatter.status === key ? 1 : 0.3,
-              transform: chatter.status === key ? 'scale(1.3)' : 'scale(1)',
-            }}
-            title={val.label}
-          />
-        ))}
+      <div className='mt-1 flex items-center gap-1'>
+        <span className='me-1 text-xs text-muted-foreground'>Set status</span>
+        {Object.entries(statusConfig).map(([key, val]) => {
+          const on = chatter.status === key;
+          return (
+            <Tooltip key={key}>
+              <TooltipTrigger asChild>
+                <button type='button' aria-label={val.label} aria-pressed={on}
+                  onClick={(e) => { e.stopPropagation(); onStatusChange(chatter.id, key); }}
+                  className='flex size-6 items-center justify-center rounded-full transition-colors hover:bg-accent'>
+                  {/* Data colour; the current status is full-size and opaque. */}
+                  <span className={cn('rounded-full transition-all', on ? 'size-3.5 ring-2 ring-ring/40 ring-offset-1 ring-offset-card' : 'size-2.5 opacity-40')}
+                    style={{ background: val.color }} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{val.label}</TooltipContent>
+            </Tooltip>
+          );
+        })}
       </div>
     </div>
   );

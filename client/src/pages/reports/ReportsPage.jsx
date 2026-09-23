@@ -1,41 +1,48 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import api from '../../services/api';
-import { Chip } from '../../components/shared';
-import { Upload, FileSpreadsheet, Check, X, Loader2, MessageSquare, Users } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, CircleCheck, X, Loader2, MessageSquare, Users, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
+import api from '@/services/api';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 
 const REPORTS = [
-  { key:'message-dashboard', label:'Message Dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare, color:'var(--indigo)' },
-  { key:'creator-stats',     label:'Creator Statistics', desc:'Per-creator revenue, subs, fan tiers',       icon:Users, color:'var(--warn)' },
+  { key:'message-dashboard', label:'Message dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare },
+  { key:'creator-stats',     label:'Creator statistics', desc:'Per-creator revenue, subs, fan tiers',       icon:Users },
 ];
 
 function ReportCard({ report, selected, uploaded, onSelect }) {
   const Icon = report.icon;
   const isUploaded = !!uploaded;
   return (
-    <div onClick={()=>onSelect(report.key)} style={{
-      flex:1, padding:16, background:selected?report.color:'var(--bg-2)',
-      border:`1px solid ${selected?report.color:'var(--border)'}`,
-      borderRadius:'var(--r-card)', cursor:'pointer', transition:'all .12s',
-      color: selected?'white':'var(--fg-0)',
-    }}>
-      <Icon size={20} style={{marginBottom:8,opacity:0.8}}/>
-      <div style={{fontSize:13,fontWeight:600}}>{report.label}</div>
-      <div style={{fontSize:11,marginTop:4,opacity:0.7}}>{report.desc}</div>
-      {isUploaded&&(
-        <div style={{marginTop:10,display:'flex',alignItems:'center',gap:6,fontSize:11}}>
-          <span style={{width:6,height:6,borderRadius:'50%',background:selected?'white':'var(--good)'}}/>
-          Uploaded · {uploaded.row_count} rows
-        </div>
-      )}
-      {!isUploaded&&(
-        <div style={{marginTop:10,display:'flex',alignItems:'center',gap:6,fontSize:11,color:selected?'rgba(255,255,255,0.7)':'var(--bad)'}}>
-          <span style={{width:6,height:6,borderRadius:'50%',background:'var(--bad)'}}/>
-          Not uploaded
-        </div>
-      )}
-    </div>
+    <button type='button' onClick={()=>onSelect(report.key)} aria-pressed={selected}
+      className={cn(
+        'flex w-full items-start gap-3 rounded-lg border bg-card p-4 text-start transition-colors hover:bg-muted/40',
+        selected && 'border-primary ring-1 ring-primary',
+      )}>
+      <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-md border',
+        selected ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted text-muted-foreground')}>
+        <Icon className='size-4' />
+      </span>
+      <div className='min-w-0 flex-1'>
+        <div className='text-sm font-medium'>{report.label}</div>
+        <div className='mt-0.5 text-xs text-muted-foreground'>{report.desc}</div>
+        {isUploaded ? (
+          <div className='mt-2.5 flex items-center gap-1.5 text-xs text-good'>
+            <span className='size-1.5 rounded-full bg-good' />
+            Uploaded · <span className='tabular-nums'>{uploaded.row_count}</span> rows
+          </div>
+        ) : (
+          <div className='mt-2.5 flex items-center gap-1.5 text-xs text-bad'>
+            <span className='size-1.5 rounded-full bg-bad' />
+            Not uploaded
+          </div>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -113,45 +120,56 @@ export default function ReportsPage() {
     finally { setProgress(null); }
   }
 
+  // Pipeline bar position: same stages/percentages as before.
+  const pipelinePct = !progress ? 0
+    : progress.stage==='calc' ? 8
+      : progress.stage==='build' ? 96
+        : (progress.total ? (progress.done/progress.total)*90+5 : 5);
+
   return (
-    <div className="animate-in">
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div className='flex flex-wrap items-end justify-between gap-3'>
         <div>
-          <h1 style={{fontSize:22,fontWeight:700}}>Daily Reports</h1>
-          <p style={{fontSize:13,color:'var(--fg-2)',marginTop:4}}>Upload three spreadsheets each morning. AI reads them and proposes tasks.</p>
+          <h2 className='text-2xl font-bold tracking-tight'>Daily reports</h2>
+          <p className='text-muted-foreground'>Upload the Infloww spreadsheets each morning. AI reads them and proposes tasks.</p>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <span style={{fontSize:12,color:'var(--fg-3)'}}>Report date:</span>
-          <input type="date" value={date} onChange={e=>setDate(e.target.value)}
-            style={{padding:'6px 10px',borderRadius:'var(--r-btn)',fontSize:12,background:'var(--bg-2)',border:'1px solid var(--border)',color:'var(--fg-0)',outline:'none'}}/>
+        <div className='flex items-center gap-2'>
+          <Label htmlFor='report-date' className='font-normal text-muted-foreground'>Report date</Label>
+          <Input id='report-date' type='date' value={date} onChange={e=>setDate(e.target.value)} className='h-9 w-auto dark:scheme-dark' />
         </div>
       </div>
 
       {/* Report type cards */}
-      <div style={{display:'flex',gap:12,marginBottom:24}}>
+      <div className='grid gap-3 sm:grid-cols-2'>
         {REPORTS.map(r=><ReportCard key={r.key} report={r} selected={selected===r.key} uploaded={getUploaded(r.key)} onSelect={setSelected}/>)}
       </div>
 
       {/* Both reports in → one-click daily pipeline */}
       {bothReady && (
-        <div style={{ background:'var(--indigo-soft)', border:'1px solid var(--indigo)', borderRadius:'var(--r-panel)', padding:'14px 16px', marginBottom:24 }}>
+        <div className='rounded-lg border bg-card p-4'>
           {!progress ? (
-            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-              <div style={{ flex:1, minWidth:200 }}>
-                <div style={{ fontSize:13, fontWeight:600 }}>Both reports uploaded for {date} ✓</div>
-                <div style={{ fontSize:11.5, color:'var(--fg-2)', marginTop:2 }}>Recompute metrics, run the AI report on every chatter, and build the tasks — in one go.</div>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-center'>
+              <div className='flex min-w-0 flex-1 items-start gap-3'>
+                <CircleCheck className='mt-0.5 size-5 shrink-0 text-good' />
+                <div>
+                  <div className='text-sm font-medium'>Both reports uploaded for {date}</div>
+                  <div className='mt-0.5 text-xs text-muted-foreground'>Recompute metrics, run the AI report on every chatter, and build the tasks — in one go.</div>
+                </div>
               </div>
-              <button onClick={createDailyTasks} className="btn primary" style={{ height:38, padding:'0 18px' }}>✨ Create daily tasks</button>
+              <Button onClick={createDailyTasks} className='w-full sm:w-auto'><Sparkles />Create daily tasks</Button>
             </div>
           ) : (
             <div>
-              <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, color:'var(--fg-1)', marginBottom:6 }}>
-                <span>{progress.stage==='calc' ? 'Recalculating metrics…' : progress.stage==='build' ? 'Building & ranking tasks…' : `Analysing chatters… ${progress.done}/${progress.total}${progress.current ? ` · ${progress.current}` : ''}`}</span>
-                {progress.total ? <span>{Math.round((progress.done/progress.total)*100)}%</span> : null}
+              <div className='mb-2 flex items-center justify-between gap-3 text-sm'>
+                <span className='flex min-w-0 items-center gap-2'>
+                  <Loader2 className='size-4 shrink-0 animate-spin text-muted-foreground' />
+                  <span className='truncate'>
+                    {progress.stage==='calc' ? 'Recalculating metrics…' : progress.stage==='build' ? 'Building & ranking tasks…' : `Analysing chatters… ${progress.done}/${progress.total}${progress.current ? ` · ${progress.current}` : ''}`}
+                  </span>
+                </span>
+                {progress.total ? <span className='shrink-0 text-xs tabular-nums text-muted-foreground'>{Math.round((progress.done/progress.total)*100)}%</span> : null}
               </div>
-              <div style={{ height:6, background:'var(--bg-3)', borderRadius:3, overflow:'hidden' }}>
-                <div style={{ height:'100%', background:'var(--indigo)', transition:'width 0.3s', width: progress.stage==='calc' ? '8%' : progress.stage==='build' ? '96%' : `${progress.total ? (progress.done/progress.total)*90+5 : 5}%` }}/>
-              </div>
+              <Progress value={pipelinePct} />
             </div>
           )}
         </div>
@@ -159,54 +177,56 @@ export default function ReportsPage() {
 
       {/* Upload area */}
       {selected&&(
-        <div className="animate-in" style={{marginBottom:24}}>
-          <div {...getRootProps()} style={{
-            padding:file?20:40, borderRadius:'var(--r-panel)', textAlign:'center', cursor:'pointer',
-            background:isDragActive?'var(--indigo-soft)':'var(--bg-2)',
-            border:`2px dashed ${isDragActive?'var(--indigo)':'var(--border)'}`,
-            transition:'all .12s',
-          }}>
+        <div>
+          <div {...getRootProps()} className={cn(
+            'cursor-pointer rounded-lg border-2 border-dashed bg-card text-center transition-colors hover:bg-muted/40',
+            file ? 'p-5' : 'p-10',
+            isDragActive && 'border-primary bg-accent',
+          )}>
             <input {...getInputProps()}/>
             {file?(
-              <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:12}}>
-                <FileSpreadsheet size={24} style={{color:'var(--good)'}}/>
-                <div style={{textAlign:'left'}}>
-                  <div style={{fontSize:13,fontWeight:500}}>{file.name}</div>
-                  <div style={{fontSize:11,color:'var(--fg-3)'}}>{(file.size/1024).toFixed(1)} KB</div>
+              <div className='flex items-center justify-center gap-3'>
+                <FileSpreadsheet className='size-6 shrink-0 text-good' />
+                <div className='min-w-0 text-start'>
+                  <div className='truncate text-sm font-medium'>{file.name}</div>
+                  <div className='text-xs text-muted-foreground tabular-nums'>{(file.size/1024).toFixed(1)} KB</div>
                 </div>
-                <button onClick={e=>{e.stopPropagation();setFile(null);}} className="btn sm ghost" style={{color:'var(--bad)'}}><X size={14}/></button>
+                <Button size='icon-sm' variant='ghost' className='text-bad hover:text-bad' aria-label='Remove file'
+                  onClick={e=>{e.stopPropagation();setFile(null);}}><X /></Button>
               </div>
             ):(
-              <div>
-                <Upload size={28} style={{color:'var(--fg-3)',marginBottom:8}}/>
-                <div style={{fontSize:13,color:'var(--fg-2)'}}>Drop spreadsheet here, or click to browse</div>
-                <div style={{fontSize:11,color:'var(--fg-3)',marginTop:4}}>.xlsx or .csv</div>
+              <div className='flex flex-col items-center'>
+                <Upload className='mb-2 size-7 text-muted-foreground' />
+                <div className='text-sm'>Drop spreadsheet here, or click to browse</div>
+                <div className='mt-1 text-xs text-muted-foreground'>.xlsx or .csv</div>
               </div>
             )}
           </div>
-          {file&&<button onClick={handleUpload} disabled={uploading} className="btn primary" style={{width:'100%',height:38,justifyContent:'center',marginTop:12}}>
-            {uploading?<><Loader2 size={14} className="pulse-live"/> Processing...</>:'Upload & Process'}
-          </button>}
+          {file&&(
+            <Button onClick={handleUpload} disabled={uploading} className='mt-3 w-full'>
+              {uploading?<><Loader2 className='animate-spin' />Processing...</>:'Upload & process'}
+            </Button>
+          )}
         </div>
       )}
 
       {/* History */}
       {imports.length>0&&(
-        <div style={{background:'var(--bg-1)',border:'1px solid var(--border)',borderRadius:'var(--r-panel)',overflow:'hidden'}}>
-          <div style={{padding:'14px 16px',borderBottom:'1px solid var(--border)',fontWeight:600,fontSize:13.5}}>Recent imports</div>
-          <div style={{maxHeight:300,overflow:'auto'}}>
+        <div className='overflow-hidden rounded-lg border bg-card'>
+          <div className='border-b px-4 py-3 text-sm font-medium'>Recent imports</div>
+          <div className='max-h-[300px] divide-y overflow-auto'>
             {imports.slice(0,20).map(imp=>(
-              <div key={imp.id} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 16px',borderBottom:'1px solid var(--border-soft)'}}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  {imp.status==='completed'?<Check size={14} style={{color:'var(--good)'}}/>:imp.status==='failed'?<X size={14} style={{color:'var(--bad)'}}/>:<Loader2 size={14} className="pulse-live" style={{color:'var(--warn)'}}/>}
-                  <div>
-                    <div style={{fontSize:12.5}}>{imp.file_name}</div>
-                    <div style={{fontSize:10.5,color:'var(--fg-3)'}}>{imp.report_type?.replace(/_/g,' ')} · {imp.report_date}</div>
+              <div key={imp.id} className='flex items-center justify-between gap-3 px-4 py-2.5'>
+                <div className='flex min-w-0 items-center gap-3'>
+                  {imp.status==='completed'?<Check className='size-4 shrink-0 text-good' />
+                    :imp.status==='failed'?<X className='size-4 shrink-0 text-bad' />
+                      :<Loader2 className='size-4 shrink-0 animate-spin text-warn' />}
+                  <div className='min-w-0'>
+                    <div className='truncate text-sm'>{imp.file_name}</div>
+                    <div className='text-xs text-muted-foreground first-letter:uppercase'>{imp.report_type?.replace(/_/g,' ')} · <span className='tabular-nums'>{imp.report_date}</span></div>
                   </div>
                 </div>
-                <div style={{textAlign:'right'}}>
-                  <div className="mono" style={{fontSize:11,color:'var(--fg-2)'}}>{imp.row_count>0?`${imp.row_count} rows`:imp.status}</div>
-                </div>
+                <div className='shrink-0 font-mono text-xs text-muted-foreground tabular-nums'>{imp.row_count>0?`${imp.row_count} rows`:imp.status}</div>
               </div>
             ))}
           </div>

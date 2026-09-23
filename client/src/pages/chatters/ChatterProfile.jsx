@@ -1,17 +1,35 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import api from '../../services/api';
-import { Avatar, Chip, StatusDot } from '../../components/shared';
-import { STATUS_META } from '../../utils/helpers';
-import { TIER, fmtSentAt, areaLabel } from '../../utils/taskMeta';
 import {
-  ArrowLeft, Plus, Clock, ChevronDown, MessageSquare,
-  Calendar, DollarSign, Brain, BarChart3, Flag
+  AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, Bookmark, BookmarkCheck,
+  Brain, Calendar, Check, ChevronDown, ChevronRight, Clock, Flag, Plus, RotateCcw, Star,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '@/context/AuthContext';
+import api from '@/services/api';
+import { STATUS_META, initials } from '@/utils/helpers';
+import { TIER, fmtSentAt, areaLabel } from '@/utils/taskMeta';
+import { cn } from '@/lib/utils';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Textarea } from '@/components/ui/textarea';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 /* ─── Constants ──────────────────────────────────── */
+// Data colours: one per mistake category (drawn as a small bar / dot).
 const CATEGORY_COLORS = {
   long_response_time:'#f59e0b', poor_selling_pushy:'#ef4444', poor_selling_soft:'#ef4444',
   missing_notes:'#8b5cf6', afk_issue:'#f97316', script_quality:'#a855f7',
@@ -19,38 +37,71 @@ const CATEGORY_COLORS = {
   lack_of_aftercare:'#f59e0b', poor_horny_talk:'#f97316', poor_shift_handover:'#8b5cf6', other:'#6c6c84',
 };
 
+// Status dot colours (same values the old --st-* variables held).
+const STATUS_DOT = { new: '#ef4444', new_monitoring: '#f97316', developing: '#eab308', experienced: '#22c55e' };
+
+// Golden ratio / unlock rate bands → text colour class.
 function goldenColor(val) {
   const v = parseFloat(val) || 0;
-  if (v <= 2) return '#f87171';
-  if (v <= 4) return '#fbbf24';
-  if (v <= 8) return '#4ade80';
-  if (v <= 10) return '#fbbf24';
-  return '#f87171';
+  if (v <= 2) return 'text-bad';
+  if (v <= 4) return 'text-warn';
+  if (v <= 8) return 'text-good';
+  if (v <= 10) return 'text-warn';
+  return 'text-bad';
 }
 
 function unlockColor(val) {
   const v = parseFloat(val) || 0;
-  if (v <= 20) return '#f87171';
-  if (v <= 39) return '#fbbf24';
-  if (v <= 60) return '#4ade80';
-  if (v <= 80) return '#fbbf24';
-  return '#f87171';
+  if (v <= 20) return 'text-bad';
+  if (v <= 39) return 'text-warn';
+  if (v <= 60) return 'text-good';
+  if (v <= 80) return 'text-warn';
+  return 'text-bad';
 }
+
+const sevDot = s => s === 'high' || s === 'critical' ? 'bg-bad' : s === 'medium' ? 'bg-warn' : 'bg-muted-foreground/60';
+const categoryLabel = cat => cat?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+/* ─── Small building blocks ──────────────────────── */
+
+// A bordered block with an optional icon + title row on top.
+function Panel({ icon: Icon, title, meta, action, className, bodyClassName, children }) {
+  return (
+    <section className={cn('overflow-hidden rounded-lg border bg-card', className)}>
+      <div className='flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-3'>
+        {Icon && <Icon className='size-4 text-muted-foreground' />}
+        <h3 className='text-sm font-semibold'>{title}</h3>
+        {meta && <span className='text-xs text-muted-foreground'>{meta}</span>}
+        {action && <div className='ms-auto flex items-center gap-2'>{action}</div>}
+      </div>
+      <div className={bodyClassName}>{children}</div>
+    </section>
+  );
+}
+
+const EmptyState = ({ children, className }) => (
+  <div className={cn('rounded-md border border-dashed px-4 py-6 text-center text-sm text-muted-foreground', className)}>{children}</div>
+);
+
+const TimeStamp = ({ children }) => (
+  <span className='inline-flex items-center gap-1 font-medium text-link'><Clock className='size-3' />{children}</span>
+);
 
 /* ═══ TOP ZONE ═══════════════════════════════════ */
 
 function AIScoreCard({ icon: Icon, label, score, trend, color }) {
-  const scoreColor = score >= 7 ? '#4ade80' : score >= 5 ? '#fbbf24' : score > 0 ? '#f87171' : 'var(--fg-3)';
-  const trendIcon = trend === 'up' ? '↑' : trend === 'down' ? '↓' : '→';
-  const trendColor = trend === 'up' ? '#4ade80' : trend === 'down' ? '#f87171' : 'var(--fg-3)';
+  const scoreColor = score >= 7 ? 'text-good' : score >= 5 ? 'text-warn' : score > 0 ? 'text-bad' : 'text-muted-foreground';
+  const TrendIcon = trend === 'up' ? ArrowUp : trend === 'down' ? ArrowDown : ArrowRight;
+  const trendColor = trend === 'up' ? 'text-good' : trend === 'down' ? 'text-bad' : 'text-muted-foreground';
   return (
-    <div style={{ flex:1, padding:'14px 16px', background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-card)', display:'flex', alignItems:'center', gap:12 }}>
-      <div style={{ width:36, height:36, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', background:`${color}15`, color }}><Icon size={18}/></div>
-      <div style={{ flex:1 }}>
-        <div style={{ fontSize:10.5, color:'var(--fg-3)', marginBottom:2 }}>{label}</div>
-        <div style={{ display:'flex', alignItems:'baseline', gap:6 }}>
-          <span className="mono" style={{ fontSize:22, fontWeight:700, color:scoreColor }}>{score > 0 ? score.toFixed(1) : '—'}</span>
-          {score > 0 && <span style={{ fontSize:11, color:trendColor, fontWeight:600 }}>{trendIcon}</span>}
+    <div className='flex flex-1 items-center gap-3 rounded-lg border bg-card px-4 py-3'>
+      <div className='flex size-9 items-center justify-center rounded-md'
+        style={{ color, background: `color-mix(in oklch, ${color} 12%, transparent)` }}><Icon className='size-4' /></div>
+      <div className='flex-1'>
+        <div className='text-xs text-muted-foreground'>{label}</div>
+        <div className='flex items-baseline gap-1.5'>
+          <span className={cn('text-xl font-bold tabular-nums', scoreColor)}>{score > 0 ? score.toFixed(1) : '—'}</span>
+          {score > 0 && <TrendIcon className={cn('size-3.5', trendColor)} />}
         </div>
       </div>
     </div>
@@ -60,11 +111,11 @@ function AIScoreCard({ icon: Icon, label, score, trend, color }) {
 function AlertsBanner({ alerts }) {
   if (!alerts || alerts.length === 0) return null;
   return (
-    <div style={{ background:'rgba(239,68,68,0.06)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:'var(--r-card)', padding:'10px 16px', display:'flex', flexDirection:'column', gap:6 }}>
+    <div className='flex flex-col gap-1.5 rounded-lg border border-bad/30 bg-bad/5 px-4 py-3'>
       {alerts.map((a, i) => (
-        <div key={i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12.5 }}>
-          <span style={{ fontSize:10 }}>{a.severity === 'high' ? '🔴' : '🟡'}</span>
-          <span style={{ color: a.severity === 'high' ? '#f87171' : '#fbbf24' }}>{a.message}</span>
+        <div key={i} className={cn('flex items-center gap-2 text-sm', a.severity === 'high' ? 'text-bad' : 'text-warn')}>
+          <AlertTriangle className='size-4 shrink-0' />
+          <span>{a.message}</span>
         </div>
       ))}
     </div>
@@ -75,28 +126,21 @@ function AlertsBanner({ alerts }) {
 
 function KPI({ label, value, sub, color }) {
   return (
-    <div style={{ flex:1, textAlign:'center', padding:'12px 6px', borderRight:'1px solid var(--border-soft)' }}>
-      <div className="mono" style={{ fontSize:18, fontWeight:600, color: color || 'var(--fg-0)' }}>{value}</div>
-      <div style={{ fontSize:10, color:'var(--fg-3)', marginTop:2 }}>{label}</div>
-      {sub && <div style={{ fontSize:9.5, color: color || 'var(--fg-3)', marginTop:1 }}>{sub}</div>}
+    <div className='bg-card px-4 py-3'>
+      <div className='text-xs text-muted-foreground'>{label}</div>
+      <div className={cn('mt-1 text-xl font-semibold tabular-nums', color)}>{value}</div>
+      {sub && <div className={cn('mt-0.5 text-xs tabular-nums', color || 'text-muted-foreground')}>{sub}</div>}
     </div>
   );
 }
 
 function AIDailySummary({ summary, date }) {
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:'14px 16px' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-        <Brain size={14} style={{ color:'var(--indigo-bright)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>AI Daily Summary</span>
-        <div style={{ flex:1 }}/>
-        {date && <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>compliance check · {date}</span>}
-      </div>
+    <Panel icon={Brain} title='AI daily summary' meta={date ? `Compliance check · ${date}` : null} bodyClassName='p-4'>
       {summary
-        ? <p style={{ fontSize:12.5, color:'var(--fg-1)', lineHeight:1.65, margin:0 }}>{summary}</p>
-        : <p style={{ fontSize:12, color:'var(--fg-3)', margin:0, fontStyle:'italic' }}>No compliance summary yet — run the Daily Check for this chatter to populate it.</p>
-      }
-    </div>
+        ? <p className='text-sm leading-relaxed text-foreground/90'>{summary}</p>
+        : <p className='text-sm text-muted-foreground'>No compliance summary yet. Run the Daily Check for this chatter to fill it in.</p>}
+    </Panel>
   );
 }
 
@@ -104,48 +148,41 @@ function AIDailySummary({ summary, date }) {
 function AIQualityPanel({ ev, onRun, running, canRun }) {
   const overall = ev?.evaluation?.overall;
   const issues = ev?.evaluation?.issues || [];
-  const sevColor = s => s === 'high' || s === 'critical' ? '#f87171' : s === 'medium' ? '#fbbf24' : 'var(--fg-3)';
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', marginBottom:12 }}>
-      <div style={{ display:'flex', alignItems:'center', padding:'12px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-        <Brain size={14} style={{ color:'var(--indigo-bright)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>AI Analysis for Dialogues and Sales Quality</span>
-        {ev?.report_date && <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>· last run {ev.report_date}</span>}
-        <div style={{ flex:1 }}/>
-        <button className="btn sm primary" onClick={onRun} disabled={running || !canRun} style={{ opacity: running || !canRun ? 0.6 : 1 }}>
+    <Panel icon={Brain} title='AI analysis of dialogues and sales quality'
+      meta={ev?.report_date ? `Last run ${ev.report_date}` : null}
+      action={
+        <Button size='sm' onClick={onRun} disabled={running || !canRun}>
           {running ? 'Analysing…' : ev ? 'Re-run' : 'Run analysis'}
-        </button>
-      </div>
+        </Button>
+      }
+      bodyClassName='p-4'>
       {!ev ? (
-        <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>
-          Not analysed yet — run the AI analysis on this chatter's recent dialogues & sales quality.
-        </div>
+        <EmptyState>Not analysed yet. Run the AI analysis on this chatter's recent dialogues and sales quality.</EmptyState>
       ) : (
-        <div style={{ padding:14 }}>
-          {overall && <p style={{ fontSize:12.5, color:'var(--fg-1)', lineHeight:1.6, margin:'0 0 10px' }}>{overall}</p>}
-          {issues.length === 0 && <div style={{ fontSize:12, color:'var(--fg-3)' }}>No strategy deviations found — the chatter followed the playbook.</div>}
+        <div className='space-y-3'>
+          {overall && <p className='text-sm leading-relaxed text-foreground/90'>{overall}</p>}
+          {issues.length === 0 && <p className='text-sm text-muted-foreground'>No strategy deviations found. The chatter followed the playbook.</p>}
           {issues.length > 0 && (
-            <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-              <div className="label" style={{ fontSize:10 }}>{issues.length} coaching point{issues.length === 1 ? '' : 's'}</div>
+            <div className='space-y-2'>
+              <div className='text-sm font-medium'>{issues.length} coaching point{issues.length === 1 ? '' : 's'}</div>
               {issues.map((iss, i) => {
                 const who = iss.fan_username || iss.fan || null;
                 return (
-                  <div key={i} style={{ display:'flex', gap:8, alignItems:'flex-start', padding:'8px 10px', background:'var(--bg-2)', borderRadius:'var(--r-tile)' }}>
-                    <span style={{ width:6, height:6, borderRadius:'50%', background:sevColor(iss.severity), marginTop:5, flexShrink:0 }}/>
-                    <div style={{ minWidth:0, flex:1 }}>
-                      <div style={{ fontSize:11.5, color:'var(--fg-1)', lineHeight:1.45 }}>{iss.detail || iss.title || iss.issue || 'Issue'}</div>
+                  <div key={i} className='flex items-start gap-3 rounded-md border bg-muted/40 px-3 py-2'>
+                    <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', sevDot(iss.severity))} />
+                    <div className='min-w-0 flex-1 space-y-1'>
+                      <div className='text-sm leading-snug'>{iss.detail || iss.title || iss.issue || 'Issue'}</div>
                       {(who || iss.sent_at || iss.area) && (
-                        <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginTop:4, fontSize:10.5, color:'var(--fg-3)' }}>
+                        <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
                           {iss.area && <span>{areaLabel(iss.area)}</span>}
-                          {who && <span style={{ color:'var(--indigo-bright)', fontWeight:600 }}>@{who}</span>}
-                          {iss.spend != null && <span>${iss.spend} spent</span>}
-                          {iss.sent_at && <span>🕐 {fmtSentAt(iss.sent_at)}</span>}
+                          {who && <span className='font-medium text-link'>@{who}</span>}
+                          {iss.spend != null && <span className='tabular-nums'>${iss.spend} spent</span>}
+                          {iss.sent_at && <TimeStamp>{fmtSentAt(iss.sent_at)}</TimeStamp>}
                         </div>
                       )}
                       {iss.message && (
-                        <div style={{ fontSize:11, color:'var(--fg-2)', fontStyle:'italic', marginTop:4, paddingLeft:8, borderLeft:'2px solid var(--border)', lineHeight:1.4 }}>
-                          “{iss.message}”
-                        </div>
+                        <p className='border-l-2 ps-2 text-xs italic leading-snug text-muted-foreground'>“{iss.message}”</p>
                       )}
                     </div>
                   </div>
@@ -155,7 +192,7 @@ function AIQualityPanel({ ev, onRun, running, canRun }) {
           )}
         </div>
       )}
-    </div>
+    </Panel>
   );
 }
 
@@ -200,43 +237,40 @@ function PageContribution({ stats, allStats, timeframe, setTimeframe }) {
   if (rows.length === 0) return null;
 
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-      <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-        <BarChart3 size={14} style={{ color:'var(--fg-3)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>Per-Page Contribution</span>
-        <div style={{ flex:1 }}/>
-        <div style={{ display:'flex', gap:4 }}>
-          {['1d','7d','30d'].map(tf => (
-            <button key={tf} className={`btn sm ${timeframe === tf ? 'primary' : ''}`}
-              onClick={() => setTimeframe(tf)} style={{ fontSize:10, padding:'3px 8px' }}>{tf}</button>
-          ))}
-        </div>
-      </div>
-      <div style={{ overflow:'auto' }}>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
-          <thead>
-            <tr style={{ background:'var(--bg-2)' }}>
-              {['Page','Sales','Msgs','Fans','Golden','Unlock','Fan CVR'].map(h => (
-                <th key={h} style={{ padding:'8px 12px', textAlign:'left', fontSize:10, fontWeight:600, color:'var(--fg-3)', textTransform:'uppercase', letterSpacing:'.05em' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.sort((a,b) => parseFloat(b.sales) - parseFloat(a.sales)).map((s,i) => (
-              <tr key={i} style={{ borderBottom:'1px solid var(--border-soft)' }}>
-                <td style={{ padding:'10px 12px', fontWeight:500 }}>{s.creator_name || '—'}</td>
-                <td style={{ padding:'10px 12px' }} className="mono">${parseFloat(s.sales||0).toFixed(0)}</td>
-                <td style={{ padding:'10px 12px' }} className="mono">{s.messages_sent||0}</td>
-                <td style={{ padding:'10px 12px' }} className="mono">{s.fans_chatted||0}</td>
-                <td className="mono" style={{ padding:'10px 12px', color:goldenColor(s.golden_ratio) }}>{parseFloat(s.golden_ratio||0).toFixed(1)}%</td>
-                <td style={{ padding:'10px 12px', color:unlockColor(s.unlock_rate) }} className="mono">{parseFloat(s.unlock_rate||0).toFixed(0)}%</td>
-                <td style={{ padding:'10px 12px' }} className="mono">{parseFloat(s.fan_cvr||0).toFixed(0)}%</td>
-              </tr>
+    <Panel icon={BarChart3} title='Per-page contribution'
+      action={
+        <ToggleGroup type='single' variant='outline' size='sm' value={timeframe}
+          onValueChange={v => { if (v) setTimeframe(v); }}>
+          {['1d', '7d', '30d'].map(tf => <ToggleGroupItem key={tf} value={tf} className='px-2.5 text-xs'>{tf}</ToggleGroupItem>)}
+        </ToggleGroup>
+      }>
+      <Table>
+          <TableHeader>
+            <TableRow className='bg-muted/40 hover:bg-muted/40'>
+              <TableHead className='ps-4'>Page</TableHead>
+              <TableHead className='text-right'>Sales</TableHead>
+              <TableHead className='text-right'>Messages</TableHead>
+              <TableHead className='text-right'>Fans</TableHead>
+              <TableHead className='text-right'>Golden ratio</TableHead>
+              <TableHead className='text-right'>Unlock</TableHead>
+              <TableHead className='pe-4 text-right'>Fan CVR</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.sort((a, b) => parseFloat(b.sales) - parseFloat(a.sales)).map((s, i) => (
+              <TableRow key={i}>
+                <TableCell className='ps-4 font-medium'>{s.creator_name || '—'}</TableCell>
+                <TableCell className='text-right tabular-nums'>${parseFloat(s.sales || 0).toFixed(0)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{s.messages_sent || 0}</TableCell>
+                <TableCell className='text-right tabular-nums'>{s.fans_chatted || 0}</TableCell>
+                <TableCell className={cn('text-right tabular-nums', goldenColor(s.golden_ratio))}>{parseFloat(s.golden_ratio || 0).toFixed(1)}%</TableCell>
+                <TableCell className={cn('text-right tabular-nums', unlockColor(s.unlock_rate))}>{parseFloat(s.unlock_rate || 0).toFixed(0)}%</TableCell>
+                <TableCell className='pe-4 text-right tabular-nums'>{parseFloat(s.fan_cvr || 0).toFixed(0)}%</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </TableBody>
+      </Table>
+    </Panel>
   );
 }
 
@@ -268,10 +302,9 @@ function PerformanceTrend({ stats }) {
   const worked = series.filter(p => p.sales != null);
 
   if (!worked.length) return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:16 }}>
-      <span style={{ fontWeight:600, fontSize:13 }}>Performance Trend</span>
-      <div style={{ padding:'24px 0', textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>No sales data yet.</div>
-    </div>
+    <Panel title='Performance trend' bodyClassName='p-4'>
+      <EmptyState>No sales data yet.</EmptyState>
+    </Panel>
   );
 
   const W = 520, H = 130, padL = 10, padR = 10, padT = 14, padB = 26;
@@ -295,69 +328,64 @@ function PerformanceTrend({ stats }) {
   const dM = ds => { const [, m, d] = ds.split('-'); return `${parseInt(d)}/${parseInt(m)}`; };
 
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:16 }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-        <span style={{ fontWeight:600, fontSize:13 }}>Performance Trend</span>
-        <div style={{ display:'flex', gap:4 }}>
-          {RANGES.map(r => (
-            <button key={r.k} onClick={() => { setRange(r.k); setHover(null); }}
-              style={{ fontSize:10.5, padding:'3px 9px', borderRadius:'var(--r-btn)', cursor:'pointer', fontWeight:700,
-                border:`1px solid ${range === r.k ? 'var(--indigo)' : 'var(--border)'}`,
-                background: range === r.k ? 'var(--indigo-soft)' : 'var(--bg-2)', color: range === r.k ? 'var(--indigo-bright)' : 'var(--fg-3)' }}>
-              {r.l}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div style={{ display:'flex', gap:16, marginBottom:6, fontSize:11, color:'var(--fg-3)' }}>
-        <span>Total <b style={{ color:'var(--fg-0)' }}>${Math.round(total).toLocaleString()}</b></span>
-        <span>Avg/working day <b style={{ color:'var(--fg-0)' }}>${Math.round(avg).toLocaleString()}</b></span>
-        <span>{worked.length}/{n} days worked</span>
+    <Panel title='Performance trend'
+      action={
+        <ToggleGroup type='single' variant='outline' size='sm' value={String(range)}
+          onValueChange={v => { if (v) { setRange(Number(v)); setHover(null); } }}>
+          {RANGES.map(r => <ToggleGroupItem key={r.k} value={String(r.k)} className='px-2.5 text-xs'>{r.l}</ToggleGroupItem>)}
+        </ToggleGroup>
+      }
+      bodyClassName='p-4'>
+      <div className='mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground'>
+        <span>Total <b className='font-semibold text-foreground tabular-nums'>${Math.round(total).toLocaleString()}</b></span>
+        <span>Average per working day <b className='font-semibold text-foreground tabular-nums'>${Math.round(avg).toLocaleString()}</b></span>
+        <span className='tabular-nums'>{worked.length} of {n} days worked</span>
       </div>
 
-      <div style={{ position:'relative' }}>
-        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow:'visible' }} onMouseLeave={() => setHover(null)}>
+      <div className='relative'>
+        <svg width='100%' viewBox={`0 0 ${W} ${H}`} className='overflow-visible' onMouseLeave={() => setHover(null)}>
           <defs>
-            <linearGradient id="ptgrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--indigo-bright)" stopOpacity="0.25"/>
-              <stop offset="100%" stopColor="var(--indigo-bright)" stopOpacity="0"/>
+            <linearGradient id='ptgrad' x1='0' y1='0' x2='0' y2='1'>
+              <stop offset='0%' stopColor='var(--chart-1)' stopOpacity='0.25' />
+              <stop offset='100%' stopColor='var(--chart-1)' stopOpacity='0' />
             </linearGradient>
           </defs>
-          {/* area + line per segment */}
+          {/* line per segment */}
           {segments.map((seg, si) => (
             <g key={si}>
-              {seg.length > 1 && <polyline points={seg.join(' ')} fill="none" stroke="var(--indigo-bright)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>}
+              {seg.length > 1 && <polyline points={seg.join(' ')} fill='none' stroke='var(--chart-1)' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' />}
             </g>
           ))}
           {/* points: worked = solid, off = hollow on baseline */}
           {series.map((p, i) => p.sales != null ? (
-            <circle key={i} cx={xOf(i)} cy={yOf(p.sales)} r={hover === i ? 4.5 : 3} fill="var(--indigo-bright)"/>
+            <circle key={i} cx={xOf(i)} cy={yOf(p.sales)} r={hover === i ? 4.5 : 3} fill='var(--chart-1)' />
           ) : (
-            <circle key={i} cx={xOf(i)} cy={padT + innerH} r={2.5} fill="none" stroke="var(--fg-4)" strokeWidth="1"/>
+            <circle key={i} cx={xOf(i)} cy={padT + innerH} r={2.5} fill='none' stroke='var(--muted-foreground)' strokeOpacity='0.6' strokeWidth='1' />
           ))}
           {/* hover guide */}
-          {hover != null && <line x1={xOf(hover)} y1={padT - 6} x2={xOf(hover)} y2={padT + innerH} stroke="var(--border-strong)" strokeWidth="1" strokeDasharray="3 3"/>}
+          {hover != null && <line x1={xOf(hover)} y1={padT - 6} x2={xOf(hover)} y2={padT + innerH} stroke='var(--muted-foreground)' strokeOpacity='0.5' strokeWidth='1' strokeDasharray='3 3' />}
           {/* invisible hover bands */}
           {series.map((p, i) => (
-            <rect key={`h${i}`} x={xOf(i) - innerW / (2 * n)} y={0} width={innerW / n + 2} height={H} fill="transparent"
-              onMouseEnter={() => setHover(i)} style={{ cursor:'pointer' }}/>
+            <rect key={`h${i}`} x={xOf(i) - innerW / (2 * n)} y={0} width={innerW / n + 2} height={H} fill='transparent'
+              onMouseEnter={() => setHover(i)} className='cursor-pointer' />
           ))}
           {/* x labels: first / mid / last */}
           {[0, Math.floor((n - 1) / 2), n - 1].map(i => (
-            <text key={`x${i}`} x={xOf(i)} y={H - 8} textAnchor="middle" fontSize="9" fill="var(--fg-4)">{dM(series[i].date)}</text>
+            <text key={`x${i}`} x={xOf(i)} y={H - 8} textAnchor='middle' fontSize='9' fill='var(--muted-foreground)'>{dM(series[i].date)}</text>
           ))}
         </svg>
         {hover != null && (
-          <div style={{ position:'absolute', top:-4, left:`${(xOf(hover) / W) * 100}%`, transform:'translateX(-50%)', pointerEvents:'none',
-            background:'var(--bg-3)', border:'1px solid var(--border-strong)', borderRadius:6, padding:'4px 8px', fontSize:11, whiteSpace:'nowrap', boxShadow:'0 4px 12px rgba(0,0,0,0.3)' }}>
-            <div style={{ color:'var(--fg-3)', fontSize:10 }}>{dM(series[hover].date)}</div>
+          // Position follows the hovered point (data-driven).
+          <div className='pointer-events-none absolute -top-1 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md'
+            style={{ left: `${(xOf(hover) / W) * 100}%` }}>
+            <div className='text-muted-foreground'>{dM(series[hover].date)}</div>
             {series[hover].sales != null
-              ? <div style={{ fontWeight:700 }}>${Math.round(series[hover].sales).toLocaleString()}</div>
-              : <div style={{ color:'var(--fg-4)', fontWeight:600 }}>off / didn't work</div>}
+              ? <div className='font-semibold tabular-nums'>${Math.round(series[hover].sales).toLocaleString()}</div>
+              : <div className='text-muted-foreground'>Off, didn't work</div>}
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -367,66 +395,67 @@ function MistakePatterns({ mistakes }) {
   const recent = {};
   const now = Date.now();
   mistakes.forEach(m => {
-    counts[m.category] = (counts[m.category]||0) + 1;
-    if (now - new Date(m.created_at).getTime() < 7*86400000) recent[m.category] = (recent[m.category]||0) + 1;
+    counts[m.category] = (counts[m.category] || 0) + 1;
+    if (now - new Date(m.created_at).getTime() < 7 * 86400000) recent[m.category] = (recent[m.category] || 0) + 1;
   });
-  const sorted = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   if (sorted.length === 0) return null;
 
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-      <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-        <Flag size={14} style={{ color:'var(--fg-3)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>Mistake Patterns</span>
-      </div>
-      <div style={{ padding:'8px 16px' }}>
-        {sorted.map(([cat, total]) => {
-          const thisWeek = recent[cat]||0;
-          const color = CATEGORY_COLORS[cat]||'var(--fg-3)';
-          const label = cat.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
-          return (
-            <div key={cat} style={{ display:'flex', alignItems:'center', gap:10, padding:'10px 0', borderBottom:'1px solid var(--border-soft)' }}>
-              <div style={{ width:4, height:28, borderRadius:2, background:color }}/>
-              <div style={{ flex:1 }}>
-                <div style={{ fontSize:12, fontWeight:500 }}>{label}</div>
-                <div style={{ fontSize:10.5, color:'var(--fg-3)', marginTop:1 }}>{total} total · {thisWeek} this week</div>
-              </div>
-              {thisWeek >= 2 && <Chip tone="bad" style={{ fontSize:9.5 }}>ESCALATING</Chip>}
-              {total >= 3 && thisWeek < 2 && <Chip tone="warn" style={{ fontSize:9.5 }}>REPEATED</Chip>}
+    <Panel icon={Flag} title='Mistake patterns' bodyClassName='divide-y px-4'>
+      {sorted.map(([cat, total]) => {
+        const thisWeek = recent[cat] || 0;
+        const color = CATEGORY_COLORS[cat] || 'var(--muted-foreground)';
+        const label = categoryLabel(cat);
+        return (
+          <div key={cat} className='flex items-center gap-3 py-2.5'>
+            <span className='h-7 w-1 shrink-0 rounded-full' style={{ background: color }} />
+            <div className='min-w-0 flex-1'>
+              <div className='text-sm font-medium'>{label}</div>
+              <div className='text-xs text-muted-foreground tabular-nums'>{total} total · {thisWeek} this week</div>
             </div>
-          );
-        })}
-      </div>
-    </div>
+            {thisWeek >= 2 && <Badge variant='outline' className='border-bad/40 bg-bad/10 text-bad'>Escalating</Badge>}
+            {total >= 3 && thisWeek < 2 && <Badge variant='outline' className='border-warn/40 text-warn'>Repeated</Badge>}
+          </div>
+        );
+      })}
+    </Panel>
   );
 }
 
 function MistakeEntry({ m }) {
-  const color = CATEGORY_COLORS[m.category]||'var(--fg-3)';
-  const label = m.category?.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  const color = CATEGORY_COLORS[m.category] || 'var(--muted-foreground)';
+  const label = categoryLabel(m.category);
   return (
-    <div style={{ padding:'12px 0', borderBottom:'1px solid var(--border-soft)' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4 }}>
-        <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:'.06em', padding:'2px 6px', borderRadius:4, background:`${color}20`, color }}>{label}</span>
-        <span className="mono" style={{ fontSize:10, color:'var(--fg-3)' }}>{new Date(m.created_at).toLocaleDateString()}</span>
+    <div className='space-y-1 py-3'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Badge variant='outline' className='gap-1.5 font-normal'>
+          <span className='size-1.5 rounded-full' style={{ background: color }} />{label}
+        </Badge>
+        <span className='text-xs text-muted-foreground tabular-nums'>{new Date(m.created_at).toLocaleDateString()}</span>
       </div>
-      {m.description && <div style={{ fontSize:12, color:'var(--fg-1)', lineHeight:1.5, marginTop:4 }}>{m.description}</div>}
-      {m.users?.name && <div style={{ fontSize:10.5, color:'var(--fg-3)', marginTop:4 }}>logged by {m.users.name}</div>}
+      {m.description && <p className='text-sm leading-relaxed text-foreground/90'>{m.description}</p>}
+      {m.users?.name && <p className='text-xs text-muted-foreground'>Logged by {m.users.name}</p>}
     </div>
   );
 }
 
 function ReviewEntry({ r }) {
   return (
-    <div style={{ padding:'12px 0', borderBottom:'1px solid var(--border-soft)' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-        <span className="mono" style={{ fontSize:10.5, color:'var(--fg-3)' }}>{new Date(r.created_at).toLocaleDateString()}</span>
-        <span style={{ fontSize:10.5, color:'var(--fg-3)' }}>by {r.users?.name||'—'}</span>
+    <div className='space-y-1 py-3'>
+      <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
+        <span className='tabular-nums'>{new Date(r.created_at).toLocaleDateString()}</span>
+        <span>by {r.users?.name || '—'}</span>
       </div>
-      <div style={{ fontSize:12, color:'var(--fg-1)', lineHeight:1.5 }}>"{r.notes}"</div>
+      <p className='text-sm leading-relaxed text-foreground/90'>"{r.notes}"</p>
     </div>
   );
 }
+
+// Two-option picker used inside the dialogs (same pattern as the Tasks page).
+const Choice = ({ on, onClick, className, children }) => (
+  <Button type='button' variant={on ? 'secondary' : 'outline'} className={cn('flex-1', on && 'ring-1 ring-ring', className)} onClick={onClick}>{children}</Button>
+);
 
 /* ─── Penalty/Bonus Modal ────────────────────────── */
 function PenaltyModal({ chatterId, onClose, onSaved }) {
@@ -434,7 +463,6 @@ function PenaltyModal({ chatterId, onClose, onSaved }) {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
-  const inp = { width:'100%', padding:'8px 12px', borderRadius:'var(--r-btn)', fontSize:12.5, outline:'none', background:'var(--bg-2)', border:'1px solid var(--border)', color:'var(--fg-0)' };
 
   async function save(e) {
     e.preventDefault(); setSaving(true);
@@ -451,107 +479,91 @@ function PenaltyModal({ chatterId, onClose, onSaved }) {
   const isPenalty = type === 'penalty';
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:420, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:20 }} onClick={e => e.stopPropagation()}>
-        <h3 style={{ fontSize:14, fontWeight:600, marginBottom:14 }}>Add Penalty or Bonus</h3>
-        <form onSubmit={save} style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          {/* Type toggle */}
-          <div style={{ display:'flex', gap:8 }}>
-            <button type="button" onClick={() => setType('penalty')}
-              style={{ flex:1, padding:'10px 0', borderRadius:'var(--r-btn)', cursor:'pointer', fontSize:13, fontWeight:600, border: isPenalty ? '2px solid #f87171' : '2px solid var(--border)', background: isPenalty ? 'rgba(248,113,113,0.1)' : 'var(--bg-2)', color: isPenalty ? '#f87171' : 'var(--fg-3)' }}>
-              ⚠ Penalty
-            </button>
-            <button type="button" onClick={() => setType('bonus')}
-              style={{ flex:1, padding:'10px 0', borderRadius:'var(--r-btn)', cursor:'pointer', fontSize:13, fontWeight:600, border: !isPenalty ? '2px solid #4ade80' : '2px solid var(--border)', background: !isPenalty ? 'rgba(74,222,128,0.1)' : 'var(--bg-2)', color: !isPenalty ? '#4ade80' : 'var(--fg-3)' }}>
-              ★ Bonus
-            </button>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-md'>
+        <DialogHeader>
+          <DialogTitle>Add a penalty or bonus</DialogTitle>
+          <DialogDescription>It's recorded on this chatter's profile.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className='grid gap-4'>
+          <div className='flex gap-2'>
+            <Choice on={isPenalty} onClick={() => setType('penalty')} className={cn(isPenalty && 'text-bad')}><AlertTriangle />Penalty</Choice>
+            <Choice on={!isPenalty} onClick={() => setType('bonus')} className={cn(!isPenalty && 'text-good')}><Star />Bonus</Choice>
           </div>
-          <div>
-            <label className="label" style={{ display:'block', marginBottom:6 }}>Amount ($) — optional</label>
-            <input type="number" step="0.01" min="0" value={amount} onChange={e => setAmount(e.target.value)} style={inp} placeholder="e.g. 25.00"/>
+          <div className='grid gap-2'>
+            <Label htmlFor='pb-amount'>Amount ($) <span className='font-normal text-muted-foreground'>(optional)</span></Label>
+            <Input id='pb-amount' type='number' step='0.01' min='0' value={amount} onChange={e => setAmount(e.target.value)} placeholder='e.g. 25.00' />
           </div>
-          <div>
-            <label className="label" style={{ display:'block', marginBottom:6 }}>What for?</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} required style={{ ...inp, resize:'vertical' }} placeholder={isPenalty ? "Reason for penalty..." : "Reason for bonus..."}/>
+          <div className='grid gap-2'>
+            <Label htmlFor='pb-desc'>What for?</Label>
+            <Textarea id='pb-desc' value={description} onChange={e => setDescription(e.target.value)} rows={3} required placeholder={isPenalty ? 'Reason for penalty…' : 'Reason for bonus…'} />
           </div>
-          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn primary" disabled={saving}>{saving ? 'Saving...' : isPenalty ? 'Issue penalty' : 'Give bonus'}</button>
-          </div>
+          <DialogFooter>
+            <Button type='button' variant='ghost' onClick={onClose}>Cancel</Button>
+            <Button type='submit' disabled={saving}>{saving ? 'Saving…' : isPenalty ? 'Issue penalty' : 'Give bonus'}</Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 /* ─── Weekly Schedule ────────────────────────────── */
-const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const DAY_NUMBERS = [1,2,3,4,5,6,7];
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const DAY_NUMBERS = [1, 2, 3, 4, 5, 6, 7];
 
 function WeeklySchedule({ chatterId, workDays, assignments, onUpdate }) {
-  const days = workDays || [1,2,3,4,5];
+  const days = workDays || [1, 2, 3, 4, 5];
   // New cover model: this chatter's recurring covers (weekday + hours) from the Shifts board.
   const covers = (assignments || []).filter(a => a.day_of_week != null && a.cover_hours != null)
     .sort((a, b) => a.day_of_week - b.day_of_week);
   const coverDays = new Set(covers.map(c => c.day_of_week));
 
   async function toggle(dayNum) {
-    const updated = days.includes(dayNum) ? days.filter(d=>d!==dayNum) : [...days,dayNum].sort();
+    const updated = days.includes(dayNum) ? days.filter(d => d !== dayNum) : [...days, dayNum].sort();
     try { await api.put(`/api/chatters/${chatterId}`, { work_days: updated }); toast.success('Schedule updated'); onUpdate(); }
     catch { toast.error('Failed'); }
   }
 
   return (
-    <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-      <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-        <Calendar size={14} style={{ color:'var(--fg-3)' }}/>
-        <span style={{ fontWeight:600, fontSize:13 }}>Weekly Schedule</span>
-        <div style={{ flex:1 }}/>
-        <span style={{ fontSize:11, color:'var(--fg-3)' }}>{days.length} days/week</span>
+    <Panel icon={Calendar} title='Weekly schedule' meta={`${days.length} days a week`} bodyClassName='space-y-4 p-4'>
+      <div className='grid grid-cols-7 gap-1.5'>
+        {DAY_LABELS.map((label, i) => {
+          const dayNum = DAY_NUMBERS[i], active = days.includes(dayNum), hasCover = coverDays.has(dayNum);
+          return (
+            <Button key={dayNum} variant={active ? 'default' : 'outline'} aria-pressed={active}
+              onClick={() => toggle(dayNum)} className={cn('relative h-9 px-0 text-xs', !active && 'text-muted-foreground')}>
+              {label}
+              {hasCover && <span title='Cover shift' className='absolute -top-1 -right-1 size-2.5 rounded-full bg-link ring-2 ring-card' />}
+            </Button>
+          );
+        })}
       </div>
-      <div style={{ padding:16 }}>
-        <div style={{ display:'flex', gap:6, marginBottom:14 }}>
-          {DAY_LABELS.map((label,i) => {
-            const dayNum=DAY_NUMBERS[i], active=days.includes(dayNum), hasCover=coverDays.has(dayNum);
-            return (
-              <button key={dayNum} onClick={()=>toggle(dayNum)} style={{
-                flex:1, padding:'10px 0', borderRadius:'var(--r-tile)', cursor:'pointer',
-                border:active?'2px solid var(--indigo-bright)':'2px solid var(--border)',
-                background:active?'var(--indigo-soft)':'var(--bg-2)', color:active?'var(--indigo-bright)':'var(--fg-3)',
-                fontWeight:active?700:500, fontSize:12, textAlign:'center', transition:'all .12s', position:'relative',
-              }}>
-                {label}
-                {hasCover&&<div title="Cover shift" style={{ position:'absolute',top:-4,right:-4,width:8,height:8,borderRadius:'50%',background:'var(--indigo-bright)',border:'2px solid var(--bg-1)' }}/>}
-              </button>
-            );
-          })}
-        </div>
 
-        <div className="label" style={{ fontSize:10, marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
-          Cover shifts
-          <span style={{ fontWeight:400, color:'var(--fg-4)', textTransform:'none', letterSpacing:0 }}>· managed on the Shifts board</span>
+      <div className='space-y-2'>
+        <div className='text-sm'>
+          <span className='font-medium'>Cover shifts</span>
+          <span className='text-muted-foreground'> · managed on the Shifts board</span>
         </div>
         {covers.length === 0 ? (
-          <div style={{ fontSize:11.5, color:'var(--fg-3)', padding:'10px 12px', border:'1px dashed var(--border)', borderRadius:'var(--r-tile)', textAlign:'center' }}>
-            No cover shifts. Add them by dragging onto the Shifts board.
-          </div>
+          <EmptyState className='py-4'>No cover shifts. Add them by dragging onto the Shifts board.</EmptyState>
         ) : (
-          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <div className='space-y-1.5'>
             {covers.map(c => (
               <div key={c.shift_id ? `${c.creator_id}-${c.shift_id}-${c.day_of_week}` : c.day_of_week}
-                style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--indigo-soft)', border:'1px solid var(--indigo-line)', borderRadius:'var(--r-tile)' }}>
-                <span style={{ fontSize:10.5, fontWeight:700, color:'var(--indigo-bright)', width:30 }}>{DAY_LABELS[c.day_of_week-1]}</span>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:12.5, fontWeight:600 }}>{c.creators?.name || '—'}</div>
-                  <div style={{ fontSize:10.5, color:'var(--fg-3)' }}>{c.shifts?.name || 'shift'}</div>
+                className='flex items-center gap-3 rounded-md border bg-muted/40 px-3 py-2'>
+                <span className='w-8 text-xs font-semibold text-link'>{DAY_LABELS[c.day_of_week - 1]}</span>
+                <div className='min-w-0 flex-1'>
+                  <div className='truncate text-sm font-medium'>{c.creators?.name || '—'}</div>
+                  <div className='text-xs text-muted-foreground'>{c.shifts?.name || 'shift'}</div>
                 </div>
-                <span className="mono" style={{ fontSize:11.5, fontWeight:700, color:'var(--indigo-bright)' }}>+{c.cover_hours}h</span>
+                <span className='text-sm font-semibold text-link tabular-nums'>+{c.cover_hours}h</span>
               </div>
             ))}
           </div>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -563,7 +575,6 @@ function AddTaskModal({ chatterId, chatterName, onClose, onSaved }) {
   const [description, setDescription] = useState('');
   const [important, setImportant] = useState(false);
   const [saving, setSaving] = useState(false);
-  const inp = { width:'100%', padding:'8px 12px', borderRadius:'var(--r-btn)', fontSize:12.5, outline:'none', background:'var(--bg-2)', border:'1px solid var(--border)', color:'var(--fg-0)' };
 
   async function save(e) {
     e.preventDefault(); setSaving(true);
@@ -576,39 +587,35 @@ function AddTaskModal({ chatterId, chatterName, onClose, onSaved }) {
   }
 
   return (
-    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }} onClick={onClose}>
-      <div style={{ width:460, background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:20 }} onClick={e=>e.stopPropagation()}>
-        <h3 style={{ fontSize:14, fontWeight:600, marginBottom:4 }}>New custom task</h3>
-        <p style={{ fontSize:12, color:'var(--fg-3)', marginBottom:14 }}>for {chatterName} · pins above the AI queue on Tasks</p>
-        <form onSubmit={save} style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          <div>
-            <label className="label" style={{ display:'block', marginBottom:6 }}>Title</label>
-            <input value={title} onChange={e=>setTitle(e.target.value)} required style={inp} placeholder="e.g. Review selling technique on Leya"/>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>New custom task</DialogTitle>
+          <DialogDescription>For {chatterName}. It's pinned above the AI tasks on the Tasks page.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className='grid gap-4'>
+          <div className='grid gap-2'>
+            <Label htmlFor='at-title'>Title</Label>
+            <Input id='at-title' value={title} onChange={e => setTitle(e.target.value)} required placeholder='e.g. Review selling technique on Leya' autoFocus />
           </div>
-          <div>
-            <label className="label" style={{ display:'block', marginBottom:6 }}>Details (optional)</label>
-            <textarea value={description} onChange={e=>setDescription(e.target.value)} rows={3} style={{...inp, resize:'vertical'}} placeholder="What to do, context…"/>
+          <div className='grid gap-2'>
+            <Label htmlFor='at-detail'>Details <span className='font-normal text-muted-foreground'>(optional)</span></Label>
+            <Textarea id='at-detail' value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder='What to do, context…' />
           </div>
-          <div>
-            <label className="label" style={{ display:'block', marginBottom:6 }}>Importance</label>
-            <div style={{ display:'flex', gap:8 }}>
-              {[[false,'Normal'],[true,'★ Important']].map(([v,l])=>(
-                <button key={l} type="button" onClick={()=>setImportant(v)}
-                  style={{ flex:1, padding:'8px 0', borderRadius:'var(--r-btn)', cursor:'pointer', fontSize:12, fontWeight:700,
-                    border:`2px solid ${important===v?'#f59e0b':'var(--border)'}`,
-                    background:important===v?'rgba(245,158,11,0.12)':'var(--bg-2)',
-                    color:important===v?'#f59e0b':'var(--fg-3)',
-                  }}>{l}</button>
-              ))}
+          <div className='grid gap-2'>
+            <Label>Importance</Label>
+            <div className='flex gap-2'>
+              <Choice on={!important} onClick={() => setImportant(false)}>Normal</Choice>
+              <Choice on={important} onClick={() => setImportant(true)}><Star />Important</Choice>
             </div>
           </div>
-          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-            <button type="button" className="btn" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn primary" disabled={saving||!title}>{saving?'Creating...':'Create task'}</button>
-          </div>
+          <DialogFooter>
+            <Button type='button' variant='ghost' onClick={onClose}>Cancel</Button>
+            <Button type='submit' disabled={saving || !title}>{saving ? 'Creating…' : 'Create task'}</Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -632,55 +639,83 @@ function CoachingLog({ chatterId, canCreate, onAddCustom }) {
   const toCoach = all.filter(t => t.coach_flag && !t.coached_at);
   const coached = all.filter(t => t.coached_at);
   const list = tab === 'pending' ? pending : tab === 'tocoach' ? toCoach : coached;
-  const TabBtn = ({ k, label, n }) => (
-    <button onClick={() => setTab(k)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700, padding: '2px 2px', color: tab === k ? 'var(--fg-0)' : 'var(--fg-3)', borderBottom: tab === k ? '2px solid var(--indigo)' : '2px solid transparent' }}>{label} {n}</button>
-  );
-  const empty = { pending: 'No pending cases for this chatter.', tocoach: 'Nothing saved for coaching — use the 📌 button to add cases.', coached: 'No coached cases yet.' };
+  const TABS = [['pending', 'Pending', pending.length], ['tocoach', 'To coach', toCoach.length], ['coached', 'Coached', coached.length]];
+  const empty = { pending: 'No pending cases for this chatter.', tocoach: 'Nothing saved for coaching. Use the bookmark button on a pending case to add it.', coached: 'No coached cases yet.' };
   return (
-    <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 14 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>Coaching Log</span>
-        <TabBtn k="pending" label="Pending" n={pending.length} />
-        <TabBtn k="tocoach" label="To coach" n={toCoach.length} />
-        <TabBtn k="coached" label="Coached" n={coached.length} />
-        <div style={{ flex: 1 }} />
-        {canCreate && <button className="btn sm" onClick={onAddCustom}><Plus size={12} /> Custom task</button>}
+    <section className='overflow-hidden rounded-lg border bg-card'>
+      <div className='flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3'>
+        <h3 className='text-sm font-semibold'>Coaching log</h3>
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>
+            {TABS.map(([k, label, n]) => (
+              <TabsTrigger key={k} value={k} className='gap-1.5 text-xs'>
+                {label}
+                <span className='rounded-full bg-background/60 px-1.5 font-mono text-xs text-muted-foreground'>{n}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+        {canCreate && <Button size='sm' variant='outline' className='ms-auto' onClick={onAddCustom}><Plus />Custom task</Button>}
       </div>
-      <div style={{ padding: 8, maxHeight: 460, overflowY: 'auto' }}>
+      <div className='max-h-[460px] overflow-y-auto'>
         {list.length === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{empty[tab]}</div>
-        ) : list.map(t => {
-          const tier = TIER[t.priority] || {};
-          const sentAt = t.context?.sent_at;
-          return (
-            <div key={t.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-soft)', opacity: t.coached_at ? 0.7 : 1 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ width: 6, height: 6, borderRadius: '50%', background: tier.c || 'var(--fg-3)', flexShrink: 0, marginTop: 5 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 500 }}>{t.title || t.detail}</div>
-                  <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    {t.creator_name && <b style={{ color: 'var(--fg-3)' }}>{t.creator_name}</b>}
-                    {t.fan_username && <span style={{ color: 'var(--fg-3)' }}>{t.fan_username}</span>}
-                    {sentAt && <span style={{ color: 'var(--indigo-bright)', fontWeight: 600 }}>🕐 {fmtSentAt(sentAt)}</span>}
-                    <span>{areaLabel(t.area)}</span>
-                    {t.coached_at && <span>✓ coached {new Date(t.coached_at).toLocaleDateString()}</span>}
+          <div className='p-4'><EmptyState>{empty[tab]}</EmptyState></div>
+        ) : (
+          <div className='divide-y'>
+            {list.map(t => {
+              const tier = TIER[t.priority] || {};
+              const sentAt = t.context?.sent_at;
+              return (
+                <div key={t.id} className={cn('flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:gap-4', t.coached_at && 'opacity-70')}>
+                  <div className='flex min-w-0 flex-1 items-start gap-3'>
+                    <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', !tier.c && 'bg-muted-foreground/60')}
+                      style={tier.c ? { background: tier.c } : undefined} />
+                    <div className='min-w-0 flex-1 space-y-1'>
+                      <div className='text-sm font-medium'>{t.title || t.detail}</div>
+                      <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
+                        {t.creator_name && <span className='font-medium text-foreground'>{t.creator_name}</span>}
+                        {t.fan_username && <span className='font-mono'>{t.fan_username}</span>}
+                        {sentAt && <TimeStamp>{fmtSentAt(sentAt)}</TimeStamp>}
+                        <span>{areaLabel(t.area)}</span>
+                        {t.coached_at && <span className='inline-flex items-center gap-1'><Check className='size-3' />Coached {new Date(t.coached_at).toLocaleDateString()}</span>}
+                      </div>
+                      {t.context?.message && <p className='text-xs italic text-muted-foreground'>“{t.context.message}”</p>}
+                    </div>
                   </div>
-                  {t.context?.message && <div style={{ fontSize: 11, color: 'var(--fg-2)', fontStyle: 'italic', marginTop: 4 }}>“{t.context.message}”</div>}
+                  <div className='flex shrink-0 items-center gap-1.5 ps-5 sm:ps-0'>
+                    {tab === 'pending' && (t.coach_flag ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button size='sm' variant='secondary' className='text-warn' onClick={() => act(t, 'uncoach')}><BookmarkCheck />Saved</Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Remove from coaching</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button size='icon-sm' variant='ghost' aria-label='Save for coaching' onClick={() => act(t, 'coach')}><Bookmark /></Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Save for coaching</TooltipContent>
+                      </Tooltip>
+                    ))}
+                    {tab === 'pending' && <Button size='sm' onClick={() => act(t, 'complete')}>Complete</Button>}
+                    {tab === 'tocoach' && <Button size='sm' onClick={() => act(t, 'coached')}>Mark coached</Button>}
+                    {tab === 'coached' && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button size='icon-sm' variant='ghost' aria-label='Move back to coach' onClick={() => act(t, 'uncoached')}><RotateCcw /></Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Move back to "To coach"</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  {tab === 'pending' && (t.coach_flag
-                    ? <button className="btn sm" onClick={() => act(t, 'uncoach')} title="Remove from coaching" style={{ color: '#f59e0b' }}>📌 Saved</button>
-                    : <button className="btn sm" onClick={() => act(t, 'coach')} title="Save for coaching">📌</button>)}
-                  {tab === 'pending' && <button className="btn sm primary" onClick={() => act(t, 'complete')}>Complete</button>}
-                  {tab === 'tocoach' && <button className="btn sm primary" onClick={() => act(t, 'coached')}>Coached</button>}
-                  {tab === 'coached' && <button className="btn sm" onClick={() => act(t, 'uncoached')} title="Move back to coach">↺</button>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -693,46 +728,58 @@ function ReportsTimeline({ chatterId, type, title, emptyText }) {
     api.get(`/api/daily-check/chatter-eval-history?chatter_id=${chatterId}`)
       .then(r => setReports((r.data?.evaluations || []).filter(e => !type || e.eval_type === type))).catch(() => {});
   }, [chatterId, type]);
-  const sevColor = s => s === 'high' || s === 'critical' ? '#f87171' : s === 'medium' ? '#fbbf24' : 'var(--fg-3)';
   return (
-    <div style={{ background: 'var(--bg-1)', border: '1px solid var(--border)', borderRadius: 'var(--r-panel)', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', gap: 8 }}>
-        <span style={{ fontWeight: 600, fontSize: 13 }}>{title}</span>
-        <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{reports.length} run{reports.length === 1 ? '' : 's'}</span>
-      </div>
-      <div style={{ maxHeight: 460, overflowY: 'auto' }}>
-        {reports.length === 0 ? (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--fg-3)', fontSize: 12 }}>{emptyText || 'No reports generated yet.'}</div>
-        ) : reports.map((r) => {
-          const key = `${r.report_date}-${r.eval_type}-${r.created_at}`;
-          const issues = r.evaluation?.issues || [];
-          const isOpen = openKey === key;
-          return (
-            <div key={key} style={{ borderBottom: '1px solid var(--border-soft)' }}>
-              <button onClick={() => setOpenKey(isOpen ? null : key)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
-                <span style={{ fontSize: 10, color: 'var(--fg-3)', width: 12 }}>{isOpen ? '▾' : '▸'}</span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--fg-1)' }}>{r.report_date}</span>
-                <div style={{ flex: 1 }} />
-                <span style={{ fontSize: 11, color: issues.length ? 'var(--fg-2)' : 'var(--fg-4)' }}>{issues.length} issue{issues.length === 1 ? '' : 's'}</span>
-              </button>
-              {isOpen && (
-                <div style={{ padding: '0 14px 12px 34px' }}>
-                  {r.evaluation?.overall && <p style={{ fontSize: 12, color: 'var(--fg-1)', lineHeight: 1.55, margin: '0 0 8px' }}>{r.evaluation.overall}</p>}
-                  {issues.map((iss, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0' }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: sevColor(iss.severity), marginTop: 5, flexShrink: 0 }} />
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 11.5, color: 'var(--fg-1)', lineHeight: 1.4 }}>{iss.detail || iss.title}</div>
-                        <div style={{ fontSize: 10, color: 'var(--fg-4)', marginTop: 2 }}>{areaLabel(iss.area)}{iss.fan_username ? ` · @${iss.fan_username}` : ''}</div>
+    <Panel title={title} meta={`${reports.length} run${reports.length === 1 ? '' : 's'}`} bodyClassName='max-h-[460px] overflow-y-auto'>
+      {reports.length === 0 ? (
+        <div className='p-4'><EmptyState>{emptyText || 'No reports generated yet.'}</EmptyState></div>
+      ) : (
+        <div className='divide-y'>
+          {reports.map((r) => {
+            const key = `${r.report_date}-${r.eval_type}-${r.created_at}`;
+            const issues = r.evaluation?.issues || [];
+            const isOpen = openKey === key;
+            return (
+              <div key={key}>
+                <button type='button' onClick={() => setOpenKey(isOpen ? null : key)} aria-expanded={isOpen}
+                  className='flex w-full items-center gap-2 px-4 py-2.5 text-start transition-colors hover:bg-muted/50'>
+                  <ChevronRight className={cn('size-4 text-muted-foreground transition-transform', isOpen && 'rotate-90')} />
+                  <span className='text-sm font-medium tabular-nums'>{r.report_date}</span>
+                  <span className={cn('ms-auto text-xs', issues.length ? 'text-foreground/80' : 'text-muted-foreground')}>{issues.length} issue{issues.length === 1 ? '' : 's'}</span>
+                </button>
+                {isOpen && (
+                  <div className='space-y-2 px-4 pb-3 ps-10'>
+                    {r.evaluation?.overall && <p className='text-sm leading-relaxed text-foreground/90'>{r.evaluation.overall}</p>}
+                    {issues.map((iss, i) => (
+                      <div key={i} className='flex items-start gap-2'>
+                        <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', sevDot(iss.severity))} />
+                        <div className='min-w-0'>
+                          <div className='text-sm leading-snug'>{iss.detail || iss.title}</div>
+                          <div className='text-xs text-muted-foreground'>{areaLabel(iss.area)}{iss.fan_username ? ` · @${iss.fan_username}` : ''}</div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function ProfileSkeleton() {
+  return (
+    <div className='flex flex-col gap-4'>
+      <Skeleton className='h-8 w-20' />
+      <div className='flex items-center gap-4'>
+        <Skeleton className='size-14 rounded-full' />
+        <div className='space-y-2'><Skeleton className='h-7 w-48' /><Skeleton className='h-4 w-64' /></div>
       </div>
+      <Skeleton className='h-32 w-full rounded-lg' />
+      <Skeleton className='h-20 w-full rounded-lg' />
+      <div className='grid gap-4 lg:grid-cols-2'><Skeleton className='h-48 rounded-lg' /><Skeleton className='h-48 rounded-lg' /></div>
     </div>
   );
 }
@@ -776,13 +823,13 @@ export default function ChatterProfile() {
     catch { toast.error('Failed'); }
   }
 
-  if (loading) return (
-    <div style={{ display:'flex', justifyContent:'center', paddingTop:80 }}>
-      <div style={{ width:24, height:24, border:'2px solid var(--indigo)', borderTopColor:'transparent', borderRadius:'50%', animation:'spin .6s linear infinite' }}/>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  if (loading) return <ProfileSkeleton />;
+  if (!chatter) return (
+    <div className='flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground'>
+      Chatter not found.
+      <Button variant='link' size='sm' onClick={() => navigate(-1)}>Go back</Button>
     </div>
   );
-  if (!chatter) return <div style={{ padding:40, textAlign:'center', color:'var(--fg-3)' }}>Chatter not found</div>;
 
   const meta = STATUS_META[chatter.status] || STATUS_META.new;
   const assignments = chatter.chatter_creator_assignments?.filter(a=>a.is_active) || [];
@@ -842,54 +889,64 @@ export default function ChatterProfile() {
   });
 
   // Sales and golden ratio colors
-  const salesColor = vsAvgPct == null ? 'var(--fg-0)' : vsAvgPct > 0 ? '#4ade80' : vsAvgPct < -20 ? '#f87171' : 'var(--fg-0)';
+  const salesColor = vsAvgPct == null ? '' : vsAvgPct > 0 ? 'text-good' : vsAvgPct < -20 ? 'text-bad' : '';
   const gr = parseFloat(latestMetric.golden_ratio) || 0;
   const ur = parseFloat(latestMetric.unlock_rate) || 0;
+  const mistakes30 = mistakes.filter(m=>new Date(m.created_at)>new Date(Date.now()-30*86400000)).length;
+  const commRing = commScore>=7 ? 'stroke-good' : commScore>=5 ? 'stroke-warn' : 'stroke-bad';
 
   return (
-    <div className="animate-in" style={{ maxWidth:1200, margin:'0 auto' }}>
-      <button className="btn ghost sm" onClick={() => navigate(-1)} style={{ marginBottom:12, color:'var(--fg-3)' }}>
-        <ArrowLeft size={14}/> Back
-      </button>
+    <div className='flex flex-col gap-4 sm:gap-6'>
+      <div className='flex flex-col gap-3'>
+        <Button variant='ghost' size='sm' className='-ms-2 self-start text-muted-foreground' onClick={() => navigate(-1)}>
+          <ArrowLeft />Back
+        </Button>
 
-      {/* ═══ HEADER ═══ */}
-      <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', padding:'20px 20px 16px', marginBottom:12, display:'flex', alignItems:'center', gap:16 }}>
-        <div style={{ position:'relative' }}>
-          <Avatar name={chatter.name} size={56}/>
-          {commScore > 0 && (
-            <svg width={64} height={64} style={{ position:'absolute', top:-4, left:-4 }}>
-              <circle cx={32} cy={32} r={30} fill="none" stroke="var(--border)" strokeWidth={3}/>
-              <circle cx={32} cy={32} r={30} fill="none" stroke={commScore>=7?'#4ade80':commScore>=5?'#fbbf24':'#f87171'} strokeWidth={3} strokeDasharray={`${(commScore/10)*188} 188`} strokeLinecap="round" transform="rotate(-90 32 32)"/>
-            </svg>
-          )}
-        </div>
-        <div style={{ flex:1 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <h1 style={{ fontSize:22, fontWeight:700, color:meta.nameColor }}>{chatter.name}</h1>
-            <div style={{ position:'relative' }}>
-              <button onClick={()=>setStatusOpen(!statusOpen)} style={{ display:'flex', alignItems:'center', gap:4, padding:'4px 10px', borderRadius:999, background:`${meta.color}20`, color:meta.nameColor, border:`1px solid ${meta.color}40`, fontSize:11.5, fontWeight:500, cursor:'pointer' }}>
-                {meta.label} <ChevronDown size={12}/>
-              </button>
-              {statusOpen && (
-                <div style={{ position:'absolute', top:'100%', left:0, marginTop:4, background:'var(--bg-2)', border:'1px solid var(--border)', borderRadius:8, overflow:'hidden', zIndex:10, minWidth:140, boxShadow:'var(--shadow-raised)' }}>
+        {/* ═══ HEADER ═══ */}
+        <div className='flex flex-wrap items-center gap-4'>
+          <div className='relative shrink-0'>
+            <Avatar className='size-14'>
+              <AvatarFallback className='text-lg font-semibold text-foreground'>{initials(chatter.name)}</AvatarFallback>
+            </Avatar>
+            {commScore > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <svg width={64} height={64} className='absolute -top-1 -left-1'>
+                    <circle cx={32} cy={32} r={30} fill='none' className='stroke-border' strokeWidth={3} />
+                    <circle cx={32} cy={32} r={30} fill='none' className={commRing} strokeWidth={3} strokeDasharray={`${(commScore/10)*188} 188`} strokeLinecap='round' transform='rotate(-90 32 32)' />
+                  </svg>
+                </TooltipTrigger>
+                <TooltipContent>Communication score {commScore.toFixed(1)} / 10</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          <div className='min-w-0 flex-1'>
+            <div className='flex flex-wrap items-center gap-2'>
+              <h2 className='text-2xl font-bold tracking-tight'>{chatter.name}</h2>
+              <DropdownMenu open={statusOpen} onOpenChange={setStatusOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button variant='outline' size='sm' className='h-7 gap-1.5 rounded-full px-2.5 text-xs'>
+                    <span className='size-2 rounded-full' style={{ background: STATUS_DOT[chatter.status] || STATUS_DOT.new }} />
+                    {meta.label}<ChevronDown className='size-3 opacity-60' />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='start' className='min-w-40'>
                   {Object.entries(STATUS_META).map(([k,v]) => (
-                    <button key={k} onClick={()=>changeStatus(k)} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', width:'100%', border:'none', background:chatter.status===k?'var(--bg-3)':'transparent', color:'var(--fg-0)', fontSize:12, cursor:'pointer', textAlign:'left' }}
-                      onMouseEnter={e=>e.currentTarget.style.background='var(--bg-3)'} onMouseLeave={e=>e.currentTarget.style.background=chatter.status===k?'var(--bg-3)':'transparent'}>
-                      <StatusDot status={k}/> {v.label}
-                    </button>
+                    <DropdownMenuItem key={k} onClick={()=>changeStatus(k)} className={cn(chatter.status===k && 'bg-accent')}>
+                      <span className='size-2 rounded-full' style={{ background: STATUS_DOT[k] }} />{v.label}
+                      {chatter.status===k && <Check className='ms-auto' />}
+                    </DropdownMenuItem>
                   ))}
-                </div>
-              )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <div className='mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground'>
+              {creatorNames.map(n => <Badge key={n} variant='secondary' className='font-normal'>{n}</Badge>)}
+              <span className='inline-flex items-center gap-1'><Clock className='size-3.5' />{shiftName} {shiftHours}</span>
+              <span>Joined {new Date(chatter.created_at).toLocaleDateString()}</span>
             </div>
           </div>
-          <div style={{ display:'flex', gap:8, marginTop:8, flexWrap:'wrap' }}>
-            {creatorNames.map(n => <Chip key={n} tone="neutral" style={{ fontSize:11 }}>{n}</Chip>)}
-            <span style={{ fontSize:12, color:'var(--fg-3)', display:'flex', alignItems:'center', gap:4 }}><Clock size={11}/> {shiftName} {shiftHours}</span>
-            <span style={{ fontSize:12, color:'var(--fg-3)' }}>joined {new Date(chatter.created_at).toLocaleDateString()}</span>
-          </div>
-        </div>
-        <div style={{ display:'flex', gap:6 }}>
-          {canCreate && <button className="btn primary" onClick={()=>setShowTaskModal(true)}><Plus size={13}/> Custom task</button>}
+          {canCreate && <Button onClick={()=>setShowTaskModal(true)}><Plus />Custom task</Button>}
         </div>
       </div>
 
@@ -897,32 +954,31 @@ export default function ChatterProfile() {
       <AIQualityPanel ev={salesEval} onRun={runQuality} running={runningQuality} canRun={!!latestDay}/>
 
       {/* ═══ ALERTS ═══ */}
-      {alerts.length > 0 && <div style={{ marginBottom:12 }}><AlertsBanner alerts={alerts}/></div>}
+      {alerts.length > 0 && <AlertsBanner alerts={alerts}/>}
 
       {/* ═══ KPI STRIP ═══ */}
-      <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden', marginBottom:12 }}>
-        <div style={{ display:'flex', background:'var(--bg-2)' }}>
-          <KPI label="Sales (latest day)" value={`$${Math.round(latestDaySales).toLocaleString()}`} color={salesColor}
-            sub={vsAvgPct != null ? `${vsAvgPct>0?'+':''}${vsAvgPct}% vs 7d avg` : null}/>
-          <KPI label="7d Avg" value={`$${Math.round(avg7).toLocaleString()}`}/>
-          <KPI label="Golden Ratio" value={`${gr.toFixed(1)}%`} color={goldenColor(gr)}/>
-          <KPI label="Unlock Rate" value={`${ur.toFixed(0)}%`} color={unlockColor(ur)}/>
-          <KPI label="Mistakes (30d)" value={mistakes.filter(m=>new Date(m.created_at)>new Date(Date.now()-30*86400000)).length}
-            color={mistakes.filter(m=>new Date(m.created_at)>new Date(Date.now()-30*86400000)).length>3?'#f87171':'var(--fg-0)'}/>
-          <KPI label="Last review" value={reviews.length>0?`${Math.floor((Date.now()-new Date(reviews[0].created_at))/(86400000))}d ago`:'never'}/>
-        </div>
+      <div className='grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3 xl:grid-cols-6'>
+        <KPI label='Sales, latest day' value={`$${Math.round(latestDaySales).toLocaleString()}`} color={salesColor}
+          sub={vsAvgPct != null ? `${vsAvgPct>0?'+':''}${vsAvgPct}% vs 7-day average` : null}/>
+        <KPI label='7-day average' value={`$${Math.round(avg7).toLocaleString()}`}/>
+        <KPI label='Golden ratio' value={`${gr.toFixed(1)}%`} color={goldenColor(gr)}/>
+        <KPI label='Unlock rate' value={`${ur.toFixed(0)}%`} color={unlockColor(ur)}/>
+        <KPI label='Mistakes, last 30 days' value={mistakes30} color={mistakes30>3?'text-bad':''}/>
+        <KPI label='Last review' value={reviews.length>0?`${Math.floor((Date.now()-new Date(reviews[0].created_at))/(86400000))}d ago`:'Never'}/>
       </div>
 
       {/* ═══ AI SUMMARY + PER-PAGE ═══ */}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1.2fr', gap:12, marginBottom:12 }}>
+      <div className='grid items-start gap-4 lg:grid-cols-[1fr_1.2fr]'>
         <AIDailySummary summary={complianceEval?.evaluation?.overall} date={complianceEval?.report_date}/>
-        <PageContribution stats={latestPageStats} allStats={employeeStats} timeframe={pageTimeframe} setTimeframe={setPageTimeframe}/>
+        <div className='min-w-0'>
+          <PageContribution stats={latestPageStats} allStats={employeeStats} timeframe={pageTimeframe} setTimeframe={setPageTimeframe}/>
+        </div>
       </div>
 
       {/* ═══ BOTTOM ZONE ═══ */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.4fr 1fr', gap:12 }}>
+      <div className='grid items-start gap-4 lg:grid-cols-[1.4fr_1fr]'>
         {/* Left */}
-        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        <div className='flex min-w-0 flex-col gap-4'>
           {/* Performance trend — calendar-based, interactive */}
           <PerformanceTrend stats={employeeStats}/>
 
@@ -934,63 +990,57 @@ export default function ChatterProfile() {
         </div>
 
         {/* Right */}
-        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        <div className='flex min-w-0 flex-col gap-4'>
           <WeeklySchedule chatterId={id} workDays={chatter.work_days} assignments={assignments} onUpdate={load}/>
 
           {/* Daily reports — history of the daily (compliance) AI reports */}
-          <ReportsTimeline chatterId={id} type="compliance" title="Daily reports" emptyText="No daily reports yet."/>
+          <ReportsTimeline chatterId={id} type='compliance' title='Daily reports' emptyText='No daily reports yet.'/>
 
           {/* AI Analysis for Dialogues and Sales Quality — history of the strategy analyses */}
-          <ReportsTimeline chatterId={id} type="sales_quality" title="AI Analysis for Dialogues and Sales Quality" emptyText="No dialogue / sales-quality analyses yet — run one above."/>
+          <ReportsTimeline chatterId={id} type='sales_quality' title='Dialogue and sales-quality analyses' emptyText='No dialogue or sales-quality analyses yet. Run one above.'/>
 
           {/* Mistake log */}
-          <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-            <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-              <span style={{ fontWeight:600, fontSize:13 }}>Mistake Log</span>
-              <span style={{ fontSize:11, color:'var(--fg-3)' }}>{mistakes.length} entries</span>
-            </div>
-            <div style={{ padding:'4px 16px', maxHeight:300, overflow:'auto' }}>
-              {mistakes.length===0 ? <div style={{ padding:20, textAlign:'center', color:'var(--fg-3)', fontSize:12 }}>No mistakes logged yet.</div>
-                : mistakes.map(m=><MistakeEntry key={m.id} m={m}/>)}
-            </div>
-          </div>
+          <Panel title='Mistake log' meta={`${mistakes.length} entries`} bodyClassName='max-h-[300px] overflow-y-auto'>
+            {mistakes.length===0
+              ? <div className='p-4'><EmptyState>No mistakes logged yet.</EmptyState></div>
+              : <div className='divide-y px-4'>{mistakes.map(m=><MistakeEntry key={m.id} m={m}/>)}</div>}
+          </Panel>
 
           {/* Penalties & Bonuses */}
-          <div style={{ background:'var(--bg-1)', border:'1px solid var(--border)', borderRadius:'var(--r-panel)', overflow:'hidden' }}>
-            <div style={{ display:'flex', alignItems:'center', padding:'14px 16px', borderBottom:'1px solid var(--border)', gap:8 }}>
-              <span style={{ fontWeight:600, fontSize:13 }}>Penalties & Bonuses</span>
-              <div style={{ flex:1 }}/>
-            </div>
-            <div style={{ padding:'4px 16px' }}>
-              {penalties.length===0 ? (
-                <div style={{ padding:16, textAlign:'center', color:'var(--fg-3)', fontSize:12, border:'1px dashed var(--border)', borderRadius:'var(--r-tile)', margin:8 }}>No penalties or bonuses.</div>
-              ) : penalties.map(p => {
-                const isBonus = p.penalty_type === 'bonus';
-                return (
-                  <div key={p.id} style={{ padding:'10px 0', borderBottom:'1px solid var(--border-soft)', display:'flex', alignItems:'flex-start', gap:10 }}>
-                    <div style={{ marginTop:2, fontSize:14 }}>{isBonus ? '★' : '⚠'}</div>
-                    <div style={{ flex:1 }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                        <span style={{ fontSize:10, fontWeight:600, textTransform:'uppercase', padding:'2px 6px', borderRadius:4, background:isBonus?'rgba(74,222,128,0.1)':'rgba(248,113,113,0.1)', color:isBonus?'#4ade80':'#f87171' }}>
-                          {isBonus ? 'BONUS' : 'PENALTY'}
-                        </span>
-                        {p.amount && <span className="mono" style={{ fontSize:12, color:isBonus?'#4ade80':'#f87171' }}>{isBonus?'+':'-'}${p.amount}</span>}
-                        <span className="mono" style={{ fontSize:10, color:'var(--fg-3)' }}>{new Date(p.created_at).toLocaleDateString()}</span>
+          <Panel title='Penalties and bonuses'>
+            {penalties.length===0 ? (
+              <div className='p-4'><EmptyState>No penalties or bonuses.</EmptyState></div>
+            ) : (
+              <div className='divide-y px-4'>
+                {penalties.map(p => {
+                  const isBonus = p.penalty_type === 'bonus';
+                  const Icon = isBonus ? Star : AlertTriangle;
+                  return (
+                    <div key={p.id} className='flex items-start gap-3 py-3'>
+                      <Icon className={cn('mt-0.5 size-4 shrink-0', isBonus ? 'text-good' : 'text-bad')} />
+                      <div className='min-w-0 flex-1 space-y-1'>
+                        <div className='flex flex-wrap items-center gap-2'>
+                          <Badge variant='outline' className={isBonus ? 'border-good/30 bg-good/10 text-good' : 'border-bad/30 bg-bad/10 text-bad'}>
+                            {isBonus ? 'Bonus' : 'Penalty'}
+                          </Badge>
+                          {p.amount && <span className={cn('text-sm font-medium tabular-nums', isBonus ? 'text-good' : 'text-bad')}>{isBonus?'+':'-'}${p.amount}</span>}
+                          <span className='text-xs text-muted-foreground tabular-nums'>{new Date(p.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <p className='text-sm text-foreground/90'>{p.description}</p>
+                        {p.users?.name && <p className='text-xs text-muted-foreground'>by {p.users.name}</p>}
                       </div>
-                      <div style={{ fontSize:12, color:'var(--fg-1)', marginTop:4 }}>{p.description}</div>
-                      {p.users?.name && <div style={{ fontSize:10.5, color:'var(--fg-3)', marginTop:2 }}>by {p.users.name}</div>}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
         </div>
       </div>
 
       {/* Modals */}
       {showPenaltyModal && <PenaltyModal chatterId={id} onClose={()=>setShowPenaltyModal(false)} onSaved={load}/>}
-        {showTaskModal && <AddTaskModal chatterId={id} chatterName={chatter.name} onClose={()=>setShowTaskModal(false)} onSaved={load}/>}
+      {showTaskModal && <AddTaskModal chatterId={id} chatterName={chatter.name} onClose={()=>setShowTaskModal(false)} onSaved={load}/>}
     </div>
   );
 }
