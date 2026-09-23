@@ -28,7 +28,7 @@ export default function TeamPage() {
       setChatters(chattersRes.data);
       setShifts(shiftsRes.data);
     } catch (err) {
-      console.error('Team load error:', err);
+      console.error('Team load error:', err?.message || err?.toString?.());
     } finally {
       setLoading(false);
     }

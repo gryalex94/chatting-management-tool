@@ -1,23 +1,29 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
-const { computeMetricsForOrg } = require('../utils/computeMetrics');
 const { requireMinRole } = require('../middleware/auth');
 
 // GET /api/metrics/chatter/:id - Get metrics for a specific chatter
 router.get('/chatter/:id', async (req, res) => {
   try {
     const { days } = req.query;
-    const limit = parseInt(days) || 30;
+    // a DATE window, not a row limit: rows are per chatter+page+day
+    const n = Math.min(Math.max(parseInt(days) || 30, 1), 366);
+    const since = new Date(Date.now() - n * 86400000).toISOString().slice(0, 10);
 
-    const { data, error } = await supabaseAdmin
-      .from('chatter_daily_metrics')
-      .select('*')
-      .eq('chatter_id', req.params.id)
-      .eq('organisation_id', req.user.organisationId)
-      .order('report_date', { ascending: false })
-      .limit(limit);
-
-    if (error) return res.status(500).json({ error: error.message });
+    let data = [];
+    for (let from = 0; ; from += 1000) {
+      const { data: page, error } = await supabaseAdmin
+        .from('chatter_daily_metrics')
+        .select('*')
+        .eq('chatter_id', req.params.id)
+        .eq('organisation_id', req.user.organisationId)
+        .gte('report_date', since)
+        .order('report_date', { ascending: false }).order('id', { ascending: true })
+        .range(from, from + 999);
+      if (error) return res.status(500).json({ error: error.message });
+      data = data.concat(page || []);
+      if (!page || page.length < 1000) break;
+    }
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch metrics' });
@@ -139,18 +145,6 @@ router.get('/selling-patterns', async (req, res) => {
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch selling patterns' });
-  }
-});
-
-// POST /api/metrics/compute - Trigger Tier 1 computation
-router.post('/compute', requireMinRole('va'), async (req, res) => {
-  try {
-    const { date } = req.body; // optional: compute for specific date only
-    const result = await computeMetricsForOrg(req.user.organisationId, date || null);
-    res.json(result);
-  } catch (err) {
-    console.error('Compute metrics error:', err);
-    res.status(500).json({ error: 'Failed to compute metrics' });
   }
 });
 

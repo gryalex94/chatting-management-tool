@@ -52,7 +52,8 @@ async function computeChatterDailyMetrics(organisationId, tzOffsetHours = 1) {
         .eq('organisation_id', organisationId)
         .range(foff, foff + 999);
       if (error || !data?.length) break;
-      data.forEach(f => { fanTier[f.username] = f; });
+      // "Deleted user" merges every deleted account into one fake fan — never tier it
+      data.forEach(f => { if (String(f.username || '').trim().toLowerCase() !== 'deleted user') fanTier[f.username] = f; });
       if (data.length < 1000) break;
       foff += 1000;
     }
@@ -66,8 +67,10 @@ async function computeChatterDailyMetrics(organisationId, tzOffsetHours = 1) {
       .select('sender_name, creator_id, sent_datetime, sent_time, replay_time_seconds, price, purchased, fan_message_text, creator_message_text, sent_to_username, sent_to_nickname, organisation_id')
       .eq('organisation_id', organisationId)
       .order('sent_datetime', { ascending: true })
+      .order('id', { ascending: true })            // tiebreaker: stable pages
       .range(offset, offset + 999);
-    if (error) { console.error('[Metrics] fetch error', error.message); break; }
+    // a failed page must not produce metrics from partial data
+    if (error) throw new Error(`[Metrics] message fetch failed at row ${offset}: ${error.message}`);
     if (!data?.length) break;
     all.push(...data);
     if (data.length < 1000) break;
@@ -218,7 +221,7 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
     const firstSeen = f && f.first_seen ? String(f.first_seen).slice(0, 10) : null;
     let tier;
     if (cls === 'whale' || spend >= 1000) tier = 'whale';    // whale threshold $1000+
-    else if (cls === 'ps' || spend >= 100) tier = 'spender';
+    else if (cls === 'ps' || spend >= 80) tier = 'spender';   // PS threshold $80+
     else if (spend > 0) tier = 'low';
     else tier = 'new';                                   // no spend recorded
 

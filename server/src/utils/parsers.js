@@ -82,15 +82,17 @@ function parseTextDate(val) {
 }
 
 // Parse "Dragonknight (u177154572)" into { display: "Dragonknight", username: "u177154572" }
+// Usernames can hold '.' / '-' (e.g. "Rich (panther.8196053)"); input is capped so the regex stays cheap.
 function parseSentTo(val) {
   if (!val) return { display: null, username: null, nickname: null };
-  const str = String(val).trim();
-  const match = str.match(/^(.*?)\s*\((\w+)\)\s*$/);
-  if (match) {
+  const str = String(val).trim().slice(0, 300);
+  const match = str.match(/\(([^()]{1,64})\)\s*$/);
+  const username = match ? match[1].trim() : '';
+  if (username) {
     return {
       display: str,
-      username: match[2],
-      nickname: match[1].trim(),
+      username,
+      nickname: str.slice(0, match.index).trim(),
     };
   }
   return { display: str, username: null, nickname: str };

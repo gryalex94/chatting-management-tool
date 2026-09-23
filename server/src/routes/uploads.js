@@ -73,17 +73,17 @@ router.post('/message-dashboard', requireMinRole('manager'), upload.single('file
       // Auto-populate chatter metrics from messages (new per-creator engine)
       const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
       computeChatterDailyMetrics(req.user.organisationId).catch(err =>
-        console.error('Auto-populate metrics failed:', err)
+        console.error('Auto-populate metrics failed:', err?.message)
       );
     } catch (parseErr) {
-      console.error('Parse error:', parseErr);
+      console.error('Parse error:', parseErr?.message);
       await supabaseAdmin
         .from('data_imports')
         .update({ status: 'failed', error_message: parseErr.message })
         .eq('id', importRecord.id);
     }
   } catch (err) {
-    console.error('Upload error:', err);
+    console.error('Upload error:', err?.message);
     res.status(500).json({ error: 'Upload failed' });
   }
 
@@ -133,10 +133,10 @@ router.post('/employee-report', requireMinRole('manager'), upload.single('file')
       // Auto-compute metrics from messages (per-creator, fixed reply times, AFK)
       const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
       computeChatterDailyMetrics(req.user.organisationId).catch(err =>
-        console.error('Auto-compute metrics failed:', err)
+        console.error('Auto-compute metrics failed:', err?.message)
       );
     } catch (parseErr) {
-      console.error('Parse error:', parseErr);
+      console.error('Parse error:', parseErr?.message);
       await supabaseAdmin
         .from('data_imports')
         .update({ status: 'failed', error_message: parseErr.message })
@@ -188,7 +188,7 @@ router.post('/creator-stats', requireMinRole('manager'), upload.single('file'), 
         .update({ status: 'completed', row_count: result.rowCount })
         .eq('id', importRecord.id);
     } catch (parseErr) {
-      console.error('Parse error:', parseErr);
+      console.error('Parse error:', parseErr?.message);
       await supabaseAdmin
         .from('data_imports')
         .update({ status: 'failed', error_message: parseErr.message })
@@ -282,7 +282,7 @@ router.post('/subscriber-spend', requireMinRole('manager'), upload.single('file'
       }
       console.log(`[Upload] subscriber-spend done:`, result);
     } catch (parseErr) {
-      console.error('Spend import error:', parseErr);
+      console.error('Spend import error:', parseErr?.message);
       if (importRec.data) {
         await supabaseAdmin.from('data_imports')
           .update({ status: 'failed', error_message: parseErr.message })
@@ -290,7 +290,7 @@ router.post('/subscriber-spend', requireMinRole('manager'), upload.single('file'
       }
     }
   } catch (err) {
-    console.error('Spend upload error:', err);
+    console.error('Spend upload error:', err?.message);
     res.status(500).json({ error: 'Upload failed' });
   }
 });

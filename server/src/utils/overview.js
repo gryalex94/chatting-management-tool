@@ -23,6 +23,31 @@ function moneyConcern(m) {
   return Math.round((dailyDrop * 3 + weekDrop * 2 + ratioPenalty) * sizeWeight * 100) / 100;
 }
 
+// every open/taken task (paged past Supabase's 1000-row cap; id keeps pages stable)
+async function liveTasks(orgId) {
+  let rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin.from('review_tasks')
+      .select('id, chatter_id, creator_id, severity, status, title, priority, area')
+      .eq('organisation_id', orgId).in('status', ['open', 'taken'])
+      .order('id', { ascending: true }).range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows = rows.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { data: rows };
+}
+
+// status counts straight from the DB (head-only count queries, no rows fetched)
+async function countTasks(orgId) {
+  const statuses = ['open', 'taken', 'completed', 'dismissed'];
+  const res = await Promise.all(statuses.map(st => supabaseAdmin.from('review_tasks')
+    .select('id', { count: 'exact', head: true }).eq('organisation_id', orgId).eq('status', st)));
+  const out = {};
+  statuses.forEach((st, i) => { out[st] = res[i].count || 0; });
+  return out;
+}
+
 /**
  * Home overview: AI day-review + chatters ranked by concern (with metrics, and
  * deltas vs team average and vs their own previous day) + pages ranked by health.
@@ -34,7 +59,7 @@ async function buildOverview(orgId, reportDate) {
   const NET = 0.8;
   const result = await runDailyCheck(orgId, reportDate);   // page metrics + chatter list
 
-  const [{ data: allChatters }, { data: allCreators }, { data: metricRows }, { data: pageStats }, { data: tasks }, { data: dr }] = await Promise.all([
+  const [{ data: allChatters }, { data: allCreators }, { data: metricRows }, { data: pageStats }, { data: tasks }, { data: dr }, taskCounts] = await Promise.all([
     supabaseAdmin.from('chatters').select('id, name').eq('organisation_id', orgId),
     supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
     supabaseAdmin.from('chatter_daily_metrics')
@@ -42,10 +67,10 @@ async function buildOverview(orgId, reportDate) {
       .eq('organisation_id', orgId).in('report_date', days7),
     supabaseAdmin.from('creator_daily_stats').select('creator_id, report_date, total_earnings_gross')
       .eq('organisation_id', orgId).in('report_date', days7),
-    supabaseAdmin.from('review_tasks').select('chatter_id, creator_id, severity, status, title, priority, area')
-      .eq('organisation_id', orgId),
+    liveTasks(orgId),
     supabaseAdmin.from('daily_reviews').select('summary, day_review, created_at')
       .eq('organisation_id', orgId).eq('report_date', reportDate).maybeSingle(),
+    countTasks(orgId),
   ]);
 
   const chatterName = {}; (allChatters || []).forEach(c => { chatterName[c.id] = c.name; });
@@ -88,10 +113,7 @@ async function buildOverview(orgId, reportDate) {
 
   // concern + compact task lists (for the expand) from open/taken tasks
   const cConcern = {}, cTasks = {}, pConcern = {}, pTasks = {}, cTaskList = {}, pTaskList = {};
-  const taskCounts = { open: 0, taken: 0, completed: 0, dismissed: 0 };
   for (const t of (tasks || [])) {
-    if (taskCounts[t.status] != null) taskCounts[t.status]++;
-    if (t.status !== 'open' && t.status !== 'taken') continue;
     const item = { title: t.title, priority: t.priority, area: t.area, severity: t.severity };
     if (t.chatter_id) { cConcern[t.chatter_id] = (cConcern[t.chatter_id] || 0) + (W[t.severity] || 1); cTasks[t.chatter_id] = (cTasks[t.chatter_id] || 0) + 1; (cTaskList[t.chatter_id] ||= []).push(item); }
     if (t.creator_id) { pConcern[t.creator_id] = (pConcern[t.creator_id] || 0) + (W[t.severity] || 1); pTasks[t.creator_id] = (pTasks[t.creator_id] || 0) + 1; (pTaskList[t.creator_id] ||= []).push(item); }

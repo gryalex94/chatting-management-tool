@@ -17,7 +17,7 @@ const { supabaseAdmin } = require('../utils/supabase');
  * historical files can't pollute the team roster with ex-employees.
  */
 async function importSubscriberSpend(fileBuffer, fileName, orgId) {
-  const wb = XLSX.read(fileBuffer, { type: 'buffer' });
+  const wb = XLSX.read(fileBuffer, { type: 'buffer', sheetRows: 200000 });   // row cap: zip-bomb guard
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet);
   if (!rows.length) throw new Error('Spreadsheet is empty');
@@ -156,6 +156,7 @@ async function addDashboardSalesToLedger(orgId) {
       .eq('organisation_id', orgId)
       .eq('purchased', true)
       .gt('price', 1)
+      .order('id', { ascending: true })            // stable paging
       .range(offset, offset + 999);
     if (error || !data?.length) break;
     sales.push(...data);
@@ -163,6 +164,10 @@ async function addDashboardSalesToLedger(orgId) {
     offset += 1000;
   }
   if (!sales.length) return { newSales: 0, subscribersUpdated: 0 };
+
+  // page name per creator_id, so ledger rows carry page attribution
+  const { data: crs } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
+  const creatorName = {}; (crs || []).forEach(c => { creatorName[c.id] = c.name; });
 
   const affected = new Set();
   const records = sales.map(s => {
@@ -176,7 +181,7 @@ async function addDashboardSalesToLedger(orgId) {
       sale_date: s.sent_date,
       price: Math.round((parseFloat(s.price) || 0) * 100) / 100,
       message_hash: hash(caption),
-      creator_name: null,
+      creator_name: creatorName[s.creator_id] || null,
     };
   }).filter(r => r.username);
 

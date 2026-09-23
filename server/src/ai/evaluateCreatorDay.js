@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS } = require('./evalShared');
+const { MODELS, normaliseLabels } = require('./evalShared');
 const { supabaseAdmin } = require('../utils/supabase');
 
 // Page-level AI analysis. Fast & cheap: it reads NUMBERS, not raw messages —
@@ -121,7 +121,7 @@ ${prior.length ? fmtTrend(prior) : '(no prior days loaded)'}`;
       evaluation: {
         overall: result.overall || '',
         issues: Array.isArray(result.issues) ? result.issues.map(i => ({
-          area: i.area || null, severity: i.severity || null, detail: i.detail || '',
+          ...normaliseLabels(i.area, i.severity), detail: i.detail || '',
         })) : [],
       },
     };

@@ -4,6 +4,7 @@ import api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { Chip } from '../../components/shared';
 import DismissModal from '../../components/shared/DismissModal';
+import { isDemoMode } from '../../utils/privacy';
 import { TIER, reasonLabel, fmtSentAt, areaMeta } from '../../utils/taskMeta';
 import toast from 'react-hot-toast';
 
@@ -326,7 +327,7 @@ export default function TasksPage() {
   // Filter/tab settings persist across tab switches and navigation (localStorage).
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
   const [tab, setTab] = useState(saved.tab || 'open');
-  const [search, setSearch] = useState(saved.search || '');
+  const [search, setSearch] = useState(isDemoMode() ? '' : (saved.search || ''));
   const [groupBy, setGroupBy] = useState(saved.groupBy || 'none');
   const [selPages, setSelPages] = useState(saved.selPages || []);
   const [selChatters, setSelChatters] = useState(saved.selChatters || []);
@@ -351,7 +352,7 @@ export default function TasksPage() {
   useEffect(() => { load(); }, [load]);
   // Persist filter/tab settings so they survive tab switches and navigation.
   useEffect(() => {
-    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search, groupBy, selPages, selChatters, showFilters })); } catch { /* ignore */ }
+    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters, showFilters })); } catch { /* ignore */ }
   }, [tab, search, groupBy, selPages, selChatters, showFilters]);
 
   const act = async (task, action, reason_code, reason) => {

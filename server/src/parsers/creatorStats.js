@@ -14,7 +14,7 @@ const { supabaseAdmin } = require('../utils/supabase');
  *    overwrites cleanly instead of duplicating.
  */
 async function parseCreatorStats(fileBuffer, fileName, importId, orgId) {
-  const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer', sheetRows: 200000 });   // row cap: zip-bomb guard
 
   // Prefer the per-day "Detail" sheet; fall back to a single-period sheet.
   const detailSheet = workbook.SheetNames.find(s => /detail/i.test(s));

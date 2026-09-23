@@ -51,7 +51,13 @@ const limiter = (windowMin, max, what) => rateLimit({
   windowMs: windowMin * 60 * 1000, max, standardHeaders: true, legacyHeaders: false,
   message: { error: `Too many ${what} — please wait a few minutes and try again.` },
 });
-app.use('/api/auth', limiter(15, 30, 'login attempts'));
+// /auth/login only checks an already-verified session token and the app calls it
+// on every page load and token refresh, so it gets a roomy limit; the routes that
+// create accounts or accept invitations keep a tight one. Password guessing
+// itself happens against Supabase, which rate-limits sign-ins on its side.
+app.use('/api/auth/login', limiter(15, 600, 'requests'));
+app.use(['/api/auth/setup', '/api/auth/invite', '/api/auth/create-member', '/api/auth/accept-invite'],
+  limiter(15, 30, 'account requests'));
 app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/review-tasks/rebuild', '/api/ai'],
   limiter(15, 150, 'AI requests'));
 app.use('/api', limiter(15, 3000, 'requests'));
@@ -59,7 +65,14 @@ app.use('/api', limiter(15, 3000, 'requests'));
 // ---------------------
 // AUTH MIDDLEWARE
 // ---------------------
-const { authMiddleware } = require('./src/middleware/auth');
+const { authMiddleware, requireMinRole } = require('./src/middleware/auth');
+const { demoMask } = require('./src/utils/privacy');
+// Every data route: a verified session, then demo-mode masking when the browser
+// asks for it (X-Demo-Mode: 1), so masked sessions never receive raw fan data.
+const protect = [authMiddleware, demoMask];
+// Reviews, evaluations, metrics, uploads and chatter records are management data:
+// the chatter role must not read them (or dismiss findings about themselves).
+const staffOnly = [authMiddleware, requireMinRole('va'), demoMask];
 
 // ---------------------
 // ROUTES
@@ -76,37 +89,37 @@ app.use('/api/auth', authRoutes);
 
 // Protected routes (require login)
 const orgRoutes = require('./src/routes/organisations');
-app.use('/api/organisations', authMiddleware, orgRoutes);
+app.use('/api/organisations', protect, orgRoutes);
 
 const creatorRoutes = require('./src/routes/creators');
-app.use('/api/creators', authMiddleware, creatorRoutes);
+app.use('/api/creators', protect, creatorRoutes);
 
 const chatterRoutes = require('./src/routes/chatters');
-app.use('/api/chatters', authMiddleware, chatterRoutes);
+app.use('/api/chatters', staffOnly, chatterRoutes);
 
 const shiftRoutes = require('./src/routes/shifts');
-app.use('/api/shifts', authMiddleware, shiftRoutes);
+app.use('/api/shifts', protect, shiftRoutes);
 
 const taskRoutes = require('./src/routes/tasks');
-app.use('/api/tasks', authMiddleware, taskRoutes);
+app.use('/api/tasks', protect, taskRoutes);
 
 const cycleRoutes = require('./src/routes/cycles');
-app.use('/api/cycles', authMiddleware, cycleRoutes);
+app.use('/api/cycles', protect, cycleRoutes);
 
 const uploadRoutes = require('./src/routes/uploads');
-app.use('/api/uploads', authMiddleware, uploadRoutes);
+app.use('/api/uploads', staffOnly, uploadRoutes);
 
 const metricsRoutes = require('./src/routes/metrics');
-app.use('/api/metrics', authMiddleware, metricsRoutes);
+app.use('/api/metrics', staffOnly, metricsRoutes);
 
 const aiRoutes = require('./src/routes/ai');
-app.use('/api/ai', authMiddleware, aiRoutes);
+app.use('/api/ai', staffOnly, aiRoutes);
 
 const dailyCheckRoutes = require('./src/routes/dailyCheck');
-app.use('/api/daily-check', authMiddleware, dailyCheckRoutes);
+app.use('/api/daily-check', staffOnly, dailyCheckRoutes);
 
 const reviewTaskRoutes = require('./src/routes/reviewTasks');
-app.use('/api/review-tasks', authMiddleware, reviewTaskRoutes);
+app.use('/api/review-tasks', staffOnly, reviewTaskRoutes);
 
 // ---------------------
 // ERROR HANDLING

@@ -12,10 +12,11 @@ const FLAG_AREA = { chargeback: 'chargeback' };
 
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
 // capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
-// area vocabulary emitted by the compliance prompt in evaluateChatterDay.js.
-const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'chargeback']);
-// The subset that rides at the very top (serious ToS). `location` is protected too
-// but ranks a notch lower (verify-against-bio, not an active breach).
+// area vocabulary emitted by the compliance prompt in evaluateChatterDay.js, plus
+// 'needs_review' — an AI label we didn't recognise (see normaliseLabels in evalShared.js).
+const PROTECTED_AREAS = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform', 'chargeback', 'needs_review']);
+// The subset that rides at the very top (serious ToS). Location flagging was
+// removed on purpose — it is not protected and not emitted.
 const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offplatform']);
 
 // Chatter tenure tiers (from join date). New chatters get a full daily deep-check;
@@ -34,8 +35,9 @@ function tenureTier(createdAt, onDate) {
 function keepByTenure(c, tier) {
   if (c.source_type === 'flag' || c.source_type === 'creator') return true;   // apply to everyone
   if (PROTECTED_AREAS.has((c.area || '').toLowerCase())) return true;         // protected always
-  const min = TENURE_MIN_SEV[tier] || 'high';
-  return (SEV_RANK[c.severity] ?? 3) <= SEV_RANK[min];
+  const rank = SEV_RANK[c.severity];
+  if (rank === undefined) return true;                                        // unrecognised severity → keep, a human looks
+  return rank <= SEV_RANK[TENURE_MIN_SEV[tier] || 'high'];
 }
 
 // Deterministic default tier from severity + source + area (the priority rules,
@@ -45,6 +47,7 @@ function defaultPriority(sev, source, area) {
   const ph = PAGE_HEALTH.includes(a);
   if (sev === 'critical') return 1;
   if (a === 'chargeback') return 1;                            // money left the business — always look it up
+  if (a === 'needs_review') return 2;                          // AI used an unknown label — a human checks it
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
   if (a === 'custom') return sev === 'high' ? 2 : 3;          // paid custom undelivered — money owed / chargeback risk
   if (a === 'abandon') return sev === 'high' ? 2 : 3;         // chatter left a warm conversation early
@@ -120,7 +123,7 @@ function collapseCrossChatter(candidates) {
  * Build/refresh the task queue for a day from the stored AI reports + engine flags.
  * Idempotent and cross-day aware:
  *  - same issue recurring  -> carry the existing task forward (days_open++, carried_over)
- *  - dismissed             -> stays dismissed, UNLESS it escalates to critical
+ *  - dismissed             -> stays dismissed, UNLESS a protected-area item escalates to critical
  *  - completed but back    -> regression: reopen, bumped
  */
 async function buildTasksForDate(orgId, reportDate) {
@@ -246,8 +249,9 @@ async function buildTasksForDate(orgId, reportDate) {
       continue;
     }
     if (ex.status === 'dismissed' || ex.status === 'archived') {
-      // stays dismissed/archived unless it escalates to critical
-      if (c.severity === 'critical' && ex.severity !== 'critical') {
+      // stays dismissed/archived unless a PROTECTED item escalates to critical — the
+      // AI calling an ordinary recurrence "critical" must not undo a manager's dismiss
+      if (c.severity === 'critical' && ex.severity !== 'critical' && PROTECTED_AREAS.has((c.area || '').toLowerCase())) {
         await supabaseAdmin.from('review_tasks').update({
           status: 'open', severity: 'critical', detail: c.detail, title: c.title, context: c.context,
           last_seen_date: reportDate, regressed: false, priority: 1, updated_at: now,
@@ -344,24 +348,31 @@ async function buildSpenderDevelopmentTasks(orgId, reportDate, opts = {}) {
     const batch = users.slice(i, i + 200);
     for (let from = 0; ; from += 1000) {
       const { data: sales } = await supabaseAdmin.from('subscriber_sales')
-        .select('username, creator_name, sale_date').in('username', batch)
-        .order('sale_date', { ascending: false }).range(from, from + 999);
+        .select('username, creator_name, sale_date').eq('organisation_id', orgId).in('username', batch)
+        .order('sale_date', { ascending: false }).order('id', { ascending: true }).range(from, from + 999);
       if (!sales || !sales.length) break;
       for (const r of sales) if (!pageOf[r.username] && r.creator_name) pageOf[r.username] = r.creator_name;
       if (sales.length < 1000) break;
     }
   }
   // Fallback for anyone still unresolved: the page of their most recent MESSAGE.
+  // Paged (the 1000-row cap would silently miss fans) until every fan in the batch
+  // is resolved or the rows run out.
   const stillMissing = users.filter(u => !pageOf[u]);
   for (let i = 0; i < stillMissing.length; i += 200) {
-    const { data: mm } = await supabaseAdmin.from('messages')
-      .select('sent_to_username, creator_id, sent_datetime').eq('organisation_id', orgId)
-      .in('sent_to_username', stillMissing.slice(i, i + 200))
-      .order('sent_datetime', { ascending: false }).limit(2000);
-    for (const r of (mm || [])) {
-      if (!pageOf[r.sent_to_username] && r.creator_id && creatorNameById[r.creator_id]) {
-        pageOf[r.sent_to_username] = creatorNameById[r.creator_id];
+    const batch = stillMissing.slice(i, i + 200);
+    for (let from = 0; ; from += 1000) {
+      const { data: mm } = await supabaseAdmin.from('messages')
+        .select('sent_to_username, creator_id, sent_datetime').eq('organisation_id', orgId)
+        .in('sent_to_username', batch)
+        .order('sent_datetime', { ascending: false }).order('id', { ascending: true }).range(from, from + 999);
+      if (!mm || !mm.length) break;
+      for (const r of mm) {
+        if (!pageOf[r.sent_to_username] && r.creator_id && creatorNameById[r.creator_id]) {
+          pageOf[r.sent_to_username] = creatorNameById[r.creator_id];
+        }
       }
+      if (mm.length < 1000 || batch.every(u => pageOf[u])) break;
     }
   }
 
@@ -452,11 +463,12 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   if (!Array.isArray(issues) || !issues.length) return { created: 0, updated: 0 };
   const src = SOURCE[evalType] || 'sales';
   const [{ data: ch }, { data: creators }, ignoreSet] = await Promise.all([
-    supabaseAdmin.from('chatters').select('name').eq('id', chatterId).maybeSingle(),
+    supabaseAdmin.from('chatters').select('name').eq('id', chatterId).eq('organisation_id', orgId).maybeSingle(),
     supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
     loadIgnoreSet(orgId),
   ]);
-  const chatterName = ch?.name || null;
+  if (!ch) return { created: 0, updated: 0 };                  // not this organisation's chatter
+  const chatterName = ch.name || null;
   if (ignoreSet.has(_norm(chatterName))) return { created: 0, updated: 0 };
   const creatorNameById = {}; const creatorIdByName = {};
   (creators || []).forEach(c => { creatorNameById[c.id] = c.name; creatorIdByName[_norm(c.name)] = c.id; });
@@ -494,4 +506,4 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   return { created, updated };
 }
 
-module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks, buildTasksForChatterEval };
+module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks, buildTasksForChatterEval, PROTECTED_AREAS, keepByTenure, defaultPriority };

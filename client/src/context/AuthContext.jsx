@@ -84,6 +84,13 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     await cleanSignOut();
+    // Saved filters and per-task checklists can hold fan usernames — don't leave
+    // them behind on a shared computer. Theme and time offset are harmless.
+    try {
+      Object.keys(localStorage)
+        .filter(k => k === 'tasksFilters' || k.startsWith('replyDone:') || k.startsWith('afkDone:'))
+        .forEach(k => localStorage.removeItem(k));
+    } catch { /* storage blocked */ }
   }
 
   return (

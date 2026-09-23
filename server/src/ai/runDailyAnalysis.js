@@ -36,8 +36,10 @@ async function runDailyAnalysis(chatterId, creatorId, reportDate, orgId) {
       .gte('sent_datetime', shiftedStart)
       .lt('sent_datetime', shiftedEnd)
       .order('sent_datetime', { ascending: true })
+      .order('id', { ascending: true })            // tiebreaker: stable pages
       .range(offset, offset + 999);
-    if (error || !data || data.length === 0) break;
+    if (error) throw new Error(`[AI] message fetch failed at row ${offset}: ${error.message}`);   // never analyse a partial day
+    if (!data || data.length === 0) break;
     allMessages.push(...data);
     if (data.length < 1000) break;
     offset += 1000;

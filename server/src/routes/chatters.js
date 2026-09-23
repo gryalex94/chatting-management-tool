@@ -118,12 +118,14 @@ router.get('/:id', async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(100);
 
+    // last 7 DAYS (rows are per chatter+page+day, so a row limit would cut days short)
+    const since7 = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const { data: latestMetrics } = await supabaseAdmin
       .from('chatter_daily_metrics')
       .select('*')
       .eq('chatter_id', chatterId)
-      .order('report_date', { ascending: false })
-      .limit(7);
+      .gte('report_date', since7)
+      .order('report_date', { ascending: false });
 
     const mistakeCounts = [];
 

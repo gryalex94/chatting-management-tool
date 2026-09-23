@@ -128,7 +128,7 @@ async function analyzeComprehensive(conversations, metadata) {
   console.log(`[AI] Timezone offset for ${metadata.report_date}: UTC+${tzOffset}`);
 
   const fanSpending = metadata.fan_spending || {};
-  const spenderCount = Object.values(fanSpending).filter(f => f.classification === 'whale' || f.classification === 'spender').length;
+  const spenderCount = Object.values(fanSpending).filter(f => f.classification === 'whale' || f.classification === 'ps' || f.classification === 'spender').length;
   console.log(`[AI] Fan spending: ${Object.keys(fanSpending).length} matched, ${spenderCount} whales/spenders`);
 
   const afkSection = metadata.afk_periods?.length
@@ -174,7 +174,7 @@ function formatConversations(conversations, tzOffset, fanSpending) {
       const total = parseFloat(spend.total_spend) || 0;
       if (spend.classification === 'whale' || total >= 1000) {
         tag = `🐋 WHALE $${Math.round(total).toLocaleString()}`;
-      } else if (spend.classification === 'spender' || total >= 100) {
+      } else if (spend.classification === 'ps' || spend.classification === 'spender' || total >= 80) {   // stored value is 'ps' (PS = $80+)
         tag = `💰 SPENDER $${Math.round(total)}`;
       } else {
         tag = `💵 LOW $${Math.round(total)}`;

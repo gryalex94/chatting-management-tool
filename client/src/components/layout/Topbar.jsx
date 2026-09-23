@@ -1,11 +1,11 @@
 import { useAuth } from '../../context/AuthContext';
 import Chip from '../shared/Chip';
-import { Search, Bell, Sun, Moon, Eye, EyeOff } from 'lucide-react';
+import { Search, Bell, Sun, Moon, Eye, EyeOff, LogOut } from 'lucide-react';
 import { isDemoMode, setDemoMode } from '../../utils/privacy';
 import { useTheme } from '../../context/ThemeContext';
 
 export default function Topbar({ subtitle = 'Dashboard', right }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const { theme, toggle } = useTheme();
   const orgName = user?.organisation?.name || 'Organisation';
   const demo = isDemoMode();
@@ -40,6 +40,10 @@ export default function Topbar({ subtitle = 'Dashboard', right }) {
           title={demo ? 'Turn off demo mode (show real fan data)' : 'Turn on demo mode before screen-sharing'}>
           {demo ? <EyeOff size={15} /> : <Eye size={15} />}
           {demo ? 'Exit demo' : 'Demo mode'}
+        </button>
+        <button onClick={signOut} className="btn ghost" title="Sign out"
+          style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <LogOut size={15} />
         </button>
         <button onClick={toggle} className="btn ghost" style={{ width: 28, height: 28, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}>

@@ -120,12 +120,13 @@ async function computeMetricsForOrg(organisationId, targetDate = null) {
       .select('sender_name, creator_id, sent_date, sent_datetime, replay_time_seconds, price, purchased, creator_message_text, sent_to_username, organisation_id')
       .eq('organisation_id', organisationId)
       .order('sent_datetime', { ascending: true })
+      .order('id', { ascending: true })            // tiebreaker: stable pages
       .range(offset, offset + PAGE - 1);
 
     if (targetDate) query = query.eq('sent_date', targetDate);
 
     const { data, error } = await query;
-    if (error) { console.error('[Metrics] Fetch error:', error); break; }
+    if (error) throw new Error(`[Metrics] message fetch failed at row ${offset}: ${error.message}`);   // no partial metrics
     if (!data || data.length === 0) break;
     allMessages.push(...data);
     if (data.length < PAGE) break;

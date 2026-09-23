@@ -765,7 +765,7 @@ export default function ChatterProfile() {
       setEmployeeStats(statsRes.data || []);
       setTasks(tasksRes.data?.tasks || []);
       setEvals(evalsRes.data?.evaluations || []);
-    } catch (err) { console.error(err); toast.error('Failed to load profile'); }
+    } catch (err) { console.error(err?.message || err?.toString?.()); toast.error('Failed to load profile'); }
     finally { setLoading(false); }
   }, [id]);
 

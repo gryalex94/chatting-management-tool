@@ -1,6 +1,31 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 
+// Which roles each role may give out, by invite or direct creation. Nobody can
+// grant `owner`, and only the owner can create admins — so an admin can never
+// mint an account more powerful than their own.
+const ASSIGNABLE = {
+  owner: ['admin', 'head_manager', 'manager', 'chatter', 'va'],
+  admin: ['head_manager', 'manager', 'chatter', 'va'],
+  head_manager: ['chatter', 'va'],
+};
+
+// These routes sit outside authMiddleware, so they verify the caller themselves —
+// including that the account hasn't been deactivated.
+async function actingUser(req, res) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'No token' }); return null; }
+  const { data: { user: authUser } } = await supabaseAdmin.auth.getUser(authHeader.split(' ')[1]);
+  if (!authUser) { res.status(401).json({ error: 'Invalid token' }); return null; }
+  const { data: me } = await supabaseAdmin.from('users').select('*').eq('auth_id', authUser.id).maybeSingle();
+  if (!me) { res.status(403).json({ error: 'User not found' }); return null; }
+  if (me.is_active === false) { res.status(403).json({ error: 'This account has been deactivated.' }); return null; }
+  return me;
+}
+
+// Supabase's own wording reveals whether an email is already registered anywhere.
+const ACCOUNT_ERROR = 'Could not create an account for this email address.';
+
 // POST /api/auth/setup - Initial setup: create org + owner account
 // This is called once to bootstrap the system
 router.post('/setup', async (req, res) => {
@@ -120,34 +145,15 @@ router.post('/login', async (req, res) => {
 // POST /api/auth/invite - Send invitation (admin/head_manager only)
 router.post('/invite', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'No token' });
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user: authUser } } = await supabaseAdmin.auth.getUser(token);
-    if (!authUser) return res.status(401).json({ error: 'Invalid token' });
-
-    const { data: inviter } = await supabaseAdmin
-      .from('users')
-      .select('*')
-      .eq('auth_id', authUser.id)
-      .single();
-
-    if (!inviter) return res.status(403).json({ error: 'User not found' });
+    const inviter = await actingUser(req, res);
+    if (!inviter) return;
 
     const { email, role } = req.body;
     if (!email || !role) {
       return res.status(400).json({ error: 'Email and role are required' });
     }
 
-    // Check permissions: who can invite whom
-    const canInvite = {
-      owner: ['admin', 'head_manager', 'manager', 'chatter', 'va'],
-      admin: ['admin', 'head_manager', 'manager', 'chatter', 'va'],
-      head_manager: ['chatter', 'va'],
-    };
-
-    const allowedRoles = canInvite[inviter.role] || [];
+    const allowedRoles = ASSIGNABLE[inviter.role] || [];
     if (!allowedRoles.includes(role)) {
       return res.status(403).json({ error: `Your role (${inviter.role}) cannot invite ${role}` });
     }
@@ -222,7 +228,8 @@ router.post('/accept-invite', async (req, res) => {
     });
 
     if (authError) {
-      return res.status(400).json({ error: authError.message });
+      console.error('Accept invite auth error:', authError.message);
+      return res.status(400).json({ error: ACCOUNT_ERROR });
     }
 
     // Create user profile
@@ -240,6 +247,7 @@ router.post('/accept-invite', async (req, res) => {
       .single();
 
     if (userError) {
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch(() => {});   // don't leave an orphan login
       return res.status(500).json({ error: 'Failed to create user: ' + userError.message });
     }
 
@@ -262,32 +270,18 @@ router.post('/accept-invite', async (req, res) => {
 // POST /api/auth/create-member - Directly create a team member (admin+)
 router.post('/create-member', async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'No token' });
-
-    const token = authHeader.split(' ')[1];
-    const { data: { user: authUser } } = await supabaseAdmin.auth.getUser(token);
-    if (!authUser) return res.status(401).json({ error: 'Invalid token' });
-
-    const { data: creator } = await supabaseAdmin
-      .from('users')
-      .select('*')
-      .eq('auth_id', authUser.id)
-      .single();
-
-    if (!creator) return res.status(403).json({ error: 'User not found' });
-
-    const canCreate = ['owner', 'admin', 'head_manager'].includes(creator.role);
-    if (!canCreate) return res.status(403).json({ error: 'Insufficient permissions' });
+    const creator = await actingUser(req, res);
+    if (!creator) return;
 
     const { email, password, name, role } = req.body;
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'Email, password, name, and role are required' });
     }
 
-    // Head managers can only create chatters/VAs
-    if (creator.role === 'head_manager' && !['chatter', 'va'].includes(role)) {
-      return res.status(403).json({ error: 'Head managers can only create chatters and VAs' });
+    // Check the role BEFORE creating the login, so a refused request leaves nothing behind.
+    const allowedRoles = ASSIGNABLE[creator.role] || [];
+    if (!allowedRoles.includes(role)) {
+      return res.status(403).json({ error: `Your role (${creator.role}) cannot create ${role} accounts` });
     }
 
     // Create Supabase auth user
@@ -297,7 +291,10 @@ router.post('/create-member', async (req, res) => {
       email_confirm: true,
     });
 
-    if (authError) return res.status(400).json({ error: authError.message });
+    if (authError) {
+      console.error('Create member auth error:', authError.message);
+      return res.status(400).json({ error: ACCOUNT_ERROR });
+    }
 
     // Create user profile
     const { data: user, error: userError } = await supabaseAdmin
@@ -313,7 +310,10 @@ router.post('/create-member', async (req, res) => {
       .select()
       .single();
 
-    if (userError) return res.status(500).json({ error: userError.message });
+    if (userError) {
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch(() => {});   // don't leave an orphan login
+      return res.status(500).json({ error: userError.message });
+    }
 
     res.status(201).json({
       message: 'Member created',

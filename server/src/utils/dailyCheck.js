@@ -200,13 +200,10 @@ async function runDailyCheck(orgId, reportDate) {
   for (const f of flags) f.score = scoreFlag(f);
   flags.sort((a, b) => b.score - a.score);
 
-  // ---- persist: wipe today's flags for this org, re-insert (idempotent) ----
-  await supabaseAdmin.from('anomaly_flags').delete().eq('organisation_id', orgId).eq('report_date', reportDate);
-  if (flags.length) {
-    const toInsert = flags.map(stripForDb);
-    const { error } = await supabaseAdmin.from('anomaly_flags').insert(toInsert);
-    if (error) console.error('[DailyCheck] flag insert error:', error.message);
-  }
+  // ---- persist: replace today's flags, KEEPING manager state (status / task /
+  // resolved) for flags that re-occur. Insert the new set first, then drop rows
+  // created before it — so two overlapping runs leave only the newest set. ----
+  await persistFlags(orgId, reportDate, flags);
 
   // ---- shape output: BY PAGE (creators tab) ----
   const pageList = Object.values(pages).map(p => {
@@ -317,7 +314,33 @@ function stripForDb(f) {
     report_date: f.report_date, flag_type: f.flag_type, severity: f.severity,
     evidence: f.evidence, details: f.details, status: f.status, score: f.score,
     organisation_id: f.organisation_id,
+    task_id: f.task_id ?? null, ai_analysis_id: f.ai_analysis_id ?? null,
+    resolved: f.resolved ?? false, resolved_by: f.resolved_by ?? null, resolved_at: f.resolved_at ?? null,
   };
+}
+const KEEP = ['status', 'task_id', 'ai_analysis_id', 'resolved', 'resolved_by', 'resolved_at'];
+const flagKey = f => `${f.flag_type}|${f.creator_id || ''}|${f.chatter_id || ''}`;
+async function persistFlags(orgId, reportDate, flags) {
+  const { data: prev, error: prevErr } = await supabaseAdmin.from('anomaly_flags')
+    .select('id, flag_type, creator_id, chatter_id, ' + KEEP.join(', '))
+    .eq('organisation_id', orgId).eq('report_date', reportDate);
+  if (prevErr) { console.error('[DailyCheck] flag load error:', prevErr.message); return; }   // never wipe state we couldn't read
+  const byKey = {};
+  for (const r of (prev || [])) (byKey[flagKey(r)] ||= []).push(r);
+  for (const f of flags) {
+    const old = byKey[flagKey(f)]?.shift();
+    if (old) KEEP.forEach(k => { if (old[k] != null) f[k] = old[k]; });
+  }
+  if (!flags.length) {
+    if (prev?.length) await supabaseAdmin.from('anomaly_flags').delete().in('id', prev.map(r => r.id));
+    return;
+  }
+  const { data: ins, error } = await supabaseAdmin.from('anomaly_flags').insert(flags.map(stripForDb)).select('id, created_at');
+  if (error) { console.error('[DailyCheck] flag insert error:', error.message); return; }   // keep the old set
+  const cutoff = ins.map(r => r.created_at).sort()[0];
+  const { error: delErr } = await supabaseAdmin.from('anomaly_flags').delete()
+    .eq('organisation_id', orgId).eq('report_date', reportDate).lt('created_at', cutoff);
+  if (delErr) console.error('[DailyCheck] old flag cleanup error:', delErr.message);
 }
 
 // ─── data access ────────────────────────────────────
@@ -329,12 +352,20 @@ async function loadConfig(orgId) {
 }
 async function pageStatsUpTo(orgId, date, windowDays) {
   const start = shiftDays(date, -(windowDays + 14));
-  const { data } = await supabaseAdmin
-    .from('creator_daily_stats').select('*')
-    .eq('organisation_id', orgId).gte('report_date', start).lte('report_date', date)
-    .order('report_date', { ascending: true });
+  // paged: one response caps at 1000 rows, which would drop the NEWEST days
+  const data = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error } = await supabaseAdmin
+      .from('creator_daily_stats').select('*')
+      .eq('organisation_id', orgId).gte('report_date', start).lte('report_date', date)
+      .order('report_date', { ascending: true }).order('id', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    data.push(...(page || []));
+    if (!page || page.length < 1000) break;
+  }
   const byCreator = {};
-  (data || []).forEach(r => { (byCreator[r.creator_id] ||= []).push(r); });
+  data.forEach(r => { (byCreator[r.creator_id] ||= []).push(r); });
   return byCreator;
 }
 async function chatterMetricsForDate(orgId, date) {

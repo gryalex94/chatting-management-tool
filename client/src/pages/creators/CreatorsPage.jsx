@@ -611,7 +611,7 @@ export default function CreatorsPage() {
       setCreators(cr.data);
       setChatters(ch.data);
       setShifts(sh.data);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error(err?.message || err?.toString?.()); }
     finally { setLoading(false); }
   }, []);
 

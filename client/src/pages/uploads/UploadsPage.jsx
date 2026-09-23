@@ -23,7 +23,7 @@ export default function UploadsPage() {
       const { data } = await api.get('/api/uploads/history');
       setImports(data);
     } catch (err) {
-      console.error('History load error:', err);
+      console.error('History load error:', err?.message || err?.toString?.());
     }
   }
 

@@ -28,3 +28,8 @@ graphify-out/
 DISMISSED_CALIBRATION.md
 ARCHIVED_AUDIT.md
 CREATOR_REPORT_DUMP.md
+
+# PC Guard: real bot token/chat id + runtime files must never be committed
+pc-guard/config.ini
+pc-guard/state.json
+pc-guard/guard.log

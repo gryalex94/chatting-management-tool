@@ -6,7 +6,7 @@ const { findOrCreateChatter, findOrCreateCreator } = require('../utils/autoMatch
  * Each row = one chatter's daily stats (may cover multiple creators)
  */
 async function parseEmployeeReport(fileBuffer, fileName, importId, orgId) {
-  const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer', sheetRows: 200000 });   // row cap: zip-bomb guard
 
   // Find the right sheet
   // Prefer detailed per-creator breakdown, fall back to aggregated

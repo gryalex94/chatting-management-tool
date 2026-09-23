@@ -262,6 +262,11 @@ router.post('/:id/timer', async (req, res) => {
 router.post('/:id/attachments', async (req, res) => {
   try {
     const { attachment_type, file_url, label, chatter_id } = req.body;
+    // Only plain https links — a stored javascript: or data: URL would become a
+    // clickable exploit the moment attachments are rendered as links.
+    if (file_url && !/^https:\/\/[^\s]+$/i.test(String(file_url))) {
+      return res.status(400).json({ error: 'Attachment links must start with https://' });
+    }
     if (!attachment_type || !file_url) {
       return res.status(400).json({ error: 'Type and file URL required' });
     }

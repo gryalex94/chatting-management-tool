@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { requireMinRole } = require('../middleware/auth');
+const { allowedModel } = require('../utils/modelPolicy');
 const { supabaseAdmin } = require('../utils/supabase');
 const { runDailyCheck } = require('../utils/dailyCheck');
 const { evaluateChatterDay } = require('../ai/evaluateChatterDay');
@@ -181,7 +182,9 @@ router.patch('/flag/:id', async (req, res) => {
  */
 router.post('/evaluate', requireMinRole('va'), async (req, res) => {
   try {
-    const { chatter_id, report_date, creator_id, model, prompt_version, eval_type, creator_name, metrics, flags } = req.body;
+    const { chatter_id, report_date, creator_id, prompt_version, eval_type, creator_name, metrics, flags } = req.body;
+    // The most expensive model is an admin decision; everyone else gets sonnet/haiku.
+    const model = allowedModel(req.body.model, req.user.role);
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });
     const orgId = req.user.organisationId;
 

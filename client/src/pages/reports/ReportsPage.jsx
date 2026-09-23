@@ -51,7 +51,7 @@ export default function ReportsPage() {
 
   async function loadHistory() {
     try { const{data}=await api.get('/api/uploads/history'); setImports(data); }
-    catch(e){console.error(e);}
+    catch(e){console.error(e?.message || e?.toString?.());}
   }
 
   const{getRootProps,getInputProps,isDragActive}=useDropzone({

@@ -2,6 +2,7 @@ const router = require('express').Router();
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
+const { allowedModel } = require('../utils/modelPolicy');
 const { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks } = require('../utils/taskGenerator');
 const { prioritiseTasks } = require('../ai/prioritiseTasks');
 
@@ -49,12 +50,21 @@ router.post('/custom', requireMinRole('head_manager'), async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
-    let q = supabaseAdmin.from('review_tasks').select('*').eq('organisation_id', orgId);
-    if (req.query.status) q = q.in('status', String(req.query.status).split(','));
-    if (req.query.chatter_id) q = q.eq('chatter_id', req.query.chatter_id);
-    const { data, error } = await q.order('priority', { ascending: true, nullsFirst: false }).order('severity', { ascending: true });
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ tasks: data || [] });
+    const build = () => {
+      let q = supabaseAdmin.from('review_tasks').select('*').eq('organisation_id', orgId);
+      if (req.query.status) q = q.in('status', String(req.query.status).split(','));
+      if (req.query.chatter_id) q = q.eq('chatter_id', req.query.chatter_id);
+      return q.order('priority', { ascending: true, nullsFirst: false }).order('severity', { ascending: true }).order('id', { ascending: true });
+    };
+    // Supabase caps a response at 1000 rows — page through (id breaks ties so pages are stable)
+    let tasks = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await build().range(from, from + 999);
+      if (error) return res.status(500).json({ error: error.message });
+      tasks = tasks.concat(data || []);
+      if (!data || data.length < 1000) break;
+    }
+    res.json({ tasks });
   } catch {
     res.status(500).json({ error: 'Failed to load tasks' });
   }
@@ -63,7 +73,8 @@ router.get('/', async (req, res) => {
 // POST /api/review-tasks/rebuild  { report_date }  — build from reports/flags, then rank
 router.post('/rebuild', requireMinRole('va'), async (req, res) => {
   try {
-    const { report_date, model } = req.body;
+    const { report_date } = req.body;
+    const model = allowedModel(req.body.model, req.user.role);   // opus is admin-only
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });
     const orgId = req.user.organisationId;
     const built = await buildTasksForDate(orgId, report_date);

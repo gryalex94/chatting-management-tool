@@ -29,6 +29,19 @@ if (-not (Test-Path $guardPy)) {
     exit 1
 }
 
+# config.ini holds the real bot token, so it is never kept in git — it's created
+# from the template on first install and must be filled in before installing.
+if (-not (Test-Path $configIni)) {
+    $example = Join-Path $scriptDir "config.example.ini"
+    if (Test-Path $example) {
+        Copy-Item $example $configIni
+        Write-Host "Created config.ini from config.example.ini. Fill in your bot token and chat ID, then run this installer again."
+    } else {
+        Write-Error "config.ini not found at $configIni"
+    }
+    exit 1
+}
+
 # --- Find pythonw.exe ---
 $pythonw = $null
 

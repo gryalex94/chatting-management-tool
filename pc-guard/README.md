@@ -41,7 +41,7 @@ Parental time-limit tool for Windows. You control your kid's PC time through Tel
 ### Step 4: Configure PC Guard (2 minutes)
 
 1. Copy the entire `pc-guard` folder to the son's PC (e.g. `C:\pc-guard`)
-2. Open `config.ini` in Notepad
+2. Copy `config.example.ini` to `config.ini` (the installer does this for you if it's missing), then open `config.ini` in Notepad
 3. Replace `PASTE_YOUR_BOT_TOKEN_HERE` with the token from Step 1
 4. Replace `PASTE_YOUR_CHAT_ID_HERE` with the number from Step 2
 5. Save and close
@@ -97,7 +97,8 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1
 | File | Purpose |
 |---|---|
 | `guard.py` | The main program |
-| `config.ini` | Your bot token & chat ID (edit this) |
+| `config.example.ini` | Template — copy to `config.ini` |
+| `config.ini` | Your bot token & chat ID (edit this — never committed to git) |
 | `install.ps1` | One-time installer (run as admin) |
 | `uninstall.ps1` | Removes everything |
 | `guard.log` | Activity log (created automatically) |

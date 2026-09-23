@@ -3,7 +3,8 @@ const Anthropic = require('@anthropic-ai/sdk');
 const client = new Anthropic();
 
 function parseJson(text) {
-  try { return JSON.parse(text.trim()); } catch {}
+  let firstErr = null;
+  try { return JSON.parse(text.trim()); } catch (e) { firstErr = e; }
 
   const fenced = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   try { return JSON.parse(fenced); } catch {}
@@ -27,7 +28,10 @@ function parseJson(text) {
   const salvaged = salvageJson(text);
   if (salvaged) { console.warn('[AI Agent] Salvaged a truncated JSON response.'); return salvaged; }
 
-  console.error('[AI Agent] Failed to parse JSON:', text.slice(0, 300));
+  // Never log the raw output — it can quote fan messages. Length + error position
+  // only (V8's parse messages embed a snippet of the text, so not the message).
+  const pos = String(firstErr?.message || '').match(/position (\d+)/);
+  console.error(`[AI Agent] Failed to parse JSON: ${firstErr?.name || 'Error'}${pos ? ` at position ${pos[1]}` : ''}, response length ${text.length}`);
   throw new Error('AI returned invalid JSON');
 }
 

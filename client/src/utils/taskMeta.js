@@ -23,6 +23,7 @@ export const AREA_META = {
   free_content: { label: 'Free content',   c: '#ef4444' },
   offplatform:  { label: 'Off-platform',   c: '#ef4444' },
   chargeback:   { label: 'Chargeback',     c: '#ef4444' },
+  needs_review: { label: 'Needs review',   c: '#ef4444' },
   // money owed / work ethic
   custom:       { label: 'Custom pending', c: '#f97316' },
   abandon:      { label: 'Left early',     c: '#f97316' },

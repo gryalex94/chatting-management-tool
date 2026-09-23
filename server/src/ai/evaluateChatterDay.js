@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -8,10 +8,12 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPage
 
 // Shared spotlight body. Calibrated from the manager's real dismiss decisions:
 // stop flagging persona/identity, ordinary discounts, copy-paste, wrong-names;
-// keep + tighten the genuine ToS classes; add location disclosure. The protected
-// classes (tos/age/meeting/free_content/offplatform/location) are never auto-cleared
-// downstream — see PROTECTED_AREAS in taskGenerator.js.
+// keep + tighten the genuine ToS classes. The protected classes
+// (tos/age/meeting/free_content/offplatform) are never auto-cleared downstream —
+// see PROTECTED_AREAS in taskGenerator.js.
 const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and identify the fan by the USERNAME shown in square brackets in their conversation header (e.g. "[u573778077, spent $480]" → fan is "u573778077") — many fans share the same display name, so the username is the only reliable identifier. If an issue involves more than one fan, include EVERY fan's username in the detail. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
+
+${UNTRUSTED_RULE}
 
 Each conversation header shows the fan's recorded spend (e.g. "[u123, spent $250]" or "no recorded spend") — use it to weigh how much a missed sale or issue matters.
 

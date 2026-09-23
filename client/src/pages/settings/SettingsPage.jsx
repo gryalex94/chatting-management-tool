@@ -58,7 +58,7 @@ const [emojiOpen, setEmojiOpen] = useState(false);
       setMembers(m.data); setCreators(cr.data); setChatters(ch.data); setShifts(sh.data); setTemplates(tp.data);
       const off = Number(cfg.data?.config?.infloww_offset_hours) || 0;
       setTzOffset(off); setInflowwOffset(off);
-    } catch(e){console.error(e);}
+    } catch(e){console.error(e?.message || e?.toString?.());}
     finally{setLoading(false);}
   },[]);
 

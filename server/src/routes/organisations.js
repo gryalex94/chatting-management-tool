@@ -66,7 +66,7 @@ router.get('/mine', async (req, res) => {
 });
 
 // GET /api/organisations/members - Get all members of the org
-router.get('/members', async (req, res) => {
+router.get('/members', requireMinRole('va'), async (req, res) => {
   try {
     const { data, error } = await supabaseAdmin
       .from('users')

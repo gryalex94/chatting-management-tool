@@ -3,8 +3,23 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { parseReplayTime, parseTextDate, parseSentTo, stripHtml, parseDollar } = require('../utils/parsers');
 const { buildLookupMaps } = require('../utils/autoMatch');
 
+// One message upload per organisation at a time (in-process): two interleaved
+// uploads could clear each other's freshly inserted rows.
+const uploadsInProgress = new Set();
+const shiftDay = (date, n) => { const d = new Date(date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
 async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, reportDate) {
-  const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
+  if (uploadsInProgress.has(orgId)) throw new Error('An upload for this organisation is already in progress — wait for it to finish, then try again.');
+  uploadsInProgress.add(orgId);
+  try {
+    return await parseMessageDashboardLocked(fileBuffer, fileName, importId, orgId, reportDate);
+  } finally {
+    uploadsInProgress.delete(orgId);
+  }
+}
+
+async function parseMessageDashboardLocked(fileBuffer, fileName, importId, orgId, reportDate) {
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer', sheetRows: 200000 });   // row cap: zip-bomb guard
   const sheetName = workbook.SheetNames[0];
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet);
@@ -44,13 +59,27 @@ async function parseMessageDashboard(fileBuffer, fileName, importId, orgId, repo
   if (reportDate && fileDates.length && !fileDates.includes(reportDate)) {
     throw new Error(`Date mismatch — you picked ${reportDate}, but this file's messages are dated ${fileDates.slice(0, 3).join(', ')}${fileDates.length > 3 ? '…' : ''}. Pick the matching date, or upload the file for ${reportDate}.`);
   }
+  // Every row must sit within a day of the picked date: one stray old row would
+  // otherwise stretch the clear-window below across months of history.
+  const dayLo = reportDate ? shiftDay(reportDate, -1) : null, dayHi = reportDate ? shiftDay(reportDate, 1) : null;
+  if (reportDate) {
+    const stray = fileDates.filter(d => d < dayLo || d > dayHi).sort();
+    if (stray.length) {
+      throw new Error(`File rejected — it contains messages dated ${stray.slice(0, 3).join(', ')}${stray.length > 3 ? '…' : ''}, outside ${dayLo} .. ${dayHi} (a day either side of ${reportDate}). Export just that day and upload again.`);
+    }
+  }
 
   const fileDatetimes = rows.map(r => {
     const d = parseTextDate(r['Sent date']); const t = r['Sent time'];
     return d && t ? `${d}T${t}` : null;
   }).filter(Boolean).sort();
   if (fileDatetimes.length) {
-    const winMin = fileDatetimes[0], winMax = fileDatetimes[fileDatetimes.length - 1];
+    let winMin = fileDatetimes[0], winMax = fileDatetimes[fileDatetimes.length - 1];
+    // clamp to the allowed day range, whatever the file says
+    if (reportDate) {
+      if (winMin < `${dayLo}T00:00:00`) winMin = `${dayLo}T00:00:00`;
+      if (winMax > `${dayHi}T23:59:59`) winMax = `${dayHi}T23:59:59`;
+    }
     const { error: delErr } = await supabaseAdmin
       .from('messages')
       .delete()
