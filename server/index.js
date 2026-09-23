@@ -138,7 +138,8 @@ app.use((err, req, res, next) => {
   // server failures never expose internal/database details to the browser.
   res.status(status).json({
     error: status < 500 ? (err.message || 'Bad request') : 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    // Internal details (stack traces) stay in the server log — never sent to the
+    // browser, whatever NODE_ENV the host happens to be set to.
   });
 });
 
