@@ -13,8 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { yesterday } from '@/utils/dates';
 
-const yesterday = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
 const Dash = ({ children = '—' }) => <span className='text-xs text-muted-foreground/60'>{children}</span>;

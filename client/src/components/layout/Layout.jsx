@@ -16,7 +16,7 @@ export default function Layout() {
         <AppSidebar />
         <SidebarInset className='@container/content'>
           <AppHeader />
-          <main className='flex-1 px-4 py-6 md:px-6 @7xl/content:mx-auto @7xl/content:w-full @7xl/content:max-w-7xl'>
+          <main className='w-full max-w-screen-2xl flex-1 px-4 py-6 md:px-6'>
             <Outlet />
           </main>
         </SidebarInset>

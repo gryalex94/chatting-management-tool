@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
+import { yesterday } from '@/utils/dates';
 
 const REPORTS = [
   { key:'message-dashboard', label:'Message dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare },
@@ -49,7 +50,7 @@ function ReportCard({ report, selected, uploaded, onSelect }) {
 export default function ReportsPage() {
   const [selected, setSelected] = useState(null);
   const [file, setFile] = useState(null);
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(yesterday());
   const [uploading, setUploading] = useState(false);
   const [imports, setImports] = useState([]);
   const [progress, setProgress] = useState(null);   // daily-tasks pipeline progress

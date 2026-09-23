@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { yesterday } from '@/utils/dates';
 
 const reportTypes = [
   { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: MessagesSquare },
@@ -16,7 +17,7 @@ const reportTypes = [
 export default function UploadsPage() {
   const [selectedType, setSelectedType] = useState(null);
   const [file, setFile] = useState(null);
-  const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reportDate, setReportDate] = useState(yesterday());
   const [uploading, setUploading] = useState(false);
   const [imports, setImports] = useState([]);
 

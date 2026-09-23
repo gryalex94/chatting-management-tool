@@ -10,7 +10,6 @@ import { isDemoMode } from '@/utils/privacy';
 import { TIER, reasonLabel, fmtSentAt, areaMeta } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import DismissModal from '@/components/shared/DismissModal';
-import { FacetedFilter } from '@/components/data-table/FacetedFilter';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -269,6 +268,30 @@ function KeywordHits({ hits, taskId }) {
         </ReviewRow>
       ))}
     </ReviewList>
+  );
+}
+
+// Always-visible one-click filter buttons (the manager's preference over a
+// dropdown): every page/chatter that still has tasks in this tab, with its count.
+function ToggleChips({ label, options, selected, onChange }) {
+  if (!options.length) return null;
+  const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
+  return (
+    <div className='flex flex-wrap items-center gap-1.5'>
+      <span className='w-full text-xs font-medium text-muted-foreground sm:w-16 sm:shrink-0'>{label}</span>
+      {options.map(o => {
+        const on = selected.includes(o.value);
+        return (
+          <button key={o.value} type='button' onClick={() => toggle(o.value)} aria-pressed={on}
+            className={cn('inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors',
+              on ? 'border-primary bg-primary text-primary-foreground' : 'bg-background text-foreground hover:bg-accent',
+              !on && o.count === 0 && 'opacity-50')}>
+            {o.label}
+            <span className={cn('font-mono tabular-nums', on ? 'text-primary-foreground/70' : 'text-muted-foreground')}>{o.count}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -577,13 +600,19 @@ export default function TasksPage() {
   // so a selected option never vanishes after you action its last task (that made
   // the whole list look empty with no way to tell why).
   const base = tasks.filter(t => cur.statuses.includes(t.status));
-  const optionsFor = (field, selected) => {
+  // Counts react to the OTHER filter, so combining is easy: pick a page and the
+  // chatter row shows only chatters who still have tasks on it. A name whose last
+  // task is done disappears (unless it's selected — then it stays, at 0, so it can
+  // be switched off).
+  const optionsFor = (field, selected, rows) => {
     const n = {};
-    base.forEach(t => { if (t[field]) n[t[field]] = (n[t[field]] || 0) + 1; });
+    rows.forEach(t => { if (t[field]) n[t[field]] = (n[t[field]] || 0) + 1; });
     return [...new Set([...Object.keys(n), ...selected])].sort().map(v => ({ value: v, label: v, count: n[v] || 0 }));
   };
-  const pageOpts = optionsFor('creator_name', selPages);
-  const chatterOpts = optionsFor('chatter_name', selChatters);
+  const pageOpts = optionsFor('creator_name', selPages,
+    selChatters.length ? base.filter(t => selChatters.includes(t.chatter_name)) : base);
+  const chatterOpts = optionsFor('chatter_name', selChatters,
+    selPages.length ? base.filter(t => selPages.includes(t.creator_name)) : base);
   const activeFilters = selPages.length + selChatters.length;
   const clearFilters = () => { setSelPages([]); setSelChatters([]); setSearch(''); };
 
@@ -631,8 +660,6 @@ export default function TasksPage() {
 
       <div className='flex flex-wrap items-center gap-2'>
         <Input value={search} onChange={e => setSearch(e.target.value)} placeholder='Search tasks…' className='h-8 w-full sm:w-56 lg:w-64' />
-        <FacetedFilter title='Page' options={pageOpts} selected={selPages} onChange={setSelPages} />
-        <FacetedFilter title='Chatter' options={chatterOpts} selected={selChatters} onChange={setSelChatters} />
         {(activeFilters > 0 || search) && (
           <Button variant='ghost' size='sm' className='h-8 px-2 lg:px-3' onClick={clearFilters}>Reset<X /></Button>
         )}
@@ -645,6 +672,13 @@ export default function TasksPage() {
           </div>
         )}
       </div>
+
+      {(pageOpts.length > 0 || chatterOpts.length > 0) && (
+        <div className='grid gap-2.5 rounded-lg border bg-card p-3'>
+          <ToggleChips label='Pages' options={pageOpts} selected={selPages} onChange={setSelPages} />
+          <ToggleChips label='Chatters' options={chatterOpts} selected={selChatters} onChange={setSelChatters} />
+        </div>
+      )}
 
       {tab === 'dismissed' && dismissBreakdown.length > 0 && (
         <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm'>

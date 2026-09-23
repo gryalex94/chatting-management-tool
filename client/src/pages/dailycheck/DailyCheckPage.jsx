@@ -18,12 +18,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { yesterday } from '@/utils/dates';
 
-const yesterday = () => {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().split('T')[0];
-};
 
 const WORKLOAD_TONE = { overloaded: 'warn', underperforming: 'bad', healthy: 'good', light: 'info' };
 const TIER_TONE = { new_sub: 'purple', whale: 'good', spender: 'info', low: 'neutral', new: 'neutral' };
