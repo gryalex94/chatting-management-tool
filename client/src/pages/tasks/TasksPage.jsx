@@ -392,6 +392,9 @@ function TaskRow({ task, onAction }) {
         )}
         <div className='flex items-center gap-1.5'>
           {task.status === 'open' && <Button size='sm' onClick={() => onAction(task, 'take')}>Take</Button>}
+          {task.status === 'open' && (
+            <Button size='sm' variant='outline' onClick={() => onAction(task, 'complete')}><CircleCheck />Complete</Button>
+          )}
           {task.status === 'taken' && <Button size='sm' onClick={() => onAction(task, 'complete')}>Complete</Button>}
           {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'dismiss')}>Dismiss</Button>}
           {!live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'reopen')}><RotateCcw />Reopen</Button>}
@@ -414,9 +417,6 @@ function TaskRow({ task, onAction }) {
                 <Button size='icon-sm' variant='ghost' aria-label='More actions'><MoreHorizontal /></Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='end'>
-                {task.status === 'open' && (
-                  <DropdownMenuItem onClick={() => onAction(task, 'complete')}><CircleCheck />Complete without taking</DropdownMenuItem>
-                )}
                 {task.status === 'taken' && (
                   <DropdownMenuItem onClick={() => onAction(task, 'reopen')}><RotateCcw />Release</DropdownMenuItem>
                 )}
