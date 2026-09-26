@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Archive, Bookmark, BookmarkCheck, ChevronRight, CircleCheck, CircleX, Clock, Copy,
-  Inbox, MoreHorizontal, Plus, RotateCcw, Star, X,
+  Inbox, Keyboard, MessageSquareText, MoreHorizontal, Plus, RefreshCw, RotateCcw, Star, TriangleAlert, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
@@ -10,6 +10,7 @@ import { isDemoMode } from '@/utils/privacy';
 import { TIER, reasonLabel, fmtSentAt, areaMeta } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import DismissModal from '@/components/shared/DismissModal';
+import DialogueSheet from './DialogueSheet';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -95,7 +96,7 @@ function useChecklist(storeKey) {
 
 /* ─── Small building blocks ─────────────────────────────────────────────── */
 
-function PriorityBadge({ priority }) {
+function PriorityBadge({ priority, reason }) {
   const t = TIER[priority] || TIER[7];
   return (
     <Tooltip>
@@ -104,10 +105,31 @@ function PriorityBadge({ priority }) {
           <span className='size-2 rounded-full' style={{ background: t.c }} />{t.label}
         </Badge>
       </TooltipTrigger>
-      <TooltipContent>{t.name}</TooltipContent>
+      <TooltipContent className='max-w-xs'>{t.name}{reason ? ` · ${reason}` : ''}</TooltipContent>
     </Tooltip>
   );
 }
+
+// Open the conversation with one fan in the side panel.
+function ChatButton({ onClick, label = 'Open the conversation' }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button type='button' size='icon-sm' variant='ghost' className='size-6' onClick={onClick} aria-label={label}>
+          <MessageSquareText className='size-3.5' />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// The server checks each AI quote against the stored messages (verifyIssues).
+// Safety findings it couldn't back up are kept, with the problem named here.
+const EVIDENCE_WARNING = {
+  quote_not_found: "The AI's quote isn't in this conversation. Read the chat before acting.",
+  fan_said_it: 'The quoted words are the fan\'s, not the chatter\'s. Check who actually did it.',
+};
 
 const SEVERITY_CLASS = {
   critical: 'border-bad/40 bg-bad/10 text-bad',
@@ -180,7 +202,7 @@ function ReviewRow({ done, onToggle, children }) {
 // Reply-time tasks carry a per-subscriber breakdown in context.subs. Each fan is
 // its own reviewable, checkable row: username (click-to-copy), tier, PAGE (a
 // chatter's subs span several pages), worst wait, when, and the message.
-function ReplyTimeSubs({ subs, workload, taskId }) {
+function ReplyTimeSubs({ subs, workload, taskId, onOpenChat }) {
   const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
     <ReviewList count={subs.length} defaultOpen={subs.length <= 4}
@@ -193,6 +215,7 @@ function ReplyTimeSubs({ subs, workload, taskId }) {
           <ReviewRow key={key} done={done.has(key)} onToggle={() => toggle(key)}>
             <div className='flex flex-wrap items-center gap-2'>
               <FanChip username={s.fan_username} nickname={s.fan_nickname} className={done.has(key) ? 'line-through' : ''} />
+              {s.fan_username && <ChatButton onClick={() => onOpenChat(s.fan_username)} />}
               <Badge variant='outline' className='capitalize' style={tint(tag.c)}>{tag.label}</Badge>
               {s.page && <Badge variant='secondary' className='font-normal'>{s.page}</Badge>}
               <span className='text-xs font-semibold text-bad'>{s.worst_reply_min}m wait</span>
@@ -252,7 +275,7 @@ function AfkIncidents({ incidents, taskId }) {
 
 // Safety-net flags (off-platform / under-18 keywords) carry context.hits — the exact
 // messages that matched, so the manager can open each one and judge it.
-function KeywordHits({ hits, taskId }) {
+function KeywordHits({ hits, taskId, onOpenChat }) {
   const [done, toggle] = useChecklist(`hitsDone:${taskId}`);
   return (
     <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label='Messages to check'
@@ -261,6 +284,7 @@ function KeywordHits({ hits, taskId }) {
         <ReviewRow key={i} done={done.has(String(i))} onToggle={() => toggle(String(i))}>
           <div className='flex flex-wrap items-center gap-2'>
             <FanChip username={h.fan_username} />
+            {h.fan_username && <ChatButton onClick={() => onOpenChat(h.fan_username)} />}
             <Badge variant='outline' className='border-bad/30 text-bad'>{h.matched}</Badge>
             {h.sent_at && <TimeStamp>{fmtSentAt(h.sent_at)}</TimeStamp>}
           </div>
@@ -303,34 +327,51 @@ const ACTIONED = {
   archived: { icon: Inbox, verb: 'Archived' },
 };
 
-function TaskRow({ task, onAction }) {
+function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, onSelect }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
   const live = task.status === 'open' || task.status === 'taken';
   const dismissed = task.status === 'dismissed';
   const actioned = ACTIONED[task.status];
-  // Every fan the task refers to, each with their own username + time.
+  // Every fan the task refers to, each with their own username + time (+ spend).
   const fans = (ctx.fans && ctx.fans.length) ? ctx.fans
-    : (task.fan_username ? [{ username: task.fan_username, sent_at: ctx.sent_at }] : []);
+    : (task.fan_username ? [{ username: task.fan_username, sent_at: ctx.sent_at, spend: ctx.spend ?? null }] : []);
   const where = [task.creator_name, task.chatter_name].filter(Boolean).join(' · ');
+  const takenBy = task.status === 'taken' && task.taken_by ? memberName(task.taken_by) : null;
+  const warning = EVIDENCE_WARNING[ctx.evidence];
+  const rowRef = useRef(null);
+  useEffect(() => { if (focused) rowRef.current?.scrollIntoView({ block: 'nearest' }); }, [focused]);
 
   return (
-    <div className={cn('flex flex-col gap-3 p-4 sm:flex-row sm:gap-6', isCustom && 'border-l-2 border-l-warn bg-warn/5')}>
+    <div ref={rowRef} data-task-id={task.id}
+      className={cn('flex flex-col gap-3 p-4 sm:flex-row sm:gap-6', isCustom && 'border-l-2 border-l-warn bg-warn/5', focused && 'bg-accent/60 ring-2 ring-inset ring-ring/40')}>
+      {live && (
+        <Checkbox checked={selected} onCheckedChange={() => onSelect(task)} className='mt-1 hidden sm:flex' aria-label='Select task' />
+      )}
       <div className='min-w-0 flex-1'>
         <div className='flex flex-wrap items-center gap-1.5'>
           {isCustom ? (
             <Badge className='gap-1 bg-warn text-white'>{ctx.important && <Star className='fill-current' />}Custom</Badge>
           ) : (
             <>
-              <PriorityBadge priority={task.priority} />
+              <PriorityBadge priority={task.priority} reason={task.priority_reason} />
               <SeverityBadge severity={task.severity} />
               <AreaBadge area={task.area} />
             </>
           )}
+          {!isCustom && task.regressed && live && (
+            <Tooltip>
+              <TooltipTrigger asChild><Badge variant='outline' className='border-bad/40 text-bad'>Came back</Badge></TooltipTrigger>
+              <TooltipContent>This was completed before and showed up again on a later day.</TooltipContent>
+            </Tooltip>
+          )}
           {!isCustom && task.days_open > 1 && (
             <Badge variant='outline' className='border-warn/40 text-warn'>{task.days_open} days open</Badge>
           )}
+          {takenBy && <Badge variant='secondary' className='font-normal'>Taken by {takenBy}</Badge>}
         </div>
+
+        {isCustom && task.title && <p className='mt-2 text-sm font-semibold'>{task.title}</p>}
 
         {(where || fans.length > 0 || (isCustom && ctx.assigned_to_name)) && (
           <div className='mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm'>
@@ -348,28 +389,35 @@ function TaskRow({ task, onAction }) {
                   </Tooltip>
                 )}
                 {f.sent_at && <TimeStamp>{fmtSentAt(f.sent_at)}</TimeStamp>}
+                {f.username && <ChatButton onClick={() => onOpenChat(task, fans.length > 1 ? f.username : null)} />}
               </span>
             ))}
           </div>
         )}
 
-        <p className='mt-2 text-sm leading-relaxed text-foreground/90'>{task.detail}</p>
+        {task.detail && <p className='mt-2 text-sm leading-relaxed text-foreground/90'>{task.detail}</p>}
 
-        {ctx.message && !dismissed && (
+        {warning && (
+          <p className='mt-2 flex items-start gap-1.5 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-xs text-warn'>
+            <TriangleAlert className='mt-px size-3.5 shrink-0' />{warning}
+          </p>
+        )}
+
+        {ctx.message && (
           <button type='button' onClick={() => copy(ctx.message)} title='Click to copy'
             className='mt-2 block w-full rounded-md border-l-2 bg-muted/50 px-3 py-2 text-start text-sm italic leading-relaxed text-muted-foreground transition-colors hover:bg-muted'>
             “{ctx.message}”
           </button>
         )}
 
-        {Array.isArray(ctx.subs) && ctx.subs.length > 0 && !dismissed && (
-          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} />
+        {Array.isArray(ctx.subs) && ctx.subs.length > 0 && (
+          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} />
         )}
-        {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && !dismissed && (
+        {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && (
           <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
         )}
-        {Array.isArray(ctx.hits) && ctx.hits.length > 0 && !dismissed && (
-          <KeywordHits hits={ctx.hits} taskId={task.id} />
+        {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
+          <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} />
         )}
 
         {task.status === 'archived' && task.priority_reason && (
@@ -431,7 +479,7 @@ function TaskRow({ task, onAction }) {
 }
 
 // A bordered block of tasks, optionally with a heading (group / day).
-function TaskSection({ title, count, tasks, onAction }) {
+function TaskSection({ title, count, tasks, rowProps }) {
   return (
     <section className='overflow-hidden rounded-lg border bg-card'>
       {title && (
@@ -439,7 +487,7 @@ function TaskSection({ title, count, tasks, onAction }) {
           {title}<Badge variant='secondary' className='h-5 rounded-full px-1.5 font-mono text-xs'>{count}</Badge>
         </div>
       )}
-      <div className='divide-y'>{tasks.map(t => <TaskRow key={t.id} task={t} onAction={onAction} />)}</div>
+      <div className='divide-y'>{tasks.map(t => <TaskRow key={t.id} task={t} {...rowProps(t)} />)}</div>
     </section>
   );
 }
@@ -538,11 +586,42 @@ function CustomTaskDialog({ meta, onClose, onCreate }) {
 
 /* ─── Page ──────────────────────────────────────────────────────────────── */
 
+const LIVE = ['open', 'taken'];
+const HISTORY_TABS = new Set(['completed', 'dismissed', 'archived']);
+const HISTORY_PAGE = 200;
+const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+const byPriority = (a, b) => (a.priority || 7) - (b.priority || 7)
+  || (SEV_ORDER[a.severity] ?? 4) - (SEV_ORDER[b.severity] ?? 4)
+  || String(a.id).localeCompare(String(b.id));
+const NEXT_STATUS = { take: 'taken', complete: 'completed', dismiss: 'dismissed', archive: 'archived', reopen: 'open' };
+const UNDOABLE = { complete: 'Completed', dismiss: 'Dismissed', archive: 'Archived' };
+const SHORTCUTS = [
+  ['j / k', 'Next / previous task'], ['t', 'Take'], ['c', 'Complete'], ['d', 'Dismiss, then 1–6 for the reason'],
+  ['o', 'Open the conversation'], ['x', 'Select for a bulk action'], ['Esc', 'Clear the selection'],
+];
+
+// Apply an action to a task locally, the same way the server just did.
+function applyAction(t, action, extra, userId) {
+  if (action === 'coach') return { ...t, coach_flag: true };
+  if (action === 'uncoach') return { ...t, coach_flag: false, coached_at: null };
+  const status = action === 'undo' ? (extra.to || 'open') : NEXT_STATUS[action];
+  const done = status === 'completed' || status === 'dismissed' || status === 'archived';
+  const next = { ...t, status, completed_at: done ? new Date().toISOString() : null };
+  if (action === 'take') { next.taken_by = userId; next.taken_at = new Date().toISOString(); }
+  if (action === 'reopen') { next.taken_by = null; next.taken_at = null; }
+  if (action === 'dismiss') { next.dismiss_reason_code = extra.reason_code; next.dismiss_reason = extra.reason || null; }
+  if (action === 'reopen' || action === 'undo') { next.dismiss_reason_code = null; next.dismiss_reason = null; }
+  return next;
+}
+
 export default function TasksPage() {
   const { user } = useAuth();
   const canCreate = ['head_manager', 'admin', 'owner'].includes(user?.role);
   const [tasks, setTasks] = useState([]);
+  const [counts, setCounts] = useState({});
   const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState({});         // tab -> { loaded, loading, hasMore }
+  const [members, setMembers] = useState([]);
   // Filter/tab settings persist across tab switches and navigation (localStorage).
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
   const [tab, setTab] = useState(saved.tab || 'open');
@@ -550,51 +629,139 @@ export default function TasksPage() {
   const [groupBy, setGroupBy] = useState(saved.groupBy || 'none');
   const [selPages, setSelPages] = useState(saved.selPages || []);
   const [selChatters, setSelChatters] = useState(saved.selChatters || []);
-  const [dismiss, setDismiss] = useState(null);
+  const [dismiss, setDismiss] = useState(null);        // a task, or { bulk: [tasks] }
   const [showCustom, setShowCustom] = useState(false);
-  const [meta, setMeta] = useState({ creators: [], chatters: [], members: [] });
+  const [meta, setMeta] = useState(null);              // pages/chatters/members for the custom-task form
+  const [chat, setChat] = useState(null);              // { task, fan }
+  const [focusId, setFocusId] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
 
-  const load = useCallback(async () => {
+  const mergeTasks = (list) => setTasks(prev => {
+    const m = new Map(prev.map(t => [t.id, t]));
+    list.forEach(t => m.set(t.id, t));
+    return [...m.values()];
+  });
+  const loadCounts = useCallback(() => {
+    api.get('/api/review-tasks/counts').then(r => setCounts(r.data || {})).catch(() => { /* counts optional */ });
+  }, []);
+  // The live queue only: history tabs are fetched when opened, a page at a time.
+  const loadLive = useCallback(async () => {
     try {
-      const [tk, cr, ch, mem] = await Promise.all([
-        api.get('/api/review-tasks'),
-        api.get('/api/creators').catch(() => ({ data: [] })),
-        api.get('/api/chatters').catch(() => ({ data: [] })),
+      const [tk, mem] = await Promise.all([
+        api.get('/api/review-tasks?status=open,taken'),
         api.get('/api/organisations/members').catch(() => ({ data: [] })),
       ]);
-      setTasks(tk.data.tasks || []);
-      setMeta({ creators: cr.data || [], chatters: ch.data || [], members: mem.data || [] });
+      const live = tk.data.tasks || [];
+      const liveIds = new Set(live.map(t => t.id));
+      setTasks(prev => [...prev.filter(t => !LIVE.includes(t.status) && !liveIds.has(t.id)), ...live]);
+      setMembers(mem.data || []);
     } catch { /* ignore */ } finally { setLoading(false); }
+    loadCounts();
+  }, [loadCounts]);
+  const loadHistory = useCallback(async (key, offset = 0) => {
+    setHistory(h => ({ ...h, [key]: { ...h[key], loading: true } }));
+    try {
+      const { data } = await api.get(`/api/review-tasks?status=${key}&limit=${HISTORY_PAGE}&offset=${offset}`);
+      mergeTasks(data.tasks || []);
+      setHistory(h => ({ ...h, [key]: { loaded: true, loading: false, hasMore: !!data.has_more, next: offset + (data.tasks || []).length } }));
+    } catch {
+      setHistory(h => ({ ...h, [key]: { ...h[key], loading: false } }));
+    }
   }, []);
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadLive(); }, [loadLive]);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (HISTORY_TABS.has(tab) && !history[tab]?.loaded && !history[tab]?.loading) loadHistory(tab);
+  }, [tab, history, loadHistory]);
   // Persist filter/tab settings so they survive tab switches and navigation.
   useEffect(() => {
     try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters })); } catch { /* ignore */ }
   }, [tab, search, groupBy, selPages, selChatters]);
+  // The custom-task form's pickers load only when it opens.
+  useEffect(() => {
+    if (!showCustom || meta) return;
+    Promise.all([
+      api.get('/api/creators').catch(() => ({ data: [] })),
+      api.get('/api/chatters').catch(() => ({ data: [] })),
+    ]).then(([cr, ch]) => setMeta({ creators: cr.data || [], chatters: ch.data || [], members }));
+  }, [showCustom, meta, members]);
 
-  const act = async (task, action, reason_code, reason) => {
+  const refresh = () => {
+    setHistory({});
+    loadLive();
+    toast.success('Refreshed');
+  };
+  const memberName = useCallback((id) => members.find(m => m.id === id)?.name || 'someone', [members]);
+
+  // One action on one task. Complete / dismiss / archive offer Undo, which puts the
+  // task back exactly where it was (open, or still taken by the same person).
+  const act = async (task, action, extra = {}) => {
+    // When the focused task leaves this tab, focus moves on to the next one.
+    if (task.id === focusId && ['take', 'complete', 'dismiss', 'archive', 'reopen'].includes(action)) {
+      const i = orderedIds.indexOf(task.id);
+      setFocusId(orderedIds[i + 1] ?? orderedIds[i - 1] ?? null);
+    }
     try {
-      await api.patch(`/api/review-tasks/${task.id}`, { action, reason_code, reason });
-      setTasks(ts => ts.map(t => {
-        if (t.id !== task.id) return t;
-        if (action === 'coach') return { ...t, coach_flag: true };
-        if (action === 'uncoach') return { ...t, coach_flag: false, coached_at: null };
-        const next = action === 'take' ? 'taken' : action === 'complete' ? 'completed' : action === 'dismiss' ? 'dismissed' : action === 'archive' ? 'archived' : 'open';
-        const done = next === 'completed' || next === 'dismissed' || next === 'archived';
-        return { ...t, status: next, completed_at: done ? new Date().toISOString() : t.completed_at, dismiss_reason_code: reason_code || t.dismiss_reason_code, dismiss_reason: reason ?? t.dismiss_reason };
-      }));
-      toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : 'Updated');
-    } catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
+      await api.patch(`/api/review-tasks/${task.id}`, { action, ...extra });
+      setTasks(ts => ts.map(t => (t.id === task.id ? applyAction(t, action, extra, user?.id) : t)));
+      loadCounts();
+      if (UNDOABLE[action]) {
+        const to = task.status === 'taken' ? 'taken' : 'open';
+        toast(tt => (
+          <span className='flex items-center gap-3'>
+            {UNDOABLE[action]}
+            <Button size='sm' variant='outline' className='h-7' onClick={() => { toast.dismiss(tt.id); act(task, 'undo', { to }); }}>Undo</Button>
+          </span>
+        ), { duration: 6000 });
+      } else {
+        toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : action === 'undo' ? 'Undone' : 'Updated');
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Failed');
+      if (e?.response?.status === 409) loadLive();       // someone else took it: show the real state
+    }
   };
   const onAction = (task, action) => { if (action === 'dismiss') setDismiss(task); else act(task, action); };
+  const openChat = (task, fan = null) => setChat({ task, fan });
+
+  // Bulk: the same action on every selected task, then one Undo for all of them.
+  const bulk = async (action, extra = {}) => {
+    const list = tasks.filter(t => selected.has(t.id) && LIVE.includes(t.status));
+    if (!list.length) return;
+    const results = await Promise.allSettled(list.map(t => api.patch(`/api/review-tasks/${t.id}`, { action, ...extra })));
+    const ok = list.filter((_, i) => results[i].status === 'fulfilled');
+    const okIds = new Set(ok.map(t => t.id));
+    setTasks(ts => ts.map(t => (okIds.has(t.id) ? applyAction(t, action, extra, user?.id) : t)));
+    setSelected(new Set());
+    loadCounts();
+    const failed = list.length - ok.length;
+    toast(tt => (
+      <span className='flex items-center gap-3'>
+        {UNDOABLE[action]} {ok.length} task{ok.length === 1 ? '' : 's'}{failed ? ` (${failed} failed)` : ''}
+        <Button size='sm' variant='outline' className='h-7' onClick={async () => {
+          toast.dismiss(tt.id);
+          await Promise.allSettled(ok.map(t => api.patch(`/api/review-tasks/${t.id}`, { action: 'undo', to: t.status === 'taken' ? 'taken' : 'open' })));
+          const back = new Map(ok.map(t => [t.id, t.status === 'taken' ? 'taken' : 'open']));
+          setTasks(ts => ts.map(t => (back.has(t.id) ? applyAction(t, 'undo', { to: back.get(t.id) }) : t)));
+          loadCounts();
+        }}>Undo</Button>
+      </span>
+    ), { duration: 8000 });
+  };
+  const toggleSelect = (task) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(task.id)) next.delete(task.id); else next.add(task.id);
+    return next;
+  });
+
   const createCustom = async (payload) => {
-    try { await api.post('/api/review-tasks/custom', payload); toast.success('Custom task created'); setShowCustom(false); load(); }
+    try { await api.post('/api/review-tasks/custom', payload); toast.success('Custom task created'); setShowCustom(false); loadLive(); }
     catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
   };
 
-  const counts = Object.fromEntries(TABS.map(tb => [tb.key, tasks.filter(t => tb.statuses.includes(t.status)).length]));
   const cur = TABS.find(tb => tb.key === tab) || TABS[0];
+  const isHistory = HISTORY_TABS.has(tab);
 
   // Filter options come from this tab's tasks, UNION the currently-selected values
   // so a selected option never vanishes after you action its last task (that made
@@ -604,10 +771,10 @@ export default function TasksPage() {
   // chatter row shows only chatters who still have tasks on it. A name whose last
   // task is done disappears (unless it's selected — then it stays, at 0, so it can
   // be switched off).
-  const optionsFor = (field, selected, rows) => {
+  const optionsFor = (field, sel, rows) => {
     const n = {};
     rows.forEach(t => { if (t[field]) n[t[field]] = (n[t[field]] || 0) + 1; });
-    return [...new Set([...Object.keys(n), ...selected])].sort().map(v => ({ value: v, label: v, count: n[v] || 0 }));
+    return [...new Set([...Object.keys(n), ...sel])].sort().map(v => ({ value: v, label: v, count: n[v] || 0 }));
   };
   const pageOpts = optionsFor('creator_name', selPages,
     selChatters.length ? base.filter(t => selChatters.includes(t.chatter_name)) : base);
@@ -620,20 +787,71 @@ export default function TasksPage() {
   if (selPages.length) list = list.filter(t => selPages.includes(t.creator_name));
   if (selChatters.length) list = list.filter(t => selChatters.includes(t.chatter_name));
   if (search) {
-    const s = search.toLowerCase();
-    list = list.filter(t => [t.detail, t.chatter_name, t.creator_name, t.fan_username].some(v => (v || '').toLowerCase().includes(s)));
+    const q = search.toLowerCase();
+    list = list.filter(t => [t.title, t.detail, t.chatter_name, t.creator_name, t.fan_username, t.context?.message]
+      .some(v => (v || '').toLowerCase().includes(q)));
   }
-  list = list.sort((a, b) => (a.priority || 7) - (b.priority || 7));
+  list = list.slice().sort(byPriority);
 
-  const isHistory = tab === 'completed' || tab === 'dismissed' || tab === 'archived';
   const customTasks = list.filter(t => t.source_type === 'custom')
     .sort((a, b) => (b.context?.important ? 1 : 0) - (a.context?.important ? 1 : 0) || String(b.created_at).localeCompare(String(a.created_at)));
   const aiTasks = list.filter(t => t.source_type !== 'custom');
+  const sections = isHistory
+    ? groupByDay(list).map(g => ({ key: g.day, title: fmtDay(g.day), ts: g.ts }))
+    : [
+      ...(customTasks.length ? [{ key: 'custom', title: 'Custom tasks', ts: customTasks }] : []),
+      ...(groupBy === 'none'
+        ? (aiTasks.length ? [{ key: 'all', title: null, ts: aiTasks }] : [])
+        : buildGroups(aiTasks, groupBy).map(g => ({ key: g.name, title: g.name, ts: g.ts }))),
+    ];
+  // Tasks in the order they're shown: what j / k walk through.
+  const ordered = sections.flatMap(sec => sec.ts);
+  const orderedIds = ordered.map(t => t.id);
+  const effectiveFocus = orderedIds.includes(focusId) ? focusId : null;
+  const selectedLive = tasks.filter(t => selected.has(t.id) && LIVE.includes(t.status));
+
+  // Keyboard shortcuts (not while typing or while a dialog / the chat is open).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target;
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
+      if (dismiss || chat || showCustom || !orderedIds.length) return;
+      const i = orderedIds.indexOf(effectiveFocus);
+      const current = ordered[i] || null;
+      const liveCurrent = current && LIVE.includes(current.status);
+      switch (e.key) {
+        case 'j': setFocusId(orderedIds[i < 0 ? 0 : Math.min(i + 1, orderedIds.length - 1)]); break;
+        case 'k': setFocusId(orderedIds[i < 0 ? 0 : Math.max(i - 1, 0)]); break;
+        case 't': if (current?.status === 'open') act(current, 'take'); else return; break;
+        case 'c': if (liveCurrent) act(current, 'complete'); else return; break;
+        case 'd': if (liveCurrent) setDismiss(current); else return; break;
+        case 'o': {
+          const fan = current?.fan_username || current?.context?.fans?.[0]?.username;
+          if (fan) openChat(current, current.fan_username ? null : fan); else return;
+          break;
+        }
+        case 'x': if (liveCurrent) toggleSelect(current); else return; break;
+        case 'Escape': if (selected.size) setSelected(new Set()); else return; break;
+        default: return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const rowProps = (t) => ({
+    onAction, onOpenChat: openChat, memberName,
+    focused: t.id === effectiveFocus, selected: selected.has(t.id), onSelect: toggleSelect,
+  });
 
   // dismissed view: calibration breakdown by reason
   const dismissBreakdown = tab === 'dismissed'
     ? Object.entries(list.reduce((m, t) => { const k = t.dismiss_reason_code || 'other'; m[k] = (m[k] || 0) + 1; return m; }, {})).sort((a, b) => b[1] - a[1])
     : [];
+  const histState = history[tab] || {};
+  const showSkeleton = loading || (isHistory && histState.loading && !histState.loaded);
 
   return (
     <div className='flex flex-col gap-4 sm:gap-6'>
@@ -642,16 +860,29 @@ export default function TasksPage() {
           <h2 className='text-2xl font-bold tracking-tight'>Tasks</h2>
           <p className='text-muted-foreground'>Open and taken tasks are the live queue. Completed, dismissed and archived tasks are the record.</p>
         </div>
-        {canCreate && <Button onClick={() => setShowCustom(true)}><Plus />Custom task</Button>}
+        <div className='flex items-center gap-2'>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant='ghost' size='icon' aria-label='Keyboard shortcuts'><Keyboard /></Button>
+            </TooltipTrigger>
+            <TooltipContent className='max-w-xs'>
+              <div className='grid grid-cols-[auto_1fr] gap-x-3 gap-y-1'>
+                {SHORTCUTS.map(([k, l]) => <span key={k} className='contents'><kbd className='font-mono font-semibold'>{k}</kbd><span>{l}</span></span>)}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+          <Button variant='outline' size='icon' onClick={refresh} aria-label='Refresh'><RefreshCw /></Button>
+          {canCreate && <Button onClick={() => setShowCustom(true)}><Plus />Custom task</Button>}
+        </div>
       </div>
 
       <div className='-mx-1 overflow-x-auto px-1'>
-        <Tabs value={tab} onValueChange={setTab}>
+        <Tabs value={tab} onValueChange={(v) => { setTab(v); setFocusId(null); setSelected(new Set()); }}>
           <TabsList>
             {TABS.map(tb => (
               <TabsTrigger key={tb.key} value={tb.key} className='gap-1.5'>
                 {tb.label}
-                <span className='rounded-full bg-background/60 px-1.5 font-mono text-xs text-muted-foreground'>{counts[tb.key]}</span>
+                <span className='rounded-full bg-background/60 px-1.5 font-mono text-xs text-muted-foreground'>{counts[tb.key] ?? '·'}</span>
               </TabsTrigger>
             ))}
           </TabsList>
@@ -680,6 +911,16 @@ export default function TasksPage() {
         </div>
       )}
 
+      {selectedLive.length > 0 && (
+        <div className='sticky top-16 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-2.5 shadow-sm'>
+          <span className='text-sm font-medium'>{selectedLive.length} selected</span>
+          <Button size='sm' variant='outline' onClick={() => bulk('complete')}><CircleCheck />Complete</Button>
+          <Button size='sm' variant='outline' onClick={() => setDismiss({ bulk: selectedLive })}>Dismiss</Button>
+          <Button size='sm' variant='outline' onClick={() => bulk('archive')}><Archive />Archive</Button>
+          <Button size='sm' variant='ghost' className='ms-auto' onClick={() => setSelected(new Set())}>Clear<X /></Button>
+        </div>
+      )}
+
       {tab === 'dismissed' && dismissBreakdown.length > 0 && (
         <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm'>
           <span className='font-medium'>Why tasks were dismissed</span>
@@ -690,7 +931,7 @@ export default function TasksPage() {
         </div>
       )}
 
-      {loading ? (
+      {showSkeleton ? (
         <div className='overflow-hidden rounded-lg border bg-card'>
           {[0, 1, 2, 3, 4].map(i => (
             <div key={i} className='space-y-2.5 border-b p-4 last:border-b-0'>
@@ -708,22 +949,30 @@ export default function TasksPage() {
             <>Nothing here. Build the queue from the Dashboard{canCreate ? ', or add a custom task' : ''}.</>
           )}
         </div>
-      ) : isHistory ? (
-        // completed / dismissed / archived → grouped by the day they were actioned
-        groupByDay(list).map(g => <TaskSection key={g.day} title={fmtDay(g.day)} count={g.ts.length} tasks={g.ts} onAction={onAction} />)
       ) : (
         <>
-          {/* custom tasks always pinned on top */}
-          {customTasks.length > 0 && <TaskSection title='Custom tasks' count={customTasks.length} tasks={customTasks} onAction={onAction} />}
-          {groupBy === 'none'
-            ? aiTasks.length > 0 && <TaskSection tasks={aiTasks} onAction={onAction} />
-            : buildGroups(aiTasks, groupBy).map(g => <TaskSection key={g.name} title={g.name} count={g.ts.length} tasks={g.ts} onAction={onAction} />)}
+          {sections.map(sec => (
+            <TaskSection key={sec.key} title={sec.title} count={sec.ts.length} tasks={sec.ts} rowProps={rowProps} />
+          ))}
+          {isHistory && histState.hasMore && (
+            <Button variant='outline' disabled={histState.loading} onClick={() => loadHistory(tab, histState.next || 0)}>
+              {histState.loading ? 'Loading…' : 'Load older tasks'}
+            </Button>
+          )}
         </>
       )}
 
-      {dismiss && <DismissModal task={dismiss} onClose={() => setDismiss(null)}
-        onConfirm={(code, note) => { act(dismiss, 'dismiss', code, note); setDismiss(null); }} />}
-      {showCustom && <CustomTaskDialog meta={meta} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
+      {dismiss && (
+        <DismissModal task={dismiss.bulk ? null : dismiss} count={dismiss.bulk?.length}
+          onClose={() => setDismiss(null)}
+          onConfirm={(code, note) => {
+            if (dismiss.bulk) bulk('dismiss', { reason_code: code, reason: note });
+            else act(dismiss, 'dismiss', { reason_code: code, reason: note });
+            setDismiss(null);
+          }} />
+      )}
+      {showCustom && <CustomTaskDialog meta={meta || { creators: [], chatters: [], members }} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
+      {chat && <DialogueSheet task={chat.task} fan={chat.fan} onClose={() => setChat(null)} />}
     </div>
   );
 }

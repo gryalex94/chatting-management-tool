@@ -627,7 +627,7 @@ function CoachingLog({ chatterId, canCreate, onAddCustom }) {
   const [tab, setTab] = useState('pending');
   const [all, setAll] = useState([]);
   const loadTasks = useCallback(async () => {
-    const { data } = await api.get(`/api/review-tasks?chatter_id=${chatterId}&status=open,taken,completed`).catch(() => ({ data: { tasks: [] } }));
+    const { data } = await api.get(`/api/review-tasks?chatter_id=${chatterId}&status=open,taken,completed,dismissed,archived`).catch(() => ({ data: { tasks: [] } }));
     setAll(data?.tasks || []);
   }, [chatterId]);
   useEffect(() => { loadTasks(); }, [loadTasks]);

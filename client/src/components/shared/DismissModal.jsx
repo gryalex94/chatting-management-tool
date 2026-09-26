@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DISMISS_REASONS } from '@/utils/taskMeta'
 import { Button } from '@/components/ui/button'
 import {
@@ -14,7 +14,9 @@ import { Textarea } from '@/components/ui/textarea'
 // while dismissing it makes it stop. The reasons are also the only signal we
 // have for correcting the AI, so they have to be effortless to give.
 // 'other' still needs a note, so it keeps the confirm button.
-export default function DismissModal({ task, onClose, onConfirm }) {
+// Keys 1–6 pick a reason (when the note box isn't focused). `task` is null for
+// a bulk dismiss of `count` tasks.
+export default function DismissModal({ task, count, onClose, onConfirm }) {
   const [code, setCode] = useState(null)
   const [note, setNote] = useState('')
   const needNote = code === 'other'
@@ -24,22 +26,31 @@ export default function DismissModal({ task, onClose, onConfirm }) {
     if (key !== 'other') onConfirm(key, note.trim())   // one click, done
   }
 
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.target?.tagName === 'TEXTAREA' || e.metaKey || e.ctrlKey || e.altKey) return
+      const r = DISMISS_REASONS[Number(e.key) - 1]
+      if (r) { e.preventDefault(); pick(r.key) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  const where = task ? [task.creator_name, task.chatter_name].filter(Boolean).join(' · ') : ''
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className='sm:max-w-lg'>
         <DialogHeader>
-          <DialogTitle>Why dismiss this?</DialogTitle>
+          <DialogTitle>{task ? 'Why dismiss this?' : `Why dismiss these ${count} tasks?`}</DialogTitle>
           <DialogDescription>
-            Pick a reason. It dismisses straight away.
-            {task.creator_name || task.chatter_name
-              ? ` ${[task.creator_name, task.chatter_name].filter(Boolean).join(' · ')}` : ''}
+            Pick a reason (or press 1–{DISMISS_REASONS.length}). It dismisses straight away.{where ? ` ${where}` : ''}
           </DialogDescription>
         </DialogHeader>
-        <p className='rounded-md bg-muted px-3 py-2 text-sm leading-relaxed text-muted-foreground'>{task.detail}</p>
+        {task && <p className='rounded-md bg-muted px-3 py-2 text-sm leading-relaxed text-muted-foreground'>{task.detail || task.title}</p>}
         <div className='flex flex-wrap gap-2'>
-          {DISMISS_REASONS.map(r => (
+          {DISMISS_REASONS.map((r, i) => (
             <Button key={r.key} variant={code === r.key ? 'default' : 'outline'} size='sm' onClick={() => pick(r.key)}>
-              {r.label}
+              <span className='font-mono text-xs opacity-60'>{i + 1}</span>{r.label}
             </Button>
           ))}
         </div>
