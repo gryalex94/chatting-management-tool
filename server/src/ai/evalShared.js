@@ -81,7 +81,7 @@ const stripPpvTags = (s) => String(s || '').normalize('NFKC')
   .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
   .replace(FORGED_PPV, ' ').replace(STRAY_PPV, '$1');
 
-// The day window the metrics use (same as runDailyAnalysis.js): the DB stores CET,
+// The day window the metrics use (computeChatterMetrics.js): the DB stores CET,
 // the manager's day is Amsterdam local, so in summer (CEST) it starts 23:00 the
 // previous day.
 function dayWindow(reportDate) {

@@ -70,11 +70,16 @@ router.post('/message-dashboard', requireMinRole('manager'), upload.single('file
         .update({ status: 'completed', row_count: result.rowCount })
         .eq('id', importRecord.id);
 
-      // Auto-populate chatter metrics from messages (new per-creator engine)
+      // Recompute that day's chatter metrics, then review the day automatically
+      // (batch AI at half price, tasks built at the end) if it's a finished day
+      // not reviewed yet, or one that grew since its last review.
       const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
-      computeChatterDailyMetrics(req.user.organisationId).catch(err =>
-        console.error('Auto-populate metrics failed:', err?.message)
-      );
+      const { maybeAutoReview } = require('../utils/dailyJob');
+      const orgId = req.user.organisationId;
+      computeChatterDailyMetrics(orgId, { dates: [report_date] })
+        .then(() => maybeAutoReview(orgId, report_date))
+        .then(r => console.log(`[Upload] auto review ${report_date}:`, r?.skipped || (r?.started ? 'started' : 'queued')))
+        .catch(err => console.error('Auto metrics / review failed:', err?.message));
     } catch (parseErr) {
       console.error('Parse error:', parseErr?.message);
       await supabaseAdmin
@@ -130,9 +135,9 @@ router.post('/employee-report', requireMinRole('manager'), upload.single('file')
         .update({ status: 'completed', row_count: result.rowCount })
         .eq('id', importRecord.id);
 
-      // Auto-compute metrics from messages (per-creator, fixed reply times, AFK)
+      // Recompute that day's metrics from messages (per-creator, reply times, AFK)
       const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
-      computeChatterDailyMetrics(req.user.organisationId).catch(err =>
+      computeChatterDailyMetrics(req.user.organisationId, { dates: [report_date] }).catch(err =>
         console.error('Auto-compute metrics failed:', err?.message)
       );
     } catch (parseErr) {

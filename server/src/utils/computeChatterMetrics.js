@@ -34,7 +34,10 @@ const SLOW_DAY_RT_SEC = 150;   // day avg reply slower than this = "slow"
 
 // Report days use the same DST-aware CET/CEST window as the AI review
 // (dayWindow in ai/evalShared.js) — a fixed +1h put winter days an hour off.
-async function computeChatterDailyMetrics(organisationId) {
+// `dates` limits the (re)written days, e.g. the days an upload touched. All
+// history is still read, because new-sub detection needs each fan's first contact.
+async function computeChatterDailyMetrics(organisationId, { dates } = {}) {
+  const only = dates?.length ? new Set(dates) : null;
   console.log('[Metrics] Computing chatter daily metrics (merged-day model, Amsterdam day)...');
 
   const { data: chatters } = await supabaseAdmin
@@ -115,6 +118,7 @@ async function computeChatterDailyMetrics(organisationId) {
   const daySignals = {}; // key chatter|date -> {workload, afk, dayRT, wordsPerMsg, incidents}
   for (const [k, msgs] of Object.entries(dayGroups)) {
     const date = k.split('|')[1];
+    if (only && !only.has(date)) continue;
     // fans this chatter spoke to today who we had ALSO contacted before today
     const priorContact = new Set();
     for (const m of msgs) {
@@ -134,7 +138,9 @@ async function computeChatterDailyMetrics(organisationId) {
   }
 
   let written = 0;
+  const rows = [];
   for (const g of Object.values(pageGroups)) {
+    if (only && !only.has(g.report_date)) continue;
     const dayKey = `${g.chatter_id}|${g.report_date}`;
     const day = daySignals[dayKey];
     const msgs = g.msgs;
@@ -182,14 +188,20 @@ async function computeChatterDailyMetrics(organisationId) {
       fans_who_spent: fansWhoSpent,
     };
 
-    const { error } = await supabaseAdmin
-      .from('chatter_daily_metrics')
-      .upsert(row, { onConflict: 'chatter_id,creator_id,report_date' });
-    if (error) console.error(`[Metrics] upsert error:`, error.message);
-    else written++;
+    rows.push(row);
   }
 
-  console.log(`[Metrics] Wrote ${written} rows (${Object.keys(dayGroups).length} chatter-days merged)`);
+  // Saved in bulk: one row at a time was thousands of round trips per run.
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500);
+    const { error } = await supabaseAdmin
+      .from('chatter_daily_metrics')
+      .upsert(chunk, { onConflict: 'chatter_id,creator_id,report_date' });
+    if (error) console.error(`[Metrics] upsert error:`, error.message);
+    else written += chunk.length;
+  }
+
+  console.log(`[Metrics] Wrote ${written} rows${only ? ` for ${[...only].join(', ')}` : ''} (${Object.keys(dayGroups).length} chatter-days in history)`);
   return { computed: written };
 }
 

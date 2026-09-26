@@ -304,12 +304,15 @@ Default model Sonnet.
 **Backend AI** (`server/src/ai/`): `agentRunner.js` (Anthropic wrapper) · `evalShared.js`
 (thread building, spend/page enrichment, fan resolution) · `evaluateChatterDay.js`
 (compliance) · `evaluateChatterSales.js` (strategy) · `evaluateCreatorDay.js` (page) ·
-`prioritiseTasks.js` (AI ranking) · `runDailyAnalysis.js` (older org-wide path) ·
-`agents/*` (older per-dimension agents, largely superseded).
+`prioritiseTasks.js` (AI ranking) · `batchRunner.js` (Batch API, half price, for the
+automatic review after an upload). The older `/api/ai` path (`runDailyAnalysis.js`,
+`agents/*`) was removed in Sep 2026.
 
 **Backend logic** (`server/src/utils/`): `computeChatterMetrics.js` (reply/AFK/tiers) ·
 `computeMetrics.js` (sales rollups) · `dailyCheck.js` (flags + page health) ·
-`taskGenerator.js` (build/cap/spender-dev/coaching-eval) · `overview.js` (Home ranking) ·
+`taskGenerator.js` (build/cap/spender-dev/coaching-eval) · `taskQueue.js` (build + rank +
+cap the day's queue) · `dailyJob.js` (the daily review as a server job; auto-run after
+message uploads) · `dismissReasons.js` · `overview.js` (Home ranking) ·
 `evaluationStore.js` (save/load evals) · `parsers.js`, `autoMatch.js`, `supabase.js`.
 
 **Backend routes** (`server/src/routes/`): one file per resource (see §12).

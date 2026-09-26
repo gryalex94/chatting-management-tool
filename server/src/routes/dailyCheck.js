@@ -9,6 +9,7 @@ const { evaluateCreatorDay } = require('../ai/evaluateCreatorDay');
 const { saveEvaluation, getEvaluations, getEvaluationsForDate, getLatestEvaluations, getEvaluationHistory } = require('../utils/evaluationStore');
 const { buildOverview } = require('../utils/overview');
 const { buildTasksForChatterEval } = require('../utils/taskGenerator');
+const { startDailyReview, getDailyReviewStatus } = require('../utils/dailyJob');
 
 // Build tasks from EVERY stored eval (compliance + strategy) for one chatter/day,
 // so a per-chatter run surfaces all of that chatter's tasks at once.
@@ -35,7 +36,7 @@ router.post('/run', requireMinRole('va'), async (req, res) => {
     // first (e.g. after a code change to the incident detail), then runs the check.
     if (recompute) {
       const { computeChatterDailyMetrics } = require('../utils/computeChatterMetrics');
-      await computeChatterDailyMetrics(req.user.organisationId);
+      await computeChatterDailyMetrics(req.user.organisationId, { dates: [report_date] });
     }
     const result = await runDailyCheck(req.user.organisationId, report_date);
     res.json(result);
@@ -43,6 +44,25 @@ router.post('/run', requireMinRole('va'), async (req, res) => {
     console.error('[DailyCheck] run error:', err);
     res.status(500).json({ error: err.message || 'Daily check failed' });
   }
+});
+
+/**
+ * POST /api/daily-check/review  { report_date }
+ * Starts the daily review on the server (metrics → check → AI review of every
+ * chatter → task queue) and returns at once; poll /review/status for progress.
+ * It keeps running if the browser tab is closed.
+ */
+router.post('/review', requireMinRole('va'), async (req, res) => {
+  const { report_date } = req.body;
+  if (!report_date) return res.status(400).json({ error: 'report_date is required' });
+  const model = allowedModel(req.body.model, req.user.role);
+  const out = startDailyReview(req.user.organisationId, report_date, { model: model || 'sonnet', mode: 'direct', trigger: 'manual' });
+  res.status(202).json(out);
+});
+
+// GET /api/daily-check/review/status — the current or last daily review job
+router.get('/review/status', (req, res) => {
+  res.json({ status: getDailyReviewStatus(req.user.organisationId) });
 });
 
 /**

@@ -64,7 +64,7 @@ const limiter = (windowMin, max, what) => rateLimit({
 app.use('/api/auth/login', limiter(15, 600, 'requests'));
 app.use(['/api/auth/setup', '/api/auth/invite', '/api/auth/create-member', '/api/auth/accept-invite'],
   limiter(15, 30, 'account requests'));
-app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/review-tasks/rebuild', '/api/ai'],
+app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/daily-check/review', '/api/review-tasks/rebuild'],
   limiter(15, 150, 'AI requests'));
 app.use('/api', limiter(15, 3000, 'requests'));
 
@@ -117,9 +117,6 @@ app.use('/api/uploads', staffOnly, uploadRoutes);
 
 const metricsRoutes = require('./src/routes/metrics');
 app.use('/api/metrics', staffOnly, metricsRoutes);
-
-const aiRoutes = require('./src/routes/ai');
-app.use('/api/ai', staffOnly, aiRoutes);
 
 const dailyCheckRoutes = require('./src/routes/dailyCheck');
 app.use('/api/daily-check', staffOnly, dailyCheckRoutes);

@@ -57,7 +57,7 @@ async function buildOverview(orgId, reportDate) {
   const prev = shiftDays(reportDate, -1);
   const days7 = []; for (let i = 6; i >= 0; i--) days7.push(shiftDays(reportDate, i ? -i : 0));
   const NET = 0.8;
-  const result = await runDailyCheck(orgId, reportDate);   // page metrics + chatter list
+  const result = await runDailyCheck(orgId, reportDate, { persist: false });   // page metrics + chatter list (read-only)
 
   const [{ data: allChatters }, { data: allCreators }, { data: metricRows }, { data: pageStats }, { data: tasks }, { data: dr }, taskCounts] = await Promise.all([
     supabaseAdmin.from('chatters').select('id, name').eq('organisation_id', orgId),

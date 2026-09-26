@@ -96,7 +96,13 @@ const PROMPTS = { A: PROMPT_A, B: PROMPT_B };
  * surfaces moments worth the manager's eyes (quotes + fan name). Pure OPINION,
  * kept visually separate from the calculated layer. No discipline/speed scoring.
  */
-async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = null, model = 'sonnet', promptVersion = 'A' }) {
+/**
+ * Everything up to the AI call: load the day, build the prompt. Returns the
+ * request plus finish(result, usage, elapsedMs) that turns the model's answer
+ * into the stored evaluation — so the same code serves a direct call and the
+ * Batch API. `corrections` can be passed in when many chatters share one run.
+ */
+async function prepareChatterDay({ orgId, chatterId, reportDate, creatorId = null, model = 'sonnet', promptVersion = 'A', corrections = null }) {
   const loaded = await loadChatterMessages(orgId, chatterId, reportDate, creatorId);
   if (!loaded.ok) return loaded;
 
@@ -116,32 +122,46 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';
-  const corrections = await loadCorrections(orgId, reportDate);
-  const userContent = `${pageInstr}${corrections}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const past = corrections ?? await loadCorrections(orgId, reportDate);
+  const userContent = `${pageInstr}${past}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
-  try {
-    const t0 = Date.now();
-    const { result, usage } = await runAgentDetailed({ systemPrompt, userContent, model: baseModelId, maxTokens: 6000 });
+  const finish = (result, usage, elapsedMs) => {
     const { kept: issues, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
     return {
       ok: true,
       eval_type: 'compliance',
       model, model_id: baseModelId, prompt_version: promptVersion,
-      elapsed_ms: Date.now() - t0, usage,
+      elapsed_ms: elapsedMs, usage,
       // No score — just the spotlight list. (overall kept as a header.) Dropped
-      // findings and coverage are stored with it so both can be audited later.
+      // findings and coverage are stored with it so both can be audited later;
+      // messages_reviewed lets a later upload tell whether the day grew since.
       evaluation: {
         overall: result.overall || '', issues, dropped,
-        coverage: { threads_evaluated: threadCount, threads_total: totalThreads, threads_skipped: droppedThreads, threads_forced: forcedThreads },
+        coverage: {
+          threads_evaluated: threadCount, threads_total: totalThreads, threads_skipped: droppedThreads,
+          threads_forced: forcedThreads, messages_reviewed: loaded.msgs.length,
+        },
       },
       threads_evaluated: threadCount,
       threads_total: totalThreads,
       threads_skipped: droppedThreads,
     };
+  };
+
+  return { ok: true, request: { systemPrompt, userContent, model: baseModelId, maxTokens: 6000 }, finish };
+}
+
+async function evaluateChatterDay(opts) {
+  const prep = await prepareChatterDay(opts);
+  if (!prep.ok) return prep;
+  try {
+    const t0 = Date.now();
+    const { result, usage } = await runAgentDetailed(prep.request);
+    return prep.finish(result, usage, Date.now() - t0);
   } catch (e) {
     return { ok: false, reason: e.message };
   }
 }
 
-module.exports = { evaluateChatterDay };
+module.exports = { evaluateChatterDay, prepareChatterDay };

@@ -218,40 +218,57 @@ export default function DailyCheckPage() {
   // (flags + stored AI evaluations) can be viewed — not just the date opened on mount.
   useEffect(() => { run(date); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [date]);
 
-  // The morning workflow: recompute everything → evaluate every chatter for
-  // compliance/work-ethic, with a live progress bar. Runs the AI a few chatters
-  // at a time so it finishes in a couple of minutes. Documents are uploaded
-  // separately on the Uploads page.
-  // Daily review — recompute + evaluate work ethic for each chatter.
+  // The morning workflow runs as a job on the server: recompute the day, run the
+  // check, review every chatter with the AI, then build the task queue. This page
+  // only starts it and follows its progress, so closing the tab doesn't stop it.
+  // An upload of a finished day starts the same job by itself.
+  const followReview = useCallback(async (d) => {
+    for (;;) {
+      let st;
+      try { ({ data: { status: st } } = await api.get('/api/daily-check/review/status')); }
+      catch { await new Promise(r => setTimeout(r, 3000)); continue; }
+      if (!st || st.report_date !== d) return;
+      if (st.finished_at) {
+        if (st.error) {
+          setProgress({ flow: 'daily', stage: 'error', message: st.error });
+        } else {
+          setProgress({ flow: 'daily', stage: 'done', errorCount: st.errors });
+          const made = st.result ? ` - ${st.result.created} new tasks` : '';
+          setStatus(`Reviewed - ${st.total_flags ?? 0} calculated issues - ${st.total} chatters evaluated${made}`);
+          run(d);
+        }
+        return;
+      }
+      setProgress({
+        flow: 'daily', stage: st.stage === 'calc' ? 'calc' : 'evaluate',
+        done: st.done, total: st.total,
+        current: st.stage === 'tasks' ? 'Building the task queue'
+          : st.mode === 'batch' && st.batch ? `Batch: ${st.batch.succeeded || 0} of ${st.total} back` : (st.current || ''),
+      });
+      await new Promise(r => setTimeout(r, 2500));
+    }
+  }, [run]);
+
   const runDailyReview = async () => {
-    setError(null); setReviewEvals({});
+    setError(null);
     try {
       setProgress({ flow: 'daily', stage: 'calc', done: 0, total: 0 });
-      const { data } = await api.post('/api/daily-check/run', { report_date: date, recompute: true });
-      setResult(data);
-
-      const chatters = data.chatters || [];
-      setProgress({ flow: 'daily', stage: 'evaluate', done: 0, total: chatters.length, current: '' });
-      let errors = 0;
-      await pool(chatters, 3, async (c) => {
-        setProgress(p => ({ ...p, current: c.chatter_name }));
-        try {
-          const { data: ev } = await api.post('/api/daily-check/evaluate', {
-            chatter_id: c.chatter_id, report_date: date, eval_type: 'compliance', model: 'sonnet', prompt_version: 'A',
-            metrics: chatterFacts(c),
-          });
-          if (ev.ok) setReviewEvals(m => ({ ...m, [c.chatter_id]: { ...(m[c.chatter_id] || {}), compliance: ev } }));
-          else errors++;
-        } catch { errors++; }
-        setProgress(p => ({ ...p, done: p.done + 1 }));
-      });
-
-      setProgress({ flow: 'daily', stage: 'done', errorCount: errors });
-      setStatus(`Reviewed - ${data.total_flags} calculated issues - ${chatters.length} chatters evaluated`);
+      await api.post('/api/daily-check/review', { report_date: date, model: 'sonnet' });
+      await followReview(date);
     } catch (err) {
       setProgress({ flow: 'daily', stage: 'error', message: err?.response?.data?.error || 'Daily review failed' });
     }
   };
+
+  // Coming back to the page while a review of this day is still running (started
+  // here, from another tab, or by an upload): pick up its progress.
+  useEffect(() => {
+    let live = true;
+    api.get('/api/daily-check/review/status').then(({ data }) => {
+      if (live && data?.status && !data.status.finished_at && data.status.report_date === date) followReview(date);
+    }).catch(() => { /* status optional */ });
+    return () => { live = false; };
+  }, [date, followReview]);
 
   // Creator review — the in-depth page analysis. Run weekly (not daily). Results
   // persist, so this stays available until you re-run it.

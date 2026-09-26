@@ -3,8 +3,7 @@ const crypto = require('crypto');
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const { allowedModel } = require('../utils/modelPolicy');
-const { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks } = require('../utils/taskGenerator');
-const { prioritiseTasks } = require('../ai/prioritiseTasks');
+const { rebuildQueue } = require('../utils/taskQueue');
 const { dayWindow, stripTags } = require('../ai/evalShared');
 const { DISMISS_CODES } = require('../utils/dismissReasons');
 
@@ -183,25 +182,11 @@ router.post('/rebuild', requireMinRole('va'), async (req, res) => {
     const model = allowedModel(req.body.model, req.user.role);   // opus is admin-only
     if (!report_date) return res.status(400).json({ error: 'report_date is required' });
     const orgId = req.user.organisationId;
-    const built = await buildTasksForDate(orgId, report_date);
-    // weekly PS/whale development — one bundled task per page (safe per-page cap)
-    let spenderDev = { created: 0, updated: 0, pages: 0 };
-    try { spenderDev = await buildSpenderDevelopmentTasks(orgId, report_date); }
-    catch (e) { console.error('[reviewTasks] spender-dev error:', e.message); }
-    const ranked = await prioritiseTasks(orgId, report_date, model || 'sonnet');
-    // deterministic backstop: keep the live queue under the cap (configurable)
-    const { data: capCfg } = await supabaseAdmin.from('daily_check_config')
-      .select('value').eq('organisation_id', orgId).eq('key', 'live_queue_cap').maybeSingle();
-    const capped = await capLiveQueue(orgId, parseInt(capCfg?.value, 10) || 150);
-    // persist the day-review narrative so Home can show it without re-running
-    try {
-      await supabaseAdmin.from('daily_reviews').delete().match({ organisation_id: orgId, report_date });
-      await supabaseAdmin.from('daily_reviews').insert({ organisation_id: orgId, report_date, summary: ranked.summary || null, day_review: ranked.day_review || null });
-    } catch (e) { console.error('[reviewTasks] day_review store error:', e.message); }
+    const out = await rebuildQueue(orgId, report_date, model || 'sonnet');
     const { data } = await supabaseAdmin.from('review_tasks').select('*')
       .eq('organisation_id', orgId).in('status', ['open', 'taken'])
       .order('priority', { ascending: true, nullsFirst: false });
-    res.json({ built, spenderDev, ranked, capped, tasks: data || [] });
+    res.json({ ...out, tasks: data || [] });
   } catch (err) {
     console.error('[reviewTasks] rebuild error:', err);
     res.status(500).json({ error: err.message || 'Rebuild failed' });

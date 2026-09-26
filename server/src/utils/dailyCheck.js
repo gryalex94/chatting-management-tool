@@ -13,7 +13,9 @@ const { matchOffPlatform, matchAge, knownPlatforms, clean } = require('./keyword
  * Nothing computed here is treated as source-of-truth — it is all re-derivable
  * from the stored facts, so re-running for a date refreshes cleanly.
  */
-async function runDailyCheck(orgId, reportDate) {
+// persist:false computes without saving flags — for read-only views (the Home
+// overview), which used to rewrite the day's flags on every page load.
+async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
   const cfg = await loadConfig(orgId);
   const commission = num(cfg.of_commission_pct, 20) / 100;
   const netFactor = 1 - commission;
@@ -219,7 +221,7 @@ async function runDailyCheck(orgId, reportDate) {
   // ---- persist: replace today's flags, KEEPING manager state (status / task /
   // resolved) for flags that re-occur. Insert the new set first, then drop rows
   // created before it — so two overlapping runs leave only the newest set. ----
-  await persistFlags(orgId, reportDate, flags);
+  if (persist) await persistFlags(orgId, reportDate, flags);
 
   // ---- shape output: BY PAGE (creators tab) ----
   const pageList = Object.values(pages).map(p => {
@@ -235,7 +237,7 @@ async function runDailyCheck(orgId, reportDate) {
   // ---- shape output: BY CHATTER (chatters tab) ----
   // Re-index the SAME flags by person. Each chatter shows ALL pages they covered,
   // punctuality, and their flags pulled from wherever they were attached.
-  const shifts = await shiftStartMap(orgId);
+  const shifts = await shiftStartMap(Object.keys(chatters));
   const grace = cfg.punctuality_grace_minutes;
 
   // chatter -> { pages:[{creator_id,name,messages}], flags:[], representative row }
@@ -454,11 +456,13 @@ async function chatterNameMap(orgId) {
 // Load each chatter's scheduled shift start (HH:MM) from their active assignment.
 // Returns { chatter_id -> { start: 'HH:MM', name } }. Best-effort: a chatter may
 // have no assignment (then punctuality is "shift not set").
-async function shiftStartMap(orgId) {
+// Assignments carry no organisation, so scope them by this organisation's chatters.
+async function shiftStartMap(chatterIds) {
+  if (!chatterIds.length) return {};
   const { data: assigns } = await supabaseAdmin
     .from('chatter_creator_assignments')
     .select('chatter_id, shift_id, is_active')
-    .eq('is_active', true);
+    .eq('is_active', true).in('chatter_id', chatterIds);
   if (!assigns?.length) return {};
   const shiftIds = [...new Set(assigns.map(a => a.shift_id).filter(Boolean))];
   if (!shiftIds.length) return {};

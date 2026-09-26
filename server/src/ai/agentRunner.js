@@ -78,39 +78,72 @@ const MODEL_SETTINGS = {
   'claude-opus-5-5': { thinking: { type: 'adaptive' }, effort: 'medium', thinkingHeadroom: 16000 },
 };
 
-/**
- * Run one agent call and return the parsed JSON plus run metadata
- * (model used + token usage) so callers can compare cost/speed across models.
- * `settings` overrides MODEL_SETTINGS (used by model comparison scripts).
- */
-async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings }) {
-  console.log(`[AI Agent] Running with ${model}, input ~${Math.round(userContent.length / 4)} tokens...`);
+const JSON_ONLY = '\n\nCRITICAL: Your entire response must be ONLY valid JSON. No preamble, no markdown fences, no explanation. Start your response with { and end with }.';
 
+/**
+ * The request for one review call — shared by direct calls and the Batch API so
+ * both run with identical settings. The fixed instructions are marked for prompt
+ * caching: every chatter in a run shares them, so after the first call they're
+ * read from cache at a tenth of the price (Sonnet 4.6 caches prompts of 1024+
+ * tokens; the review prompts are ~2-3k).
+ */
+function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings }) {
   const cfg = settings || MODEL_SETTINGS[model] || {};
   const params = {
     model,
     max_tokens: maxTokens + (cfg.thinkingHeadroom || 0),
-    system: systemPrompt + '\n\nCRITICAL: Your entire response must be ONLY valid JSON. No preamble, no markdown fences, no explanation. Start your response with { and end with }.',
+    system: [{ type: 'text', text: systemPrompt + JSON_ONLY, cache_control: { type: 'ephemeral' } }],
     messages: [{ role: 'user', content: userContent }],
   };
   if (cfg.thinking) params.thinking = cfg.thinking;
   if (cfg.effort) params.output_config = { effort: cfg.effort };
+  return params;
+}
 
-  // Streamed so a large max_tokens (thinking + answer) never hits the HTTP timeout.
-  const response = await client.messages.stream(params).finalMessage();
-
+/**
+ * Turn a finished response into { result, usage, stop_reason }. Throws on a
+ * refusal and on an answer cut off by max_tokens (salvaging it would silently
+ * drop the unfinished findings) so the caller can retry with more room.
+ */
+function readResponse(response) {
   if (response.stop_reason === 'refusal') throw new Error('AI declined to review this content');
+  if (response.stop_reason === 'max_tokens') {
+    const err = new Error('AI answer was cut off (max_tokens)');
+    err.truncated = true;
+    throw err;
+  }
+  const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
+  const u = response.usage;
+  const usage = u ? {
+    input_tokens: u.input_tokens, output_tokens: u.output_tokens,
+    cache_read_input_tokens: u.cache_read_input_tokens || 0,
+    cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
+  } : null;
+  return { result: parseJson(text), usage, stop_reason: response.stop_reason };
+}
 
-  const text = response.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('\n');
-
-  const usage = response.usage
-    ? { input_tokens: response.usage.input_tokens, output_tokens: response.usage.output_tokens }
-    : null;
-
-  return { result: parseJson(text), usage, model, stop_reason: response.stop_reason };
+/**
+ * Run one agent call and return the parsed JSON plus run metadata
+ * (model used + token usage) so callers can compare cost/speed across models.
+ * `settings` overrides MODEL_SETTINGS (used by model comparison scripts).
+ * One retry: with double the output room if the answer was cut off, or as-is if
+ * it came back as unparseable JSON.
+ */
+async function runAgentDetailed(opts) {
+  const { userContent, model = 'claude-sonnet-4-6' } = opts;
+  console.log(`[AI Agent] Running with ${model}, input ~${Math.round(userContent.length / 4)} tokens...`);
+  let maxTokens = opts.maxTokens || 16000;
+  for (let attempt = 1; ; attempt++) {
+    // Streamed so a large max_tokens (thinking + answer) never hits the HTTP timeout.
+    const response = await client.messages.stream(buildParams({ ...opts, model, maxTokens })).finalMessage();
+    try {
+      return { ...readResponse(response), model };
+    } catch (e) {
+      if (attempt >= 2 || !(e.truncated || e.message === 'AI returned invalid JSON')) throw e;
+      if (e.truncated) maxTokens *= 2;
+      console.warn(`[AI Agent] ${e.message}; retrying once`);
+    }
+  }
 }
 
 // Backward-compatible wrapper: returns just the parsed JSON.
@@ -119,4 +152,4 @@ async function runAgent(opts) {
   return result;
 }
 
-module.exports = { runAgent, runAgentDetailed };
+module.exports = { runAgent, runAgentDetailed, buildParams, readResponse, client };
