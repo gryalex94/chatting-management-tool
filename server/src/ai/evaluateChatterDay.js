@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, verifyIssues } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -14,6 +14,8 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPage
 const SPOTLIGHT_BODY = `You are an experienced OnlyFans agency chat manager reviewing one chatter's conversations for a single day. Your job is NOT to grade them — a human manager will. SPOTLIGHT the specific moments worth the manager's eyes so they can open the dialogue and judge. Always be concrete: quote the exact words and identify the fan by the USERNAME shown in square brackets in their conversation header (e.g. "[u573778077, spent $480]" → fan is "u573778077") — many fans share the same display name, so the username is the only reliable identifier. If an issue involves more than one fan, include EVERY fan's username in the detail. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
 ${UNTRUSTED_RULE}
+
+${READING_RULE}
 
 Each conversation header shows the fan's recorded spend (e.g. "[u123, spent $250]" or "no recorded spend") — use it to weigh how much a missed sale or issue matters.
 
@@ -62,7 +64,7 @@ Severity is a sort hint, not a verdict:
 - high = a missed sale / ignored buying signal on a new sub, whale or spender (lost money); big (>50%) discount; strong compliance concern.
 - medium / low = everything else; bare tips are always low.`;
 
-const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality | swearing | gift | custom | excessive","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]`;
+const ISSUE_SHAPE = `"issues": [{"area":"tos | age | meeting | free_content | offplatform | discount | sales | communication | budget | quality | swearing | gift | custom | excessive","severity":"critical | high | medium | low","detail":"what happened, with a brief exact quote (+ English translation if not English); name EVERY fan involved","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null",${EVIDENCE_FIELDS}}]`;
 
 // VERSION A — content/compliance only (recommended; engine owns discipline).
 const PROMPT_A = `${SPOTLIGHT_BODY}
@@ -99,10 +101,15 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   if (!loaded.ok) return loaded;
 
   const { enrichIssue, spendByUser, creatorNames, creatorInstructions, creatorContext } = await buildEnrichment(orgId, loaded.msgs);
-  // Show each fan's recorded spend AND which page (creator) they're on, so the AI
-  // can weigh a missed sale (new sub vs whale vs $0 fan) and never mistake a
-  // cross-page content difference for a single-page inconsistency.
-  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 40, threadCap: 30, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
+  const { tags: fanTags, earlier } = await loadFanContext(orgId, loaded.msgs, reportDate);
+  // Show each fan's recorded spend, tags (whale / new sub) AND which page (creator)
+  // they're on, so the AI can weigh a missed sale and never mistake a cross-page
+  // content difference for a single-page inconsistency. Safety-net hits always
+  // make the cut.
+  const { threadList, threadCount, totalThreads, droppedThreads, forcedThreads } = buildThreadList(loaded.msgs, {
+    lineCap: 40, threadCap: 30, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames,
+    mustInclude: keywordFans(loaded.msgs, creatorContext), fanTags, earlier,
+  });
 
   const systemPrompt = PROMPTS[promptVersion] || PROMPT_A;
   const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
@@ -114,15 +121,19 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
 
   try {
     const t0 = Date.now();
-    const { result, usage } = await runAgentDetailed({ systemPrompt, userContent, model: baseModelId, maxTokens: 4000 });
-    const issues = Array.isArray(result.issues) ? result.issues.map(enrichIssue) : [];
+    const { result, usage } = await runAgentDetailed({ systemPrompt, userContent, model: baseModelId, maxTokens: 6000 });
+    const { kept: issues, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
     return {
       ok: true,
       eval_type: 'compliance',
       model, model_id: baseModelId, prompt_version: promptVersion,
       elapsed_ms: Date.now() - t0, usage,
-      // No score — just the spotlight list. (overall kept as a header.)
-      evaluation: { overall: result.overall || '', issues },
+      // No score — just the spotlight list. (overall kept as a header.) Dropped
+      // findings and coverage are stored with it so both can be audited later.
+      evaluation: {
+        overall: result.overall || '', issues, dropped,
+        coverage: { threads_evaluated: threadCount, threads_total: totalThreads, threads_skipped: droppedThreads, threads_forced: forcedThreads },
+      },
       threads_evaluated: threadCount,
       threads_total: totalThreads,
       threads_skipped: droppedThreads,

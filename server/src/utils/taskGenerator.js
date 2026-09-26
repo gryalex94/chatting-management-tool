@@ -88,6 +88,10 @@ function defaultPriority(sev, source, area) {
   }
   return ph ? 6 : 7; // low (bare tips arrive as quality/low → 7)
 }
+// Identity of a chatter finding from any AI review: see buildTasksForDate.
+const aiFingerprint = (chatterId, fan, it) =>
+  `ai:ch=${chatterId || '-'}:fan=${fan || '-'}:${it.area || '-'}:${it.sent_at ? `t=${it.sent_at}` : slug(it.detail)}`;
+
 const defaultCluster = (chatter, creator) =>
   chatter ? `chatter:${chatter}` : creator ? `page:${creator}` : 'general';
 
@@ -175,9 +179,14 @@ async function buildTasksForDate(orgId, reportDate) {
       const chatterId = ev.chatter_id || null;
       const creatorId = ev.creator_id || (it.creator ? creatorIdByName[_norm(it.creator)] : null) || null;
       const fan = it.fan_username || null;
+      // A chatter finding is identified by WHAT it points at — chatter, fan, topic
+      // and the exact message — not by the model's wording, which changes on every
+      // run (so dismissed issues came back and re-runs duplicated). The same message
+      // flagged by both the compliance and the sales review is one task. Findings
+      // with no matched message fall back to the wording.
       const fp = src === 'creator'
         ? `creator:cr=${creatorId || '-'}:${it.area || '-'}:${slug(it.detail)}`
-        : `${ev.eval_type}:ch=${chatterId || '-'}:fan=${fan || '-'}:${it.area || '-'}:${slug(it.detail)}`;
+        : aiFingerprint(chatterId, fan, it);
       candidates.push({
         fingerprint: fp,
         source_type: src,
@@ -191,7 +200,7 @@ async function buildTasksForDate(orgId, reportDate) {
         severity: it.severity || 'low',
         title: shortTitle(it.detail),
         detail: it.detail || '',
-        context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, fans: it.fans || [], mentions: it.mentions || [], metrics },
+        context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null, fans: it.fans || [], mentions: it.mentions || [], metrics },
       });
     }
   }
@@ -505,14 +514,14 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   for (const it of issues) {
     const fan = it.fan_username || null;
     const creatorId = it.creator ? creatorIdByName[_norm(it.creator)] : null;
-    const fp = `${evalType}:ch=${chatterId}:fan=${fan || '-'}:${it.area || '-'}:${slug(it.detail)}`;
+    const fp = aiFingerprint(chatterId, fan, it);
     const row = {
       organisation_id: orgId, source_type: src, fingerprint: fp,
       creator_id: creatorId, creator_name: creatorId ? creatorNameById[creatorId] : (it.creator || null),
       chatter_id: chatterId, chatter_name: chatterName, fan_username: fan,
       area: it.area || null, severity: it.severity || 'low',
       title: shortTitle(it.detail), detail: it.detail || '',
-      context: { message: it.message || null, sent_at: it.sent_at || null, fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null },
+      context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null, fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null },
       last_seen_date: reportDate,
     };
     const { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')

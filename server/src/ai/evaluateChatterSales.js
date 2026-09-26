@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, verifyIssues } = require('./evalShared');
 
 // ── Strategy review (communication + sales craft) → TASKS ───────────────────
 // Not a grader. This layer reads FULL conversations against Rice Media's strategy
@@ -9,6 +9,8 @@ const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPage
 const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager reviewing one chatter's full conversations for a single day. Your job is to find every concrete moment where the chatter DEVIATED from Rice Media's communication and sales strategy, and turn each into a coaching TASK for the manager. Do NOT grade or score — surface actionable moments. Be specific: quote the exact words, identify each fan by the USERNAME shown in square brackets in their conversation header (e.g. "[u573778077, spent $480]" → fan is "u573778077" — display names are shared by many fans, usernames are unique), and say what the strategy expected instead. TRANSLATION IS MANDATORY: whenever a quoted message is not in English (Spanish, etc.), you MUST write the English translation immediately after it in the form: "original" (EN: "translation"). Never leave a non-English quote untranslated.
 
 ${UNTRUSTED_RULE}
+
+${READING_RULE}
 
 Each conversation header shows the fan's recorded spend ("[u123, spent $250]" or "no recorded spend") and which PAGE the fan is on ("(page: Leya)"). Use the spend to pick the right playbook and to weigh how much a miss matters. A chatter works SEVERAL pages, each with its OWN content scope — never flag a difference BETWEEN pages as an inconsistency.
 
@@ -62,7 +64,7 @@ Turn each deviation into an issue:
 Return JSON with this exact shape:
 {
   "overall": "one short paragraph: the main strategy gaps to coach today",
-  "issues": [{"area":"sales | communication | abandon | quality","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null"}]
+  "issues": [{"area":"sales | communication | abandon | quality","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null",${EVIDENCE_FIELDS}}]
 }
 If the chatter followed the strategy well, return an empty issues list. Do not invent issues to fill the list.`;
 
@@ -79,7 +81,8 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
   // Fuller conversations than the spotlight: the sales rules are sequence-dependent.
   // Cap raised 25 -> 40: at 25 roughly a third of a busy chatter's conversations
   // were never reviewed at all, and this is the review that judges missed sales.
-  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames });
+  const { tags: fanTags, earlier } = await loadFanContext(orgId, loaded.msgs, reportDate);
+  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames, fanTags, earlier });
 
   const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
   const coverage = droppedThreads
@@ -90,8 +93,8 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
 
   try {
     const t0 = Date.now();
-    const { result, usage } = await runAgentDetailed({ systemPrompt: SALES_PROMPT, userContent, model: baseModelId, maxTokens: 6000 });
-    const issues = Array.isArray(result.issues) ? result.issues.map(enrichIssue) : [];
+    const { result, usage } = await runAgentDetailed({ systemPrompt: SALES_PROMPT, userContent, model: baseModelId, maxTokens: 8000 });
+    const { kept: issues, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
     return {
       ok: true,
       eval_type: 'sales_quality',
@@ -99,7 +102,8 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
       elapsed_ms: Date.now() - t0, usage,
       evaluation: {
         overall: result.overall || '',
-        issues,
+        issues, dropped,
+        coverage: { threads_evaluated: threadCount, threads_total: totalThreads, threads_skipped: droppedThreads },
       },
       threads_evaluated: threadCount,
       threads_total: totalThreads,
