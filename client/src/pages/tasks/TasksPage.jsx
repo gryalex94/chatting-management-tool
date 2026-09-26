@@ -248,7 +248,14 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId }) {
 
 // AFK tasks carry context.incidents — each gap with its bracketing times, who the
 // chatter resumed with, and the fans left waiting. Point the manager to the spot.
-function AfkIncidents({ incidents, taskId }) {
+function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId }) {
+  // chat + Infloww buttons for one fan on this gap's page
+  const open = (fan, page) => fan && (
+    <>
+      <ChatButton onClick={() => onOpenChat(fan)} />
+      <InflowwButton href={inflowwChatLink(inflowwId(null, page), fan)} />
+    </>
+  );
   const [done, toggle] = useChecklist(`afkDone:${taskId}`);
   return (
     <ReviewList count={incidents.length} defaultOpen={incidents.length <= 3} label='AFK gaps, where to look'
@@ -262,13 +269,13 @@ function AfkIncidents({ incidents, taskId }) {
           </div>
           {g.before_message && (
             <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
-              <span>Before the gap</span><FanChip username={g.before_username} />
+              <span>Before the gap</span><FanChip username={g.before_username} />{open(g.before_username, g.page)}
               <span className='italic'>“{g.before_message}”</span>
             </div>
           )}
           {g.resumed_message && (
             <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
-              <span>Resumed</span><FanChip username={g.resumed_username} />
+              <span>Resumed</span><FanChip username={g.resumed_username} />{open(g.resumed_username, g.page)}
               <span className='italic'>“{g.resumed_message}”</span>
             </div>
           )}
@@ -277,7 +284,7 @@ function AfkIncidents({ incidents, taskId }) {
               <span>Waiting:</span>
               {g.waiting_fans.map((f, j) => (
                 <span key={j} className='inline-flex items-center gap-1'>
-                  <FanChip username={f.username} nickname={f.fan} />
+                  <FanChip username={f.username} nickname={f.fan} />{open(f.username, g.page)}
                   <span className='font-semibold text-bad'>{f.waited_min}m</span>
                 </span>
               ))}
@@ -438,7 +445,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
           <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} />
         )}
         {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && (
-          <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
+          <AfkIncidents incidents={ctx.incidents} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} />
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
           <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)}
