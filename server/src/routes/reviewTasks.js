@@ -149,9 +149,12 @@ router.get('/:id/dialogue', async (req, res) => {
         .select('id, area, severity, status, dismiss_reason_code, first_seen_date, chatter_name, title')
         .eq('organisation_id', orgId).eq('fan_username', fan).neq('id', task.id)
         .order('first_seen_date', { ascending: false }).limit(15),
-      supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
+      // infloww_creator_id arrives with migration 021; fall back if it isn't there yet
+      supabaseAdmin.from('creators').select('id, name, infloww_creator_id').eq('organisation_id', orgId)
+        .then(r => (r.error ? supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId) : r)),
     ]);
     const pageName = Object.fromEntries((pages || []).map(c => [c.id, c.name]));
+    const pageInfloww = Object.fromEntries((pages || []).map(c => [c.id, c.infloww_creator_id || null]));
 
     res.json({
       fan_username: fan,
@@ -165,6 +168,7 @@ router.get('/:id/dialogue', async (req, res) => {
       related: related || [],
       messages: rows.map(m => ({
         id: m.id, sent_at: m.sent_datetime, sender_name: m.sender_name, page: pageName[m.creator_id] || null,
+        page_infloww_id: pageInfloww[m.creator_id] || null,
         fan_message: m.fan_message_text ? stripTags(m.fan_message_text) : null,
         chatter_message: m.creator_message_text ? stripTags(m.creator_message_text) : null,
         price: parseFloat(m.price) || 0, purchased: !!m.purchased,

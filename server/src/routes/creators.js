@@ -56,6 +56,20 @@ router.post('/', requireMinRole('admin'), async (req, res) => {
 
 // PUT /api/creators/:id - Update creator (only the fields actually provided, so
 // saving just the AI instructions never blanks the name).
+// The page's Infloww ID from what a manager pastes: the bare number, or any chat
+// link copied in Infloww ("?cid=<base64 id>&fid=..."). '' clears it. Returns
+// undefined when the input is neither.
+function parseInflowwId(input) {
+  const raw = String(input ?? '').trim();
+  if (!raw) return null;
+  if (/^[0-9]{1,30}$/.test(raw)) return raw;
+  try {
+    const cid = new URL(raw).searchParams.get('cid');
+    const id = cid ? Buffer.from(cid, 'base64').toString('utf8').trim() : '';
+    return /^[0-9]{1,30}$/.test(id) ? id : undefined;
+  } catch { return undefined; }
+}
+
 router.put('/:id', requireMinRole('admin'), async (req, res) => {
   try {
     const { name, is_active, ai_instructions, ai_context } = req.body;
@@ -64,6 +78,11 @@ router.put('/:id', requireMinRole('admin'), async (req, res) => {
     if (is_active !== undefined) update.is_active = is_active;
     if (ai_instructions !== undefined) update.ai_instructions = ai_instructions;
     if (ai_context !== undefined) update.ai_context = ai_context;
+    if (req.body.infloww_creator_id !== undefined) {
+      const id = parseInflowwId(req.body.infloww_creator_id);
+      if (id === undefined) return res.status(400).json({ error: 'Paste a chat link copied from this page in Infloww, or the page ID (numbers only)' });
+      update.infloww_creator_id = id;
+    }
     const { data, error } = await supabaseAdmin
       .from('creators')
       .update(update)

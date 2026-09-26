@@ -27,6 +27,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
   const [name, setName] = useState(creator.name);
   const [ctx, setCtx] = useState(() => ({ ...(creator.ai_context || {}) }));
   const [text, setText] = useState(creator.ai_instructions || '');
+  const [inflowwId, setInflowwId] = useState(creator.infloww_creator_id || '');
   const [usage, setUsage] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -35,7 +36,8 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
     api.get(`/api/creators/${creator.id}/usage`).then(r => setUsage(r.data)).catch(() => setUsage(null));
   }, [creator.id]);
 
-  const dirty = name !== creator.name
+  const inflowwChanged = inflowwId.trim() !== (creator.infloww_creator_id || '');
+  const dirty = name !== creator.name || inflowwChanged
     || text !== (creator.ai_instructions || '')
     || JSON.stringify(cleanContext(ctx)) !== JSON.stringify(creator.ai_context || null);
 
@@ -46,6 +48,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
         name: name.trim() || creator.name,
         ai_instructions: text.trim(),
         ai_context: cleanContext(ctx),
+        ...(inflowwChanged ? { infloww_creator_id: inflowwId.trim() } : {}),
       });
       toast.success('Saved');
       onChanged();
@@ -94,6 +97,16 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
           <div className='grid gap-2'>
             <Label htmlFor='creator-name'>Page name</Label>
             <Input id='creator-name' value={name} onChange={e => setName(e.target.value)} disabled={!isAdmin} />
+          </div>
+
+          <div className='grid gap-2'>
+            <Label htmlFor='creator-infloww'>Infloww page ID</Label>
+            <Input id='creator-infloww' value={inflowwId} onChange={e => setInflowwId(e.target.value)} disabled={!isAdmin}
+              placeholder='Paste any chat link from this page, or the ID' />
+            <p className='text-xs text-muted-foreground'>
+              In Infloww, open any chat on this page and use "Copy chat link", then paste it here. It lets tasks
+              open a fan's chat straight in the Infloww app.
+            </p>
           </div>
 
           <section className='grid gap-3'>

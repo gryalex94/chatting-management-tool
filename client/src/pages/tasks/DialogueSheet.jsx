@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { History, Loader2 } from 'lucide-react';
+import { ExternalLink, History, Loader2 } from 'lucide-react';
 import api from '@/services/api';
-import { fmtSentAt, areaMeta, reasonLabel } from '@/utils/taskMeta';
+import { fmtSentAt, areaMeta, reasonLabel, inflowwChatLink } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,6 +54,10 @@ export default function DialogueSheet({ task, fan, onClose }) {
       Math.abs(Date.parse(m.sent_at) - target) < Math.abs(Date.parse(best.sent_at) - target) ? m : best).id;
   }
 
+  // Open this chat in Infloww, on the page of the flagged message (else the latest one).
+  const pageMsg = data?.messages?.find(m => m.id === focusId) || data?.messages?.[data.messages.length - 1];
+  const inflowwLink = inflowwChatLink(pageMsg?.page_infloww_id, data?.fan_username);
+
   return (
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
       <SheetContent className='flex w-full flex-col gap-0 p-0 sm:max-w-xl'>
@@ -71,6 +75,11 @@ export default function DialogueSheet({ task, fan, onClose }) {
               {info.first_seen && <Badge variant='outline' className='font-normal'>First message {fmtSentAt(info.first_seen).split(',')[0]}</Badge>}
               {info.last_spend_date && <Badge variant='outline' className='font-normal'>Last purchase {info.last_spend_date}</Badge>}
             </div>
+          )}
+          {inflowwLink && (
+            <Button asChild size='sm' className='mt-1 w-fit'>
+              <a href={inflowwLink}><ExternalLink />Open in Infloww{pageMsg?.page ? ` (${pageMsg.page})` : ''}</a>
+            </Button>
           )}
         </SheetHeader>
 

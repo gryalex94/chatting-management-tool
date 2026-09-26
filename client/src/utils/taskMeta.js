@@ -88,3 +88,13 @@ export function fmtSentAt(iso, offsetHours) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getUTCDate()} ${MON[d.getUTCMonth()]} ${d.getUTCFullYear()}, ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
+
+// Open a fan's conversation straight in the Infloww desktop app — the same thing
+// Infloww's own "Copy chat link" does. Needs the page's Infloww ID (Settings →
+// page) and the fan's OnlyFans ID, which we only know while their username is
+// still the default "u" + number. Returns null when either is missing.
+export function inflowwChatLink(pageInflowwId, fanUsername) {
+  const m = /^u(\d+)$/.exec(String(fanUsername || '').trim());
+  if (!pageInflowwId || !m) return null;
+  return `infloww://open?fid=${m[1]}&cid=${pageInflowwId}&type=chatLink`;
+}

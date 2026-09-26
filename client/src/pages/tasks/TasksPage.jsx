@@ -1,13 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Archive, Bookmark, BookmarkCheck, ChevronRight, CircleCheck, CircleX, Clock, Copy,
-  Inbox, Keyboard, MessageSquareText, MoreHorizontal, Plus, RefreshCw, RotateCcw, Star, TriangleAlert, X,
+  ExternalLink, Inbox, Keyboard, MessageSquareText, MoreHorizontal, Plus, RefreshCw, RotateCcw, Star, TriangleAlert, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 import { isDemoMode } from '@/utils/privacy';
-import { TIER, reasonLabel, fmtSentAt, areaMeta } from '@/utils/taskMeta';
+import { TIER, reasonLabel, fmtSentAt, areaMeta, inflowwChatLink } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import DismissModal from '@/components/shared/DismissModal';
 import DialogueSheet from './DialogueSheet';
@@ -124,6 +124,21 @@ function ChatButton({ onClick, label = 'Open the conversation' }) {
   );
 }
 
+// Open the fan's chat in the Infloww desktop app (null link → nothing shown).
+function InflowwButton({ href }) {
+  if (!href) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button asChild size='icon-sm' variant='ghost' className='size-6'>
+          <a href={href} aria-label='Open in Infloww'><ExternalLink className='size-3.5' /></a>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>Open this chat in Infloww (needs the Infloww app)</TooltipContent>
+    </Tooltip>
+  );
+}
+
 // The server checks each AI quote against the stored messages (verifyIssues).
 // Safety findings it couldn't back up are kept, with the problem named here.
 const EVIDENCE_WARNING = {
@@ -202,7 +217,7 @@ function ReviewRow({ done, onToggle, children }) {
 // Reply-time tasks carry a per-subscriber breakdown in context.subs. Each fan is
 // its own reviewable, checkable row: username (click-to-copy), tier, PAGE (a
 // chatter's subs span several pages), worst wait, when, and the message.
-function ReplyTimeSubs({ subs, workload, taskId, onOpenChat }) {
+function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId }) {
   const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
     <ReviewList count={subs.length} defaultOpen={subs.length <= 4}
@@ -216,6 +231,7 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat }) {
             <div className='flex flex-wrap items-center gap-2'>
               <FanChip username={s.fan_username} nickname={s.fan_nickname} className={done.has(key) ? 'line-through' : ''} />
               {s.fan_username && <ChatButton onClick={() => onOpenChat(s.fan_username)} />}
+              <InflowwButton href={inflowwChatLink(inflowwId(null, s.page), s.fan_username)} />
               <Badge variant='outline' className='capitalize' style={tint(tag.c)}>{tag.label}</Badge>
               {s.page && <Badge variant='secondary' className='font-normal'>{s.page}</Badge>}
               <span className='text-xs font-semibold text-bad'>{s.worst_reply_min}m wait</span>
@@ -275,7 +291,7 @@ function AfkIncidents({ incidents, taskId }) {
 
 // Safety-net flags (off-platform / under-18 keywords) carry context.hits — the exact
 // messages that matched, so the manager can open each one and judge it.
-function KeywordHits({ hits, taskId, onOpenChat }) {
+function KeywordHits({ hits, taskId, onOpenChat, inflowwHref }) {
   const [done, toggle] = useChecklist(`hitsDone:${taskId}`);
   return (
     <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label='Messages to check'
@@ -285,6 +301,7 @@ function KeywordHits({ hits, taskId, onOpenChat }) {
           <div className='flex flex-wrap items-center gap-2'>
             <FanChip username={h.fan_username} />
             {h.fan_username && <ChatButton onClick={() => onOpenChat(h.fan_username)} />}
+            <InflowwButton href={inflowwHref(h.fan_username)} />
             <Badge variant='outline' className='border-bad/30 text-bad'>{h.matched}</Badge>
             {h.sent_at && <TimeStamp>{fmtSentAt(h.sent_at)}</TimeStamp>}
           </div>
@@ -327,7 +344,7 @@ const ACTIONED = {
   archived: { icon: Inbox, verb: 'Archived' },
 };
 
-function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, onSelect }) {
+function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, onSelect, inflowwId }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
   const live = task.status === 'open' || task.status === 'taken';
@@ -396,6 +413,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
                 )}
                 {f.sent_at && <TimeStamp>{fmtSentAt(f.sent_at)}</TimeStamp>}
                 {f.username && <ChatButton onClick={() => onOpenChat(task, fans.length > 1 ? f.username : null)} />}
+                <InflowwButton href={inflowwChatLink(inflowwId(task.creator_id, task.creator_name), f.username)} />
               </span>
             ))}
           </div>
@@ -417,13 +435,14 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
         )}
 
         {Array.isArray(ctx.subs) && ctx.subs.length > 0 && (
-          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} />
+          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} />
         )}
         {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && (
           <AfkIncidents incidents={ctx.incidents} taskId={task.id} />
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
-          <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} />
+          <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)}
+            inflowwHref={(fan) => inflowwChatLink(inflowwId(task.creator_id, task.creator_name), fan)} />
         )}
 
         {task.status === 'archived' && task.priority_reason && (
@@ -633,6 +652,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState({});         // tab -> { loaded, loading, hasMore }
   const [members, setMembers] = useState([]);
+  const [pages, setPages] = useState([]);              // for the pages' Infloww IDs
   // Filter/tab settings persist across tab switches and navigation (localStorage).
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
   const [tab, setTab] = useState(saved.tab || 'open');
@@ -658,10 +678,12 @@ export default function TasksPage() {
   // The live queue only: history tabs are fetched when opened, a page at a time.
   const loadLive = useCallback(async () => {
     try {
-      const [tk, mem] = await Promise.all([
+      const [tk, mem, cr] = await Promise.all([
         api.get('/api/review-tasks?status=open,taken'),
         api.get('/api/organisations/members').catch(() => ({ data: [] })),
+        api.get('/api/creators').catch(() => ({ data: [] })),
       ]);
+      setPages(cr.data || []);
       const live = tk.data.tasks || [];
       const liveIds = new Set(live.map(t => t.id));
       setTasks(prev => [...prev.filter(t => !LIVE.includes(t.status) && !liveIds.has(t.id)), ...live]);
@@ -692,11 +714,9 @@ export default function TasksPage() {
   // The custom-task form's pickers load only when it opens.
   useEffect(() => {
     if (!showCustom || meta) return;
-    Promise.all([
-      api.get('/api/creators').catch(() => ({ data: [] })),
-      api.get('/api/chatters').catch(() => ({ data: [] })),
-    ]).then(([cr, ch]) => setMeta({ creators: cr.data || [], chatters: ch.data || [], members }));
-  }, [showCustom, meta, members]);
+    api.get('/api/chatters').catch(() => ({ data: [] }))
+      .then(ch => setMeta({ creators: pages, chatters: ch.data || [], members }));
+  }, [showCustom, meta, members, pages]);
 
   const refresh = () => {
     setHistory({});
@@ -704,6 +724,11 @@ export default function TasksPage() {
     toast.success('Refreshed');
   };
   const memberName = useCallback((id) => members.find(m => m.id === id)?.name || 'someone', [members]);
+  // A page's Infloww ID, looked up by id or (for reply-time rows) by name.
+  const inflowwId = useCallback((creatorId, pageName) => {
+    const p = pages.find(x => (creatorId && x.id === creatorId) || (pageName && x.name === pageName));
+    return p?.infloww_creator_id || null;
+  }, [pages]);
 
   // One action on one task. Complete / dismiss / archive offer Undo, which puts the
   // task back exactly where it was (open, or still taken by the same person).
@@ -871,7 +896,7 @@ export default function TasksPage() {
   });
 
   const rowProps = (t) => ({
-    onAction, onOpenChat: openChat, memberName,
+    onAction, onOpenChat: openChat, memberName, inflowwId,
     focused: t.id === effectiveFocus, selected: selected.has(t.id), onSelect: toggleSelect,
   });
 
