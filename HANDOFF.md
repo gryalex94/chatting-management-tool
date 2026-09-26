@@ -17,7 +17,7 @@ and surfaces money + quality metrics on a Home dashboard.
   serving — frontend and backend are **separate services**.
 - **Supabase** — Postgres + Auth. Project `goggtzbghfboqqptmgfx`.
 - **Anthropic** — via `server/src/ai/agentRunner.js` (`new Anthropic()` reads
-  `ANTHROPIC_API_KEY`). Models: Sonnet `claude-sonnet-5`, Haiku
+  `ANTHROPIC_API_KEY`). Models: Sonnet `claude-sonnet-4-6`, Haiku
   `claude-haiku-4-5`, Opus `claude-opus-5-5`.
 
 ## Deployment (Railway) — CURRENTLY LIVE AND WORKING

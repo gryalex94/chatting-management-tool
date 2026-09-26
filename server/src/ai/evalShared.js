@@ -1,9 +1,13 @@
 const { supabaseAdmin } = require('../utils/supabase');
 
 // Short model keys (from the UI) -> real model IDs.
+// Sonnet is back on 4.6: after the switch to Sonnet 5 (low effort) on 2026-09-23,
+// daily findings fell from ~70-97 to ~20-38 and high/critical ones nearly vanished,
+// so experienced chatters (gated to high+) got almost no tasks. Don't switch again
+// without re-running the same days on both models and comparing what managers keep.
 const MODELS = {
   haiku: 'claude-haiku-4-5',
-  sonnet: 'claude-sonnet-5',
+  sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-5-5',
 };
 

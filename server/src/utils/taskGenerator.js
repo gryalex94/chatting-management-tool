@@ -9,7 +9,20 @@ const SOURCE = { compliance: 'compliance', sales_quality: 'sales', creator: 'cre
 const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders'];
 // Engine flags default to 'work_ethic'; these ones carry a real area of their own.
 // Keyword safety-net flags map to protected ToS areas: never archived or capped.
-const FLAG_AREA = { chargeback: 'chargeback', keyword_offplatform: 'offplatform', keyword_age: 'age' };
+// Page-health flags map to page areas so they rank as page health, not as a
+// chatter's work ethic.
+const FLAG_AREA = {
+  chargeback: 'chargeback', keyword_offplatform: 'offplatform', keyword_age: 'age',
+  ratio_below_5: 'ratio', ltv_drop: 'ltv', earnings_drop: 'revenue', earnings_spike: 'revenue',
+};
+// Flags that describe something that HAPPENED on a day (a gap, a slow reply, a
+// keyword hit, a chargeback, a revenue swing) get one task per day: a new day is
+// new evidence, so dismissing Monday's under-18 hit must not silence Tuesday's.
+// The rest describe an ongoing state (ratio/LTV) and carry one task across days.
+const DAILY_FLAGS = new Set([
+  'keyword_age', 'keyword_offplatform', 'chargeback', 'afk_gap', 'high_response_time',
+  'earnings_drop', 'earnings_spike',
+]);
 
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
 // capped). A genuine ToS item must never be lost to backlog overflow. Mirrors the
@@ -56,11 +69,12 @@ function defaultPriority(sev, source, area) {
   if (a === 'excessive') return 4;                            // over-the-top content — worth a look
   if (a === 'swearing') return sev === 'medium' ? 5 : 6;      // swearing out of context
   if (sev === 'high') {
+    if (a === 'revenue') return 2;                             // revenue collapse — check the day now
+    if (ph) return 6;                                          // ratio/LTV drift — watch list
     if (source === 'flag' || a === 'work_ethic') return 2;
     if (a === 'discount') return 3;                            // only reaches here if >50% off
     if (a === 'sales') return 3;
     if (a === 'compliance') return 2;
-    if (ph) return 6;
     if (a === 'communication') return 4;
     return 3;
   }
@@ -183,7 +197,8 @@ async function buildTasksForDate(orgId, reportDate) {
   }
 
   for (const f of (flags || [])) {
-    const fp = `flag:${f.flag_type}:cr=${f.creator_id || '-'}:ch=${f.chatter_id || '-'}`;
+    const fp = `flag:${f.flag_type}:cr=${f.creator_id || '-'}:ch=${f.chatter_id || '-'}`
+      + (DAILY_FLAGS.has(f.flag_type) ? `:d=${reportDate}` : '');
     candidates.push({
       fingerprint: fp,
       source_type: 'flag',
@@ -250,20 +265,26 @@ async function buildTasksForDate(orgId, reportDate) {
       });
       continue;
     }
+    // Only a LATER report day is new evidence. Rebuilding the same day (or an
+    // older one) must not reopen what a manager already closed, and must never
+    // move last_seen_date backwards.
+    const laterDay = !ex.last_seen_date || reportDate > ex.last_seen_date;
+    const lastSeen = laterDay ? reportDate : ex.last_seen_date;
     if (ex.status === 'dismissed' || ex.status === 'archived') {
       // stays dismissed/archived unless a PROTECTED item escalates to critical — the
       // AI calling an ordinary recurrence "critical" must not undo a manager's dismiss
-      if (c.severity === 'critical' && ex.severity !== 'critical' && PROTECTED_AREAS.has((c.area || '').toLowerCase())) {
+      if (laterDay && c.severity === 'critical' && ex.severity !== 'critical' && PROTECTED_AREAS.has((c.area || '').toLowerCase())) {
         await supabaseAdmin.from('review_tasks').update({
           status: 'open', severity: 'critical', detail: c.detail, title: c.title, context: c.context,
-          last_seen_date: reportDate, regressed: false, priority: 1, updated_at: now,
+          last_seen_date: lastSeen, regressed: false, priority: 1, updated_at: now,
         }).eq('id', ex.id);
         reopened++;
-      } else {
-        await supabaseAdmin.from('review_tasks').update({ last_seen_date: reportDate, updated_at: now }).eq('id', ex.id);
+      } else if (laterDay) {
+        await supabaseAdmin.from('review_tasks').update({ last_seen_date: lastSeen, updated_at: now }).eq('id', ex.id);
       }
     } else if (ex.status === 'completed') {
-      // regression — it came back after being fixed
+      // regression — it came back on a later day after being fixed
+      if (!laterDay) continue;
       await supabaseAdmin.from('review_tasks').update({
         status: 'open', regressed: true, detail: c.detail, title: c.title, context: c.context, severity: c.severity,
         first_seen_date: reportDate, last_seen_date: reportDate, days_open: 1,
@@ -271,14 +292,18 @@ async function buildTasksForDate(orgId, reportDate) {
       }).eq('id', ex.id);
       reopened++;
     } else {
-      // open or taken — carry forward
-      const newDay = ex.last_seen_date !== reportDate;
+      // open or taken — carry forward (an older day's rebuild leaves it as is)
+      if (ex.last_seen_date && reportDate < ex.last_seen_date) continue;
+      const newDay = laterDay;
+      const base = defaultPriority(c.severity, c.source_type, c.area);
       await supabaseAdmin.from('review_tasks').update({
-        last_seen_date: reportDate,
+        last_seen_date: lastSeen,
         days_open: ex.days_open + (newDay ? 1 : 0),
         carried_over: ex.first_seen_date !== reportDate,
         detail: c.detail, title: c.title, context: c.context, severity: c.severity,
-        priority: ex.priority ?? defaultPriority(c.severity, c.source_type, c.area),
+        // the AI ranker never sees flags, so a flag that got worse (medium → high)
+        // must be able to climb on its own; everything else keeps its tier
+        priority: c.source_type === 'flag' ? Math.min(ex.priority ?? base, base) : (ex.priority ?? base),
         cluster_key: ex.cluster_key ?? defaultCluster(c.chatter_name, c.creator_name),
         updated_at: now,
       }).eq('id', ex.id);

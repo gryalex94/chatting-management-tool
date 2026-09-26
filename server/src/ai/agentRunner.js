@@ -68,7 +68,9 @@ function salvageJson(text) {
 // thinking eats into max_tokens, so those calls get extra headroom.
 // Picked from a blind side-by-side on real chatter days (Sep 2026):
 //   Sonnet 5 - thinking on at "low" effort. With thinking off it was the least
-//              accurate of all setups; at low it beat Sonnet 4.6 for less money.
+//              accurate of all setups; at low it beat Sonnet 4.6 for less money
+//              in that test, but in production it reported far fewer issues, so
+//              the default is Sonnet 4.6 again (see MODELS in evalShared.js).
 //   Opus 5.5 - thinking can't be turned off; "medium" is its default, set
 //              explicitly so it doesn't drift if the default changes.
 const MODEL_SETTINGS = {
@@ -81,7 +83,7 @@ const MODEL_SETTINGS = {
  * (model used + token usage) so callers can compare cost/speed across models.
  * `settings` overrides MODEL_SETTINGS (used by model comparison scripts).
  */
-async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-sonnet-5', maxTokens = 16000, settings }) {
+async function runAgentDetailed({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings }) {
   console.log(`[AI Agent] Running with ${model}, input ~${Math.round(userContent.length / 4)} tokens...`);
 
   const cfg = settings || MODEL_SETTINGS[model] || {};
