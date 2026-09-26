@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('./supabase');
+const { WRONG_FINDING } = require('./dismissReasons');
 
 const _norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const slug = (s) => _norm(s).split(' ').slice(0, 6).join(' ');           // coarse signature of an issue
@@ -139,6 +140,39 @@ function collapseCrossChatter(candidates) {
 }
 
 /**
+ * What managers decided about AI findings in the 30 days before `reportDate`:
+ *  - fanFine: "fan|area" dismissed as allowed or as the fan's own behaviour
+ *  - chatterArea: "chatterId|area" → { wrong: dismissed as a wrong finding, done: completed }
+ */
+async function loadDecisionHistory(orgId, reportDate) {
+  const since = new Date(Date.parse(reportDate + 'T00:00:00Z') - 30 * 86400000).toISOString();
+  const fanFine = new Set();
+  const chatterArea = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin.from('review_tasks')
+      .select('id, chatter_id, fan_username, area, status, dismiss_reason_code')
+      .eq('organisation_id', orgId).in('status', ['dismissed', 'completed']).in('source_type', ['compliance', 'sales'])
+      .gte('completed_at', since).lt('completed_at', reportDate + 'T23:59:59Z')
+      .order('id', { ascending: true }).range(from, from + 999);
+    if (error || !data?.length) break;
+    for (const t of data) {
+      const area = (t.area || '').toLowerCase();
+      if (t.status === 'dismissed' && t.fan_username && (t.dismiss_reason_code === 'allowed' || t.dismiss_reason_code === 'fan_fault')) {
+        fanFine.add(`${t.fan_username}|${area}`);
+      }
+      if (!t.chatter_id) continue;
+      const k = `${t.chatter_id}|${area}`;
+      const n = chatterArea.get(k) || { wrong: 0, done: 0 };
+      if (t.status === 'completed') n.done++;
+      else if (WRONG_FINDING.has(t.dismiss_reason_code)) n.wrong++;
+      chatterArea.set(k, n);
+    }
+    if (data.length < 1000) break;
+  }
+  return { fanFine, chatterArea };
+}
+
+/**
  * Build/refresh the task queue for a day from the stored AI reports + engine flags.
  * Idempotent and cross-day aware:
  *  - same issue recurring  -> carry the existing task forward (days_open++, carried_over)
@@ -241,10 +275,30 @@ async function buildTasksForDate(orgId, reportDate) {
     return keepByTenure(c, tier);
   }));
 
+  // Learn from what managers already decided (last 30 days), AI findings only,
+  // never the protected safety areas:
+  //  - the same kind of issue for the same fan was dismissed as fine / the fan's
+  //    doing → don't raise it again
+  //  - a chatter's topic keeps getting dismissed as wrong and never completed →
+  //    still raised, but two tiers lower and marked
+  const history = await loadDecisionHistory(orgId, reportDate);
+  const learned = kept.filter(c => {
+    if (c.source_type !== 'compliance' && c.source_type !== 'sales') return true;
+    const area = (c.area || '').toLowerCase();
+    if (PROTECTED_AREAS.has(area)) return true;
+    if (c.fan_username && history.fanFine.has(`${c.fan_username}|${area}`)) return false;
+    const n = history.chatterArea.get(`${c.chatter_id}|${area}`);
+    if (n && n.wrong >= 3 && n.done === 0) {
+      c.demote = 2;
+      c.context = { ...(c.context || {}), often_dismissed: n.wrong };
+    }
+    return true;
+  });
+
   // de-dupe candidates by fingerprint (keep the most severe)
   const SEV = { critical: 0, high: 1, medium: 2, low: 3 };
   const byFp = new Map();
-  for (const c of kept) {
+  for (const c of learned) {
     const prev = byFp.get(c.fingerprint);
     if (!prev || (SEV[c.severity] ?? 9) < (SEV[prev.severity] ?? 9)) byFp.set(c.fingerprint, c);
   }
@@ -269,7 +323,7 @@ async function buildTasksForDate(orgId, reportDate) {
       inserts.push({
         organisation_id: orgId, ...c,
         status: 'open', first_seen_date: reportDate, last_seen_date: reportDate, days_open: 1,
-        priority: defaultPriority(c.severity, c.source_type, c.area),
+        priority: Math.min(7, defaultPriority(c.severity, c.source_type, c.area) + (c.demote || 0)),
         cluster_key: defaultCluster(c.chatter_name, c.creator_name),
       });
       continue;
@@ -542,4 +596,4 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   return { created, updated };
 }
 
-module.exports = { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks, buildTasksForChatterEval, PROTECTED_AREAS, keepByTenure, defaultPriority };
+module.exports = { loadDecisionHistory, buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks, buildTasksForChatterEval, PROTECTED_AREAS, keepByTenure, defaultPriority };

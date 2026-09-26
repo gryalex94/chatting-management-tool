@@ -57,12 +57,18 @@ export function areaMeta(area) {
 }
 export const areaLabel = (area) => areaMeta(area).label;
 
+// Mirrors server/src/utils/dismissReasons.js — keep the two in step. The order
+// is the 1–9 keyboard order in the dismiss dialog. "Already handled", "A PPV was
+// sent" and "Duplicate" were the most common free-text reasons under "Other".
 export const DISMISS_REASONS = [
-  { key: 'allowed', label: 'This is allowed' },
-  { key: 'needs_context', label: 'Needs the full dialogue' },
+  { key: 'allowed', label: "It's fine / allowed" },
+  { key: 'already_handled', label: 'Already handled / sent' },
+  { key: 'ppv_sent', label: 'A PPV was sent' },
   { key: 'misread', label: 'AI misread it' },
+  { key: 'needs_context', label: 'Needs the full dialogue' },
   { key: 'too_minor', label: 'Too minor to action' },
   { key: 'fan_fault', label: "Fan's behaviour, not the chatter" },
+  { key: 'duplicate', label: 'Duplicate task' },
   { key: 'other', label: 'Other…' },
 ];
 export const reasonLabel = Object.fromEntries(DISMISS_REASONS.map(r => [r.key, r.label]));

@@ -6,8 +6,10 @@ const { allowedModel } = require('../utils/modelPolicy');
 const { buildTasksForDate, capLiveQueue, buildSpenderDevelopmentTasks } = require('../utils/taskGenerator');
 const { prioritiseTasks } = require('../ai/prioritiseTasks');
 const { dayWindow, stripTags } = require('../ai/evalShared');
+const { DISMISS_CODES } = require('../utils/dismissReasons');
 
 const STATUSES = ['open', 'taken', 'completed', 'dismissed', 'archived'];
+const OUTCOMES = ['coached', 'fixed', 'noted'];
 const HISTORY = new Set(['completed', 'dismissed', 'archived']);
 
 // POST /api/review-tasks/custom — a manager-created task that pins ABOVE the AI
@@ -216,12 +218,11 @@ router.patch('/:id', async (req, res) => {
     if (action === 'take') { update.status = 'taken'; update.taken_by = req.user.id; update.taken_at = now; onlyIfOpen = true; }
     else if (action === 'complete') { update.status = 'completed'; update.completed_at = now; update.resolved_by = req.user.id; }
     else if (action === 'dismiss') {
-      // Dismissing requires a reason CATEGORY (one of the 6) — the calibration
-      // signal we keep to improve the AI prompts later. 'other' needs a note.
+      // Dismissing requires a reason CATEGORY — the calibration signal the AI
+      // reviews and the task builder learn from. 'other' needs a note.
       const code = req.body.reason_code;
       const note = reason ? String(reason).trim() : '';
-      const valid = ['allowed', 'needs_context', 'misread', 'too_minor', 'fan_fault', 'other'];
-      if (!valid.includes(code)) return res.status(400).json({ error: 'A dismissal reason is required' });
+      if (!DISMISS_CODES.includes(code)) return res.status(400).json({ error: 'A dismissal reason is required' });
       if (code === 'other' && !note) return res.status(400).json({ error: 'Please explain the reason' });
       update.status = 'dismissed'; update.resolved_by = req.user.id; update.completed_at = now;
       update.dismiss_reason_code = code;
@@ -242,6 +243,17 @@ router.patch('/:id', async (req, res) => {
     else if (action === 'coach') { update.coach_flag = true; }
     else if (action === 'uncoach') { update.coach_flag = false; update.coached_at = null; }
     else if (action === 'coached') { update.coached_at = now; }
+    // How a completed task was handled. 'coached' also records the coaching
+    // session, so the chatter's coaching log fills itself in.
+    else if (action === 'outcome') {
+      const outcome = String(req.body.outcome || '');
+      if (!OUTCOMES.includes(outcome)) return res.status(400).json({ error: 'Invalid outcome' });
+      const { data: cur } = await supabaseAdmin.from('review_tasks').select('context')
+        .eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+      if (!cur) return res.status(404).json({ error: 'Task not found' });
+      update.context = { ...(cur.context || {}), outcome, outcome_by: req.user.id, outcome_at: now };
+      if (outcome === 'coached') { update.coach_flag = true; update.coached_at = now; }
+    }
     else if (action === 'uncoached') { update.coached_at = null; }
     else return res.status(400).json({ error: 'Invalid action' });
 

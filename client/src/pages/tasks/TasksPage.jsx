@@ -365,6 +365,12 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
               <TooltipContent>This was completed before and showed up again on a later day.</TooltipContent>
             </Tooltip>
           )}
+          {!isCustom && ctx.often_dismissed && live && (
+            <Tooltip>
+              <TooltipTrigger asChild><Badge variant='outline' className='font-normal text-muted-foreground'>Often dismissed</Badge></TooltipTrigger>
+              <TooltipContent>This topic was dismissed {ctx.often_dismissed} times for this chatter in the last 30 days and never completed, so it's ranked lower.</TooltipContent>
+            </Tooltip>
+          )}
           {!isCustom && task.days_open > 1 && (
             <Badge variant='outline' className='border-warn/40 text-warn'>{task.days_open} days open</Badge>
           )}
@@ -438,6 +444,9 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
             <actioned.icon className='size-3.5' />{actioned.verb} {fmtActioned(task.completed_at)}
           </span>
         )}
+        {task.status === 'completed' && OUTCOME_LABEL[ctx.outcome] && (
+          <Badge variant='secondary' className='font-normal'>{OUTCOME_LABEL[ctx.outcome]}</Badge>
+        )}
         <div className='flex items-center gap-1.5'>
           {task.status === 'open' && <Button size='sm' onClick={() => onAction(task, 'take')}>Take</Button>}
           {task.status === 'open' && (
@@ -495,6 +504,10 @@ function TaskSection({ title, count, tasks, rowProps }) {
 /* ─── New custom task ───────────────────────────────────────────────────── */
 
 const ANYONE = '__anyone';
+// One option in a row of mutually exclusive choices (importance, attach-to).
+const Choice = ({ on, onClick, children }) => (
+  <Button type='button' variant={on ? 'secondary' : 'outline'} className={cn('flex-1', on && 'ring-1 ring-ring')} onClick={onClick}>{children}</Button>
+);
 function CustomTaskDialog({ meta, onClose, onCreate }) {
   const [title, setTitle] = useState('');
   const [detail, setDetail] = useState('');
@@ -516,10 +529,6 @@ function CustomTaskDialog({ meta, onClose, onCreate }) {
     });
     setSaving(false);
   };
-
-  const Choice = ({ on, onClick, children }) => (
-    <Button type='button' variant={on ? 'secondary' : 'outline'} className={cn('flex-1', on && 'ring-1 ring-ring')} onClick={onClick}>{children}</Button>
-  );
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -595,6 +604,8 @@ const byPriority = (a, b) => (a.priority || 7) - (b.priority || 7)
   || String(a.id).localeCompare(String(b.id));
 const NEXT_STATUS = { take: 'taken', complete: 'completed', dismiss: 'dismissed', archive: 'archived', reopen: 'open' };
 const UNDOABLE = { complete: 'Completed', dismiss: 'Dismissed', archive: 'Archived' };
+const OUTCOMES = [['coached', 'Coached the chatter'], ['fixed', 'Fixed it'], ['noted', 'Just noted']];
+const OUTCOME_LABEL = Object.fromEntries(OUTCOMES);
 const SHORTCUTS = [
   ['j / k', 'Next / previous task'], ['t', 'Take'], ['c', 'Complete'], ['d', 'Dismiss, then 1–6 for the reason'],
   ['o', 'Open the conversation'], ['x', 'Select for a bulk action'], ['Esc', 'Clear the selection'],
@@ -708,12 +719,30 @@ export default function TasksPage() {
       loadCounts();
       if (UNDOABLE[action]) {
         const to = task.status === 'taken' ? 'taken' : 'open';
+        const setOutcome = async (tt, outcome) => {
+          toast.dismiss(tt.id);
+          try {
+            const { data } = await api.patch(`/api/review-tasks/${task.id}`, { action: 'outcome', outcome });
+            setTasks(ts => ts.map(t => (t.id === task.id ? { ...t, ...data } : t)));
+            toast.success(outcome === 'coached' ? 'Recorded as coached' : 'Recorded');
+          } catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
+        };
         toast(tt => (
-          <span className='flex items-center gap-3'>
-            {UNDOABLE[action]}
-            <Button size='sm' variant='outline' className='h-7' onClick={() => { toast.dismiss(tt.id); act(task, 'undo', { to }); }}>Undo</Button>
+          <span className='flex flex-col gap-2'>
+            <span className='flex items-center gap-3'>
+              {UNDOABLE[action]}
+              <Button size='sm' variant='outline' className='h-7' onClick={() => { toast.dismiss(tt.id); act(task, 'undo', { to }); }}>Undo</Button>
+            </span>
+            {action === 'complete' && (
+              <span className='flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
+                How was it handled?
+                {OUTCOMES.map(([k, l]) => (
+                  <Button key={k} size='sm' variant='secondary' className='h-6 px-2 text-xs' onClick={() => setOutcome(tt, k)}>{l}</Button>
+                ))}
+              </span>
+            )}
           </span>
-        ), { duration: 6000 });
+        ), { duration: action === 'complete' ? 9000 : 6000 });
       } else {
         toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : action === 'undo' ? 'Undone' : 'Updated');
       }

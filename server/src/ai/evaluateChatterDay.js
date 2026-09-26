@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, verifyIssues } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -116,7 +116,8 @@ async function evaluateChatterDay({ orgId, chatterId, reportDate, creatorId = nu
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';
-  const userContent = `${pageInstr}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const corrections = await loadCorrections(orgId, reportDate);
+  const userContent = `${pageInstr}${corrections}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {
