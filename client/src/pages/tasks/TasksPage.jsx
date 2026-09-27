@@ -471,6 +471,9 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
           {task.status === 'taken' && <Button size='sm' onClick={() => onAction(task, 'complete')}>Complete</Button>}
           {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'dismiss')}>Dismiss</Button>}
           {!live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'reopen')}><RotateCcw />Reopen</Button>}
+          {/* Page-level tasks can't be saved for coaching; keep the slot anyway so
+              Take / Complete / Dismiss line up across every card. */}
+          {!task.chatter_id && <span className='size-8 shrink-0' aria-hidden='true' />}
           {task.chatter_id && (
             <Tooltip>
               <TooltipTrigger asChild>
