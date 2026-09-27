@@ -112,12 +112,12 @@ function PriorityBadge({ priority, reason }) {
 }
 
 // Open the conversation with one fan in the side panel.
-function ChatButton({ onClick, label = 'Open the conversation' }) {
+function ChatButton({ onClick, label = 'Read the conversation here' }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type='button' size='icon-sm' variant='ghost' className='size-6' onClick={onClick} aria-label={label}>
-          <MessageSquareText className='size-3.5' />
+        <Button type='button' size='xs' variant='outline' className='h-7 gap-1.5 px-2.5 text-xs font-medium' onClick={onClick}>
+          <MessageSquareText className='size-3.5' />Chat
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -131,11 +131,12 @@ function InflowwButton({ href }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button asChild size='icon-sm' variant='ghost' className='size-6'>
-          <a href={href} aria-label='Open in Infloww'><ExternalLink className='size-3.5' /></a>
+        <Button asChild size='xs' variant='outline'
+          className='h-7 gap-1.5 border-link/50 px-2.5 text-xs font-medium text-link hover:bg-link/10 hover:text-link'>
+          <a href={href}><ExternalLink className='size-3.5' />Infloww</a>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Open this chat in Infloww (needs the Infloww app)</TooltipContent>
+      <TooltipContent>Open this chat in the Infloww app</TooltipContent>
     </Tooltip>
   );
 }
