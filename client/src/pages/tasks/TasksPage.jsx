@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Archive, Bookmark, BookmarkCheck, ChevronRight, CircleCheck, CircleX, Clock, Copy,
+  Archive, Bookmark, BookmarkCheck, ChevronRight, CircleCheck, CircleX, Clock,
   ExternalLink, Inbox, Keyboard, MessageSquareText, MoreHorizontal, Plus, RefreshCw, RotateCcw, Star, TriangleAlert, X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -11,6 +11,7 @@ import { TIER, reasonLabel, fmtSentAt, areaMeta, inflowwChatLink } from '@/utils
 import { cn } from '@/lib/utils';
 import DismissModal from '@/components/shared/DismissModal';
 import DialogueSheet from './DialogueSheet';
+import FanLabel from '@/components/shared/FanLabel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -167,21 +168,10 @@ function AreaBadge({ area }) {
   );
 }
 
-// A fan's username: click copies it (the nickname shows on hover).
-function FanChip({ username, nickname, className }) {
-  const value = username || nickname;
-  if (!value) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button type='button' onClick={() => copy(value)}
-          className={cn('inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 font-mono text-xs text-foreground transition-colors hover:bg-accent', className)}>
-          {value}<Copy className='size-3 opacity-40' />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{nickname && username ? `${nickname} · click to copy` : 'Click to copy'}</TooltipContent>
-    </Tooltip>
-  );
+// A fan, labelled like Infloww: their name when it's unique on the page, else the
+// username first (see FanLabel). `names` = the task's context.names.
+function FanChip({ username, nickname, className, names }) {
+  return <FanLabel username={username} nickname={nickname} info={names?.[username]} className={className} />;
 }
 
 const TimeStamp = ({ children }) => (
@@ -217,7 +207,7 @@ function ReviewRow({ done, onToggle, children }) {
 // Reply-time tasks carry a per-subscriber breakdown in context.subs. Each fan is
 // its own reviewable, checkable row: username (click-to-copy), tier, PAGE (a
 // chatter's subs span several pages), worst wait, when, and the message.
-function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId }) {
+function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId, names }) {
   const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
     <ReviewList count={subs.length} defaultOpen={subs.length <= 4}
@@ -229,7 +219,7 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId }) {
         return (
           <ReviewRow key={key} done={done.has(key)} onToggle={() => toggle(key)}>
             <div className='flex flex-wrap items-center gap-2'>
-              <FanChip username={s.fan_username} nickname={s.fan_nickname} className={done.has(key) ? 'line-through' : ''} />
+              <FanChip username={s.fan_username} nickname={s.fan_nickname} names={names} className={done.has(key) ? 'line-through' : ''} />
               {s.fan_username && <ChatButton onClick={() => onOpenChat(s.fan_username)} />}
               <InflowwButton href={inflowwChatLink(inflowwId(null, s.page), s.fan_username)} />
               <Badge variant='outline' className='capitalize' style={tint(tag.c)}>{tag.label}</Badge>
@@ -248,7 +238,7 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId }) {
 
 // AFK tasks carry context.incidents — each gap with its bracketing times, who the
 // chatter resumed with, and the fans left waiting. Point the manager to the spot.
-function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId }) {
+function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId, names }) {
   // chat + Infloww buttons for one fan on this gap's page
   const open = (fan, page) => fan && (
     <>
@@ -269,13 +259,13 @@ function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId }) {
           </div>
           {g.before_message && (
             <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
-              <span>Before the gap</span><FanChip username={g.before_username} />{open(g.before_username, g.page)}
+              <span>Before the gap</span><FanChip username={g.before_username} names={names} />{open(g.before_username, g.page)}
               <span className='italic'>“{g.before_message}”</span>
             </div>
           )}
           {g.resumed_message && (
             <div className='flex flex-wrap items-baseline gap-1.5 text-xs text-muted-foreground'>
-              <span>Resumed</span><FanChip username={g.resumed_username} />{open(g.resumed_username, g.page)}
+              <span>Resumed</span><FanChip username={g.resumed_username} names={names} />{open(g.resumed_username, g.page)}
               <span className='italic'>“{g.resumed_message}”</span>
             </div>
           )}
@@ -284,7 +274,7 @@ function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId }) {
               <span>Waiting:</span>
               {g.waiting_fans.map((f, j) => (
                 <span key={j} className='inline-flex items-center gap-1'>
-                  <FanChip username={f.username} nickname={f.fan} />{open(f.username, g.page)}
+                  <FanChip username={f.username} nickname={f.fan} names={names} />{open(f.username, g.page)}
                   <span className='font-semibold text-bad'>{f.waited_min}m</span>
                 </span>
               ))}
@@ -298,7 +288,7 @@ function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId }) {
 
 // Safety-net flags (off-platform / under-18 keywords) carry context.hits — the exact
 // messages that matched, so the manager can open each one and judge it.
-function KeywordHits({ hits, taskId, onOpenChat, inflowwHref }) {
+function KeywordHits({ hits, taskId, onOpenChat, inflowwHref, names }) {
   const [done, toggle] = useChecklist(`hitsDone:${taskId}`);
   return (
     <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label='Messages to check'
@@ -306,7 +296,7 @@ function KeywordHits({ hits, taskId, onOpenChat, inflowwHref }) {
       {hits.map((h, i) => (
         <ReviewRow key={i} done={done.has(String(i))} onToggle={() => toggle(String(i))}>
           <div className='flex flex-wrap items-center gap-2'>
-            <FanChip username={h.fan_username} />
+            <FanChip username={h.fan_username} names={names} />
             {h.fan_username && <ChatButton onClick={() => onOpenChat(h.fan_username)} />}
             <InflowwButton href={inflowwHref(h.fan_username)} />
             <Badge variant='outline' className='border-bad/30 text-bad'>{h.matched}</Badge>
@@ -409,7 +399,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
             {isCustom && ctx.assigned_to_name && <span className='text-muted-foreground'>for <span className='font-medium text-foreground'>{ctx.assigned_to_name}</span></span>}
             {fans.map((f, fi) => (
               <span key={f.username || f.nickname || fi} className='inline-flex items-center gap-1.5'>
-                <FanChip username={f.username} nickname={f.nickname} />
+                <FanChip username={f.username} nickname={f.nickname} names={ctx.names} />
                 {f.spend != null && (
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -442,13 +432,13 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
         )}
 
         {Array.isArray(ctx.subs) && ctx.subs.length > 0 && (
-          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} />
+          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} names={ctx.names} />
         )}
         {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && (
-          <AfkIncidents incidents={ctx.incidents} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} />
+          <AfkIncidents incidents={ctx.incidents} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} names={ctx.names} />
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
-          <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)}
+          <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} names={ctx.names}
             inflowwHref={(fan) => inflowwChatLink(inflowwId(task.creator_id, task.creator_name), fan)} />
         )}
 

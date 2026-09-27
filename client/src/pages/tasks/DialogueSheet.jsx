@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import FanLabel from '@/components/shared/FanLabel';
 
 // How far back "Show earlier" reaches, step by step (days before the task's day).
 const DAY_STEPS = [1, 3, 7, 14, 30];
@@ -62,7 +63,11 @@ export default function DialogueSheet({ task, fan, onClose }) {
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
       <SheetContent className='flex w-full flex-col gap-0 p-0 sm:max-w-xl'>
         <SheetHeader className='border-b'>
-          <SheetTitle className='font-mono'>{data?.fan_username || fan || task.fan_username || 'Conversation'}</SheetTitle>
+          <SheetTitle className='text-base'>
+            {data ? (
+              <FanLabel username={data.fan_username} info={data.fan_name ? { name: data.fan_name, shared: data.name_shared } : null} />
+            ) : (fan || task.fan_username || 'Conversation')}
+          </SheetTitle>
           <SheetDescription>
             {data ? `${fmtSentAt(data.from)} to ${fmtSentAt(data.to)}` : 'Loading…'}
           </SheetDescription>

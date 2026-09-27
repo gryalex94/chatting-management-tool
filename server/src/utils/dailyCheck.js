@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('./supabase');
+const { fanNameInfo } = require('./fanNames');
 const { dayWindow } = require('../ai/evalShared');
 const { matchOffPlatform, matchAge, knownPlatforms, clean } = require('./keywordScan');
 
@@ -212,6 +213,33 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
       (page.chatters[f.chatter_id]?.flags || page.flags).push(f);
     }
     flags.push(f);
+  }
+
+  // ---- fan names: what to call each fan (Infloww's name, or the username when
+  // several fans on the page share the name). Skipped for read-only views. ----
+  if (persist) {
+    const pairs = [];
+    for (const f of flags) {
+      const d = f.details || {};
+      for (const s of (d.subs || [])) pairs.push({ username: s.fan_username, creatorId: s.creator_id || f.creator_id, nickname: s.fan_nickname });
+      for (const h of (d.hits || [])) pairs.push({ username: h.fan_username, creatorId: f.creator_id });
+      for (const g of (d.incidents || [])) {
+        const cid = g.creator_id || f.creator_id;
+        pairs.push({ username: g.before_username, creatorId: cid }, { username: g.resumed_username, creatorId: cid });
+        for (const w of (g.waiting_fans || [])) pairs.push({ username: w.username, creatorId: cid, nickname: w.fan });
+      }
+    }
+    try {
+      const names = await fanNameInfo(orgId, pairs, reportDate);
+      for (const f of flags) {
+        const d = f.details || {};
+        const mine = {};
+        const users = [...(d.subs || []).map(s => s.fan_username), ...(d.hits || []).map(h => h.fan_username),
+          ...(d.incidents || []).flatMap(g => [g.before_username, g.resumed_username, ...(g.waiting_fans || []).map(w => w.username)])];
+        for (const u of users) if (u && names[u]) mine[u] = names[u];
+        if (Object.keys(mine).length) f.details = { ...d, names: mine };
+      }
+    } catch (e) { console.error('[DailyCheck] fan names:', e.message); }
   }
 
   // ---- score & rank ----

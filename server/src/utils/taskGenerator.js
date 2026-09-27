@@ -1,5 +1,27 @@
 const { supabaseAdmin } = require('./supabase');
 const { WRONG_FINDING } = require('./dismissReasons');
+const { fanNameInfo } = require('./fanNames');
+
+// Attach { username: { name, shared } } to each AI candidate's context, so the
+// task card can show the fan by name — or by username when the name is shared.
+async function attachFanNames(orgId, candidates, reportDate) {
+  const pairs = [];
+  for (const c of candidates) {
+    if (c.source_type === 'flag' || !c.creator_id) continue;
+    if (c.fan_username) pairs.push({ username: c.fan_username, creatorId: c.creator_id });
+    for (const f of (c.context?.fans || [])) pairs.push({ username: f.username, creatorId: c.creator_id, nickname: f.nickname });
+  }
+  if (!pairs.length) return;
+  try {
+    const names = await fanNameInfo(orgId, pairs, reportDate);
+    for (const c of candidates) {
+      if (c.source_type === 'flag') continue;
+      const mine = {};
+      for (const u of [c.fan_username, ...(c.context?.fans || []).map(f => f.username)]) if (u && names[u]) mine[u] = names[u];
+      if (Object.keys(mine).length) c.context = { ...(c.context || {}), names: mine };
+    }
+  } catch (e) { console.error('[taskGenerator] fan names:', e.message); }
+}
 
 const _norm = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 const slug = (s) => _norm(s).split(' ').slice(0, 6).join(' ');           // coarse signature of an issue
@@ -263,6 +285,7 @@ async function buildTasksForDate(orgId, reportDate) {
         incidents: f.details?.incidents || [],
         hits: f.details?.hits || [],           // keyword flags: the matched messages
         workload: f.details?.workload || null,
+        names: f.details?.names || {},
       },
     });
   }
@@ -304,6 +327,7 @@ async function buildTasksForDate(orgId, reportDate) {
   }
   const uniq = [...byFp.values()];
   if (!uniq.length) return { created: 0, carried: 0, reopened: 0, total_open: await countOpen(orgId) };
+  await attachFanNames(orgId, uniq, reportDate);
 
   // existing tasks for these fingerprints
   const fps = uniq.map(c => c.fingerprint);
@@ -565,6 +589,11 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
 
   const now = new Date().toISOString();
   let created = 0, updated = 0;
+  const pairs = issues.flatMap(it => {
+    const cid = it.creator ? creatorIdByName[_norm(it.creator)] : null;
+    return [{ username: it.fan_username, creatorId: cid }, ...(it.fans || []).map(f => ({ username: f.username, creatorId: cid, nickname: f.nickname }))];
+  });
+  const names = await fanNameInfo(orgId, pairs, reportDate).catch(() => ({}));
   for (const it of issues) {
     const fan = it.fan_username || null;
     const creatorId = it.creator ? creatorIdByName[_norm(it.creator)] : null;
@@ -575,7 +604,11 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
       chatter_id: chatterId, chatter_name: chatterName, fan_username: fan,
       area: it.area || null, severity: it.severity || 'low',
       title: shortTitle(it.detail), detail: it.detail || '',
-      context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null, fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null },
+      context: {
+        message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null,
+        fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null,
+        names: Object.fromEntries([fan, ...(it.fans || []).map(f => f.username)].filter(u => u && names[u]).map(u => [u, names[u]])),
+      },
       last_seen_date: reportDate,
     };
     const { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')

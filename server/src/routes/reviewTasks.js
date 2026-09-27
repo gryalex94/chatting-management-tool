@@ -6,6 +6,7 @@ const { allowedModel } = require('../utils/modelPolicy');
 const { rebuildQueue } = require('../utils/taskQueue');
 const { dayWindow, stripTags } = require('../ai/evalShared');
 const { DISMISS_CODES } = require('../utils/dismissReasons');
+const { fanNameInfo } = require('../utils/fanNames');
 
 const STATUSES = ['open', 'taken', 'completed', 'dismissed', 'archived'];
 const OUTCOMES = ['coached', 'fixed', 'noted'];
@@ -156,8 +157,14 @@ router.get('/:id/dialogue', async (req, res) => {
     const pageName = Object.fromEntries((pages || []).map(c => [c.id, c.name]));
     const pageInfloww = Object.fromEntries((pages || []).map(c => [c.id, c.infloww_creator_id || null]));
 
+    // What to call the fan: their name, and whether other fans on the page share it
+    const lastPage = rows.length ? rows[rows.length - 1].creator_id : null;
+    const nameInfo = lastPage ? (await fanNameInfo(orgId, [{ username: fan, creatorId: lastPage }]).catch(() => ({})))[fan] : null;
+
     res.json({
       fan_username: fan,
+      fan_name: nameInfo?.name || null,
+      name_shared: nameInfo?.shared || null,
       from, to, focus, days,
       fan_info: {
         total_spend: sub ? Math.round(parseFloat(sub.total_spend) || 0) : 0,

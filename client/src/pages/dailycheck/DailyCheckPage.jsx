@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { yesterday } from '@/utils/dates';
+import FanLabel from '@/components/shared/FanLabel';
 
 
 const WORKLOAD_TONE = { overloaded: 'warn', underperforming: 'bad', healthy: 'good', light: 'info' };
@@ -754,14 +755,14 @@ function FlagRow({ flag, setFlagStatus, creatorNames }) {
       </div>
       {showSubs && subs.length > 0 && (
         <div className='mt-3 divide-y border-t'>
-          {subs.map((s, i) => <SubRow key={(s.fan_username || s.fan_nickname) + i} sub={s} creatorNames={creatorNames} />)}
+          {subs.map((s, i) => <SubRow key={(s.fan_username || s.fan_nickname) + i} sub={s} creatorNames={creatorNames} names={flag.details?.names} />)}
         </div>
       )}
     </div>
   );
 }
 
-function SubRow({ sub, creatorNames }) {
+function SubRow({ sub, creatorNames, names }) {
   const creatorName = sub.creator_id ? (creatorNames?.[sub.creator_id] || null) : null;
   return (
     <div className='py-2.5'>
@@ -770,8 +771,7 @@ function SubRow({ sub, creatorNames }) {
           <ToneBadge tone={TIER_TONE[sub.tier] || 'neutral'} className='tabular-nums'>
             {TIER_LABEL[sub.tier] || sub.tier}{sub.spend ? ` $${Math.round(sub.spend).toLocaleString()}` : ''}
           </ToneBadge>
-          <span className='text-sm'>{sub.fan_nickname}</span>
-          <FanChip username={sub.fan_username} title='Copy username to search' />
+          <FanLabel username={sub.fan_username} nickname={sub.fan_nickname} info={names?.[sub.fan_username]} />
           {creatorName && (
             <span title='Page this fan was waiting on' className='text-xs'>
               <span className='text-muted-foreground'>on</span> <span className='font-medium'>{creatorName}</span>
