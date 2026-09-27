@@ -207,7 +207,7 @@ function ReviewRow({ done, onToggle, children }) {
 // Reply-time tasks carry a per-subscriber breakdown in context.subs. Each fan is
 // its own reviewable, checkable row: username (click-to-copy), tier, PAGE (a
 // chatter's subs span several pages), worst wait, when, and the message.
-function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId, names }) {
+function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwLink, names }) {
   const [done, toggle] = useChecklist(`replyDone:${taskId}`);
   return (
     <ReviewList count={subs.length} defaultOpen={subs.length <= 4}
@@ -221,7 +221,7 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId, names })
             <div className='flex flex-wrap items-center gap-2'>
               <FanChip username={s.fan_username} nickname={s.fan_nickname} names={names} className={done.has(key) ? 'line-through' : ''} />
               {s.fan_username && <ChatButton onClick={() => onOpenChat(s.fan_username)} />}
-              <InflowwButton href={inflowwChatLink(inflowwId(null, s.page), s.fan_username)} />
+              <InflowwButton href={inflowwLink(null, s.page, s.fan_username)} />
               <Badge variant='outline' className='capitalize' style={tint(tag.c)}>{tag.label}</Badge>
               {s.page && <Badge variant='secondary' className='font-normal'>{s.page}</Badge>}
               <span className='text-xs font-semibold text-bad'>{s.worst_reply_min}m wait</span>
@@ -238,12 +238,12 @@ function ReplyTimeSubs({ subs, workload, taskId, onOpenChat, inflowwId, names })
 
 // AFK tasks carry context.incidents — each gap with its bracketing times, who the
 // chatter resumed with, and the fans left waiting. Point the manager to the spot.
-function AfkIncidents({ incidents, taskId, onOpenChat, inflowwId, names }) {
+function AfkIncidents({ incidents, taskId, onOpenChat, inflowwLink, names }) {
   // chat + Infloww buttons for one fan on this gap's page
   const open = (fan, page) => fan && (
     <>
       <ChatButton onClick={() => onOpenChat(fan)} />
-      <InflowwButton href={inflowwChatLink(inflowwId(null, page), fan)} />
+      <InflowwButton href={inflowwLink(null, page, fan)} />
     </>
   );
   const [done, toggle] = useChecklist(`afkDone:${taskId}`);
@@ -341,7 +341,7 @@ const ACTIONED = {
   archived: { icon: Inbox, verb: 'Archived' },
 };
 
-function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, onSelect, inflowwId }) {
+function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, onSelect, inflowwLink }) {
   const isCustom = task.source_type === 'custom';
   const ctx = task.context || {};
   const live = task.status === 'open' || task.status === 'taken';
@@ -410,7 +410,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
                 )}
                 {f.sent_at && <TimeStamp>{fmtSentAt(f.sent_at)}</TimeStamp>}
                 {f.username && <ChatButton onClick={() => onOpenChat(task, fans.length > 1 ? f.username : null)} />}
-                <InflowwButton href={inflowwChatLink(inflowwId(task.creator_id, task.creator_name), f.username)} />
+                <InflowwButton href={inflowwLink(task.creator_id, task.creator_name, f.username)} />
               </span>
             ))}
           </div>
@@ -432,14 +432,14 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
         )}
 
         {Array.isArray(ctx.subs) && ctx.subs.length > 0 && (
-          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} names={ctx.names} />
+          <ReplyTimeSubs subs={ctx.subs} workload={ctx.workload} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwLink={inflowwLink} names={ctx.names} />
         )}
         {Array.isArray(ctx.incidents) && ctx.incidents.length > 0 && (
-          <AfkIncidents incidents={ctx.incidents} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwId={inflowwId} names={ctx.names} />
+          <AfkIncidents incidents={ctx.incidents} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} inflowwLink={inflowwLink} names={ctx.names} />
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
           <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} names={ctx.names}
-            inflowwHref={(fan) => inflowwChatLink(inflowwId(task.creator_id, task.creator_name), fan)} />
+            inflowwHref={(fan) => inflowwLink(task.creator_id, task.creator_name, fan)} />
         )}
 
         {task.status === 'archived' && task.priority_reason && (
@@ -650,6 +650,7 @@ export default function TasksPage() {
   const [history, setHistory] = useState({});         // tab -> { loaded, loading, hasMore }
   const [members, setMembers] = useState([]);
   const [pages, setPages] = useState([]);              // for the pages' Infloww IDs
+  const [fanIds, setFanIds] = useState({});            // username → OnlyFans ID from pasted chat links
   // Filter/tab settings persist across tab switches and navigation (localStorage).
   const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
   const [tab, setTab] = useState(saved.tab || 'open');
@@ -681,6 +682,7 @@ export default function TasksPage() {
         api.get('/api/creators').catch(() => ({ data: [] })),
       ]);
       setPages(cr.data || []);
+      api.get('/api/review-tasks/fan-links').then(r => setFanIds(r.data?.links || {})).catch(() => { /* optional */ });
       const live = tk.data.tasks || [];
       const liveIds = new Set(live.map(t => t.id));
       setTasks(prev => [...prev.filter(t => !LIVE.includes(t.status) && !liveIds.has(t.id)), ...live]);
@@ -726,6 +728,13 @@ export default function TasksPage() {
     const p = pages.find(x => (creatorId && x.id === creatorId) || (pageName && x.name === pageName));
     return p?.infloww_creator_id || null;
   }, [pages]);
+  const inflowwLink = useCallback((creatorId, pageName, username) =>
+    inflowwChatLink(inflowwId(creatorId, pageName), username, fanIds), [inflowwId, fanIds]);
+  // A manager pasted a fan's chat link in the chat panel: that fan (and maybe the page) now has an ID.
+  const onLinked = ({ username, of_user_id, page }) => {
+    setFanIds(m => ({ ...m, [username]: of_user_id }));
+    if (page?.set) api.get('/api/creators').then(r => setPages(r.data || [])).catch(() => { /* ignore */ });
+  };
 
   // One action on one task. Complete / dismiss / archive offer Undo, which puts the
   // task back exactly where it was (open, or still taken by the same person).
@@ -893,7 +902,7 @@ export default function TasksPage() {
   });
 
   const rowProps = (t) => ({
-    onAction, onOpenChat: openChat, memberName, inflowwId,
+    onAction, onOpenChat: openChat, memberName, inflowwLink,
     focused: t.id === effectiveFocus, selected: selected.has(t.id), onSelect: toggleSelect,
   });
 
@@ -1023,7 +1032,7 @@ export default function TasksPage() {
           }} />
       )}
       {showCustom && <CustomTaskDialog meta={meta || { creators: [], chatters: [], members }} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
-      {chat && <DialogueSheet task={chat.task} fan={chat.fan} onClose={() => setChat(null)} />}
+      {chat && <DialogueSheet task={chat.task} fan={chat.fan} onClose={() => setChat(null)} onLinked={onLinked} />}
     </div>
   );
 }

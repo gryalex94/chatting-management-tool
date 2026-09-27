@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, History, Loader2 } from 'lucide-react';
+import { ExternalLink, History, Link2, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { fmtSentAt, areaMeta, reasonLabel, inflowwChatLink } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
@@ -7,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from '@/components/ui/input';
 import FanLabel from '@/components/shared/FanLabel';
 
 // How far back "Show earlier" reaches, step by step (days before the task's day).
@@ -20,11 +22,12 @@ const STATUS_LABEL = { open: 'Open', taken: 'Taken', completed: 'Completed', dis
  * the messages around the task's day with the flagged message highlighted.
  * `fan` picks one fan out of a multi-fan task (reply-time / keyword rows).
  */
-export default function DialogueSheet({ task, fan, onClose }) {
+export default function DialogueSheet({ task, fan, onClose, onLinked }) {
   const [step, setStep] = useState(0);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [reload, setReload] = useState(0);
   const focusRef = useRef(null);
 
   useEffect(() => {
@@ -38,7 +41,7 @@ export default function DialogueSheet({ task, fan, onClose }) {
       .catch(e => { if (live) setError(e?.response?.data?.error || 'Could not load the conversation'); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [task.id, fan, step]);
+  }, [task.id, fan, step, reload]);
 
   // Bring the flagged message into view once the conversation is in.
   useEffect(() => {
@@ -57,7 +60,8 @@ export default function DialogueSheet({ task, fan, onClose }) {
 
   // Open this chat in Infloww, on the page of the flagged message (else the latest one).
   const pageMsg = data?.messages?.find(m => m.id === focusId) || data?.messages?.[data.messages.length - 1];
-  const inflowwLink = inflowwChatLink(pageMsg?.page_infloww_id, data?.fan_username);
+  const inflowwLink = inflowwChatLink(pageMsg?.page_infloww_id, data?.fan_username,
+    data?.fan_of_id ? { [data.fan_username]: data.fan_of_id } : {});
 
   return (
     <Sheet open onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -85,6 +89,10 @@ export default function DialogueSheet({ task, fan, onClose }) {
             <Button asChild size='sm' className='mt-1 w-fit'>
               <a href={inflowwLink}><ExternalLink />Open in Infloww{pageMsg?.page ? ` (${pageMsg.page})` : ''}</a>
             </Button>
+          )}
+          {data && !inflowwLink && data.messages?.length > 0 && (
+            <LinkToInfloww username={data.fan_username} missingFan={!data.fan_of_id} missingPage={!pageMsg?.page_infloww_id}
+              onDone={(r) => { onLinked?.(r); setReload(n => n + 1); }} />
           )}
         </SheetHeader>
 
@@ -146,5 +154,43 @@ export default function DialogueSheet({ task, fan, onClose }) {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * When "Open in Infloww" can't be built yet: the manager pastes this fan's chat
+ * link from Infloww once (chat → ⋮ → Copy chat link). The server keeps the fan's
+ * ID — and the page's, if that's missing too — so the button works for everyone.
+ */
+function LinkToInfloww({ username, missingFan, missingPage, onDone }) {
+  const [link, setLink] = useState('');
+  const [saving, setSaving] = useState(false);
+  const why = missingFan
+    ? "We don't know this fan's Infloww ID yet (they changed their username)."
+    : "This page's Infloww ID isn't set yet.";
+  const save = async () => {
+    if (!link.trim()) return;
+    setSaving(true);
+    try {
+      const { data } = await api.post('/api/review-tasks/fan-link', { username, link: link.trim() });
+      toast.success(data.page?.set ? `Linked, and ${data.page.name}'s Infloww ID saved too` : 'Linked. "Open in Infloww" now works for this fan');
+      setLink('');
+      onDone(data);
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Could not save the link');
+    } finally { setSaving(false); }
+  };
+  return (
+    <div className='mt-1 grid gap-1.5 rounded-md border border-dashed p-2.5'>
+      <p className='text-xs text-muted-foreground'>
+        {why} In Infloww, open this fan&apos;s chat, click <b>⋮</b> then <b>Copy chat link</b>, and paste it here once.
+        {missingPage && !missingFan ? ' Or set it in Settings → the page.' : ''}
+      </p>
+      <div className='flex gap-2'>
+        <Input value={link} onChange={e => setLink(e.target.value)} placeholder='https://chatlink.infloww.com?cid=…&fid=…'
+          className='h-8 text-xs' onKeyDown={e => { if (e.key === 'Enter') save(); }} />
+        <Button size='sm' variant='outline' disabled={!link.trim() || saving} onClick={save}><Link2 />{saving ? 'Saving…' : 'Link'}</Button>
+      </div>
+    </div>
   );
 }

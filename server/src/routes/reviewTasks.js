@@ -7,6 +7,7 @@ const { rebuildQueue } = require('../utils/taskQueue');
 const { dayWindow, stripTags } = require('../ai/evalShared');
 const { DISMISS_CODES } = require('../utils/dismissReasons');
 const { fanNameInfo } = require('../utils/fanNames');
+const { parseChatLink, idFromUsername } = require('../utils/inflowwLinks');
 
 const STATUSES = ['open', 'taken', 'completed', 'dismissed', 'archived'];
 const OUTCOMES = ['coached', 'fixed', 'noted'];
@@ -106,6 +107,71 @@ router.get('/', async (req, res) => {
   }
 });
 
+// GET /api/review-tasks/fan-links — OnlyFans IDs learned from pasted chat links,
+// { username: id }, so "Open in Infloww" works for fans with a custom username.
+router.get('/fan-links', async (req, res) => {
+  const links = {};
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin.from('fan_infloww_ids').select('username, of_user_id')
+      .eq('organisation_id', req.user.organisationId).order('username').range(from, from + 999);
+    if (error || !data?.length) break;          // table not there yet (migration 022) → none
+    data.forEach(r => { links[r.username] = r.of_user_id; });
+    if (data.length < 1000) break;
+  }
+  res.json({ links });
+});
+
+// POST /api/review-tasks/fan-link  { username, link }
+// A manager pastes the fan's "Copy chat link" from Infloww. We keep the fan's
+// OnlyFans ID from it, refusing a link that is visibly another fan's. If no page
+// has this link's Infloww page ID yet and the fan only talks on one page that
+// lacks one, that page gets it too.
+router.post('/fan-link', async (req, res) => {
+  try {
+    const orgId = req.user.organisationId;
+    const username = String(req.body.username || '').trim();
+    const parsed = parseChatLink(req.body.link);
+    if (!username) return res.status(400).json({ error: 'Which fan is this for?' });
+    if (!parsed) return res.status(400).json({ error: 'Paste the link from Infloww: open the chat, ⋮ menu → Copy chat link' });
+    const { cid, fid } = parsed;
+
+    const own = idFromUsername(username);
+    if (own && own !== fid) return res.status(400).json({ error: `This link is for a different fan (u${fid})` });
+    if (!own) {
+      const { count } = await supabaseAdmin.from('messages').select('id', { count: 'exact', head: true })
+        .eq('organisation_id', orgId).eq('sent_to_username', `u${fid}`);
+      if (count) return res.status(400).json({ error: `This link is for a different fan (u${fid})` });
+      const { error } = await supabaseAdmin.from('fan_infloww_ids').upsert(
+        { organisation_id: orgId, username, of_user_id: fid, created_by: req.user.id, created_at: new Date().toISOString() },
+        { onConflict: 'organisation_id,username' });
+      if (error) return res.status(500).json({ error: 'Could not save (has migration 022 been run?)' });
+    }
+
+    // The page's Infloww ID, if it isn't known yet.
+    let page = null;
+    const { data: known } = await supabaseAdmin.from('creators').select('id, name')
+      .eq('organisation_id', orgId).eq('infloww_creator_id', cid).maybeSingle();
+    if (known) page = { name: known.name, set: false };
+    else {
+      const since = new Date(Date.now() - 60 * 86400000).toISOString();
+      const { data: rows } = await supabaseAdmin.from('messages').select('creator_id')
+        .eq('organisation_id', orgId).eq('sent_to_username', username).gte('sent_datetime', since).limit(1000);
+      const pages = [...new Set((rows || []).map(r => r.creator_id).filter(Boolean))];
+      if (pages.length === 1) {
+        const { data: cr } = await supabaseAdmin.from('creators').select('id, name, infloww_creator_id')
+          .eq('organisation_id', orgId).eq('id', pages[0]).maybeSingle();
+        if (cr && !cr.infloww_creator_id) {
+          const { error } = await supabaseAdmin.from('creators').update({ infloww_creator_id: cid }).eq('id', cr.id);
+          if (!error) page = { name: cr.name, set: true };
+        }
+      }
+    }
+    res.json({ username, of_user_id: fid, page });
+  } catch {
+    res.status(500).json({ error: 'Could not save the link' });
+  }
+});
+
 // GET /api/review-tasks/:id/dialogue?fan=<username>&days=1
 // The conversation behind a task, so a manager can judge it without leaving the
 // app: every message with that fan from `days` days before the task's day
@@ -161,8 +227,17 @@ router.get('/:id/dialogue', async (req, res) => {
     const lastPage = rows.length ? rows[rows.length - 1].creator_id : null;
     const nameInfo = lastPage ? (await fanNameInfo(orgId, [{ username: fan, creatorId: lastPage }]).catch(() => ({})))[fan] : null;
 
+    // The fan's OnlyFans ID: in a default username, or learned from a pasted chat link
+    let fanOfId = idFromUsername(fan);
+    if (!fanOfId) {
+      const { data: link } = await supabaseAdmin.from('fan_infloww_ids').select('of_user_id')
+        .eq('organisation_id', orgId).eq('username', fan).maybeSingle();
+      fanOfId = link?.of_user_id || null;
+    }
+
     res.json({
       fan_username: fan,
+      fan_of_id: fanOfId,
       fan_name: nameInfo?.name || null,
       name_shared: nameInfo?.shared || null,
       from, to, focus, days,
