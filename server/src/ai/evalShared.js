@@ -448,6 +448,31 @@ function bestOverlap(pool, detailNorm) {
   return best;
 }
 
+// Words the review uses about any fan ("Fan VOID … new sub", "will") that are
+// also some fans' display names. A display name only counts as naming that fan
+// when it appears as a whole word and isn't one of these, a page name or a
+// chatter name (a fan called "Loona" on Loona's page, or "James" when the
+// chatter is James, would otherwise be pulled in).
+const GENERIC_NAMES = new Set('fan fans sub subs subscriber new old chatter chatters creator model page manager team person user onlyfans infloww will can may just still one two top boss daddy baby babe king bro'.split(' '));
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const wholeWord = (needle, text, flags = 'u') =>
+  new RegExp(`(^|[^\\p{L}\\p{N}_])${escRe(needle)}($|[^\\p{L}\\p{N}_])`, flags).test(text);
+function nameBlocklist(names) {
+  const out = new Set();
+  for (const n of names) {
+    const nl = _norm(n);
+    if (!nl) continue;
+    out.add(nl);
+    for (const w of nl.split(' ')) if (w.length >= 3) out.add(w);
+  }
+  return out;
+}
+function nicknameMentioned(nick, detail, blocked) {
+  const n = _norm(nick);
+  if (n.length < 3 || GENERIC_NAMES.has(n) || blocked.has(n)) return false;
+  return ` ${_norm(detail)} `.includes(` ${n} `);
+}
+
 async function buildEnrichment(orgId, msgs) {
   const creatorNames = {};
   const creatorInstructions = {};
@@ -464,6 +489,12 @@ async function buildEnrichment(orgId, msgs) {
       if (c.ai_context) creatorContext[c.id] = c.ai_context;
     });
   } catch { /* names optional */ }
+  let chatterNames = [];
+  try {
+    const { data } = await supabaseAdmin.from('chatters').select('name').eq('organisation_id', orgId);
+    chatterNames = (data || []).map(c => c.name);
+  } catch { /* optional */ }
+  const blockedNames = nameBlocklist([...Object.values(creatorNames), ...chatterNames]);
 
   // Collision-aware identity maps. Several fans often share a nickname ("Alex" can
   // be 50 different fans), so a nickname only resolves when it's UNambiguous; the
@@ -555,13 +586,14 @@ async function buildEnrichment(orgId, msgs) {
     const padded = ` ${dl} `;
     const rawDetail = String(issue.detail || '').toLowerCase();
     // Every fan the issue names: the primary + any USERNAME appearing in the detail
-    // + any UNambiguous nickname as a whole word (shared nicknames are skipped —
-    // attaching one of 50 "Alex"es would point the manager at the wrong dialogue).
+    // as a whole word + any UNambiguous nickname written as the fan spells it
+    // (shared nicknames are skipped — attaching one of 50 "Alex"es would point the
+    // manager at the wrong dialogue; see nicknameMentioned for the rest).
     const fanNick = new Map();
     if (username) fanNick.set(username, userToNick[username] || (rawFan || null));
     for (const u of allUsers) {
       if (u.length < 4 || fanNick.has(u)) continue;
-      if (rawDetail.includes(u.toLowerCase())) fanNick.set(u, userToNick[u] || null);
+      if (rawDetail.includes(u.toLowerCase()) && wholeWord(u.toLowerCase(), rawDetail)) fanNick.set(u, userToNick[u] || null);
     }
     for (const nl of nickKeys) {
       if (nl.length < 3) continue;
@@ -569,7 +601,7 @@ async function buildEnrichment(orgId, msgs) {
       const us = nickToUsers[nl];
       if (us.size !== 1) continue;                 // shared nickname → never guess
       const u = [...us][0];
-      if (u && !fanNick.has(u)) fanNick.set(u, nickDisplay[nl]);
+      if (u && !fanNick.has(u) && nicknameMentioned(nickDisplay[nl], issue.detail, blockedNames)) fanNick.set(u, nickDisplay[nl]);
     }
     const fans = [...fanNick.entries()].map(([u, nick]) => {
       const fm = (u === username && match) ? match : bestOverlap(msgIndex.filter(x => x.username === u), dl);
@@ -654,4 +686,4 @@ function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}
   return `PER-PAGE CONTEXT — these are FACTS about specific pages, set by the manager. They OVERRIDE your general assumptions for that page's conversations. Apply each page's context only to conversations on that page:\n${blocks.join('\n')}\n\n`;
 }
 
-module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, reportDateOf, stripPpvTags, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, trimLines, NEW_SUB_RULES };
+module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, reportDateOf, stripPpvTags, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, trimLines, NEW_SUB_RULES, nicknameMentioned, nameBlocklist, wholeWord };
