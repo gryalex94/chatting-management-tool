@@ -89,8 +89,8 @@ const TimeStamp = ({ children }) => (
 
 /* ═══ INFLOWW SALES CREDIT ════════════════════════ */
 // What Infloww credits this chatter with over the last 30 days — its own
-// attribution (message sender, last chatter, on shift, manual), tips included —
-// next to our number from the chat exports (PPVs bought in the chats).
+// attribution (message sender, last chatter, on shift, manual), tips included.
+// The same numbers drive every sales figure in the app.
 const CREDIT_TYPES = [['ppv', 'PPVs'], ['tips', 'Tips'], ['subs', 'Subscriptions'], ['other', 'Other']];
 function InflowwCredit({ chatterId }) {
   const [c, setC] = useState(null);
@@ -98,8 +98,7 @@ function InflowwCredit({ chatterId }) {
     api.get(`/api/chatters/${chatterId}/credit?days=30`).then(r => setC(r.data)).catch(() => setC({ error: true }));
   }, [chatterId]);
   if (!c || c.error || (!c.linked && !c.total)) return null;
-  const max = Math.max(1, ...c.days.map(d => Math.max(d.credited || 0, d.chat_sales || 0)));
-  const chatTotal = c.days.reduce((a, d) => a + (d.chat_sales || 0), 0);
+  const max = Math.max(1, ...c.days.map(d => d.credited || 0));
   const money = (n) => `$${Math.round(n || 0).toLocaleString()}`;
   return (
     <Panel title='Sales credited in Infloww' meta={`last 30 days · ${c.count} sales`}>
@@ -107,7 +106,7 @@ function InflowwCredit({ chatterId }) {
         <div className='grid content-start gap-3'>
           <div>
             <p className='text-2xl font-semibold tabular-nums'>{money(c.total)}</p>
-            <p className='text-xs text-muted-foreground'>credited by Infloww · {money(chatTotal)} in PPVs bought in our chat exports</p>
+            <p className='text-xs text-muted-foreground'>credited by Infloww, tips included</p>
           </div>
           <div className='flex flex-wrap gap-1.5'>
             {CREDIT_TYPES.filter(([k]) => c.by_type[k]).map(([k, l]) => (
@@ -134,19 +133,15 @@ function InflowwCredit({ chatterId }) {
             {c.days.map(d => (
               <Tooltip key={d.date}>
                 <TooltipTrigger asChild>
-                  <div className='flex h-full flex-1 items-end gap-px'>
-                    <div className='flex-1 rounded-t-sm bg-link/70' style={{ height: `${(100 * (d.credited || 0)) / max}%` }} />
-                    <div className='flex-1 rounded-t-sm bg-muted-foreground/30' style={{ height: `${(100 * (d.chat_sales || 0)) / max}%` }} />
+                  <div className='flex h-full flex-1 items-end'>
+                    <div className='w-full rounded-t-sm bg-link/70' style={{ height: `${(100 * (d.credited || 0)) / max}%` }} />
                   </div>
                 </TooltipTrigger>
-                <TooltipContent>{d.date}: credited {money(d.credited)} · chats {money(d.chat_sales)}</TooltipContent>
+                <TooltipContent>{d.date}: {money(d.credited)}{d.tips ? ` (tips ${money(d.tips)})` : ''}</TooltipContent>
               </Tooltip>
             ))}
           </div>
-          <div className='mt-2 flex gap-3 text-xs text-muted-foreground'>
-            <span className='inline-flex items-center gap-1'><span className='size-2 rounded-sm bg-link/70' />Credited in Infloww</span>
-            <span className='inline-flex items-center gap-1'><span className='size-2 rounded-sm bg-muted-foreground/30' />PPVs in chat exports</span>
-          </div>
+          <p className='mt-2 text-xs text-muted-foreground'>Credited per day, last 30 days</p>
         </div>
       </div>
     </Panel>

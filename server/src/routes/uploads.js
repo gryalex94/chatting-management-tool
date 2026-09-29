@@ -4,7 +4,6 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const { parseMessageDashboard } = require('../parsers/messageDashboard');
 const { parseEmployeeReport } = require('../parsers/employeeReport');
-const { parseCreatorStats } = require('../parsers/creatorStats');
 const { importSubscriberSpend } = require('../parsers/subscriberSpend');
 
 // Configure multer for file uploads (store in memory)
@@ -152,57 +151,8 @@ router.post('/employee-report', requireMinRole('manager'), upload.single('file')
   }
 });
 
-// POST /api/uploads/creator-stats - Upload creator statistics
-router.post('/creator-stats', requireMinRole('manager'), upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-    const { report_date } = req.body;
-    if (!report_date) return res.status(400).json({ error: 'Report date is required' });
-
-    const { data: importRecord, error: importError } = await supabaseAdmin
-      .from('data_imports')
-      .insert({
-        organisation_id: req.user.organisationId,
-        report_type: 'creator_statistics',
-        file_name: req.file.originalname,
-        uploaded_by: req.user.id,
-        report_date,
-        status: 'processing',
-      })
-      .select()
-      .single();
-
-    if (importError) return res.status(500).json({ error: importError.message });
-
-    res.status(202).json({
-      message: 'File received, processing started',
-      importId: importRecord.id,
-    });
-
-    try {
-      const result = await parseCreatorStats(
-        req.file.buffer,
-        req.file.originalname,
-        importRecord.id,
-        req.user.organisationId
-      );
-
-      await supabaseAdmin
-        .from('data_imports')
-        .update({ status: 'completed', row_count: result.rowCount })
-        .eq('id', importRecord.id);
-    } catch (parseErr) {
-      console.error('Parse error:', parseErr?.message);
-      await supabaseAdmin
-        .from('data_imports')
-        .update({ status: 'failed', error_message: parseErr.message })
-        .eq('id', importRecord.id);
-    }
-  } catch (err) {
-    res.status(500).json({ error: 'Upload failed' });
-  }
-});
+// The Creator Statistics upload was removed (Sep 2026): page stats now come from
+// the Infloww API every hour (utils/inflowwSync.js → creator_daily_stats).
 
 // GET /api/uploads/status/:id - Check import status
 router.get('/status/:id', async (req, res) => {
@@ -236,8 +186,7 @@ router.get('/day-status', async (req, res) => {
     res.json({
       report_date,
       message_dashboard: !!done.message_dashboard,
-      creator_statistics: !!done.creator_statistics,
-      ready: !!done.message_dashboard && !!done.creator_statistics,
+      ready: !!done.message_dashboard,          // page stats come from the Infloww API
     });
   } catch { res.status(500).json({ error: 'Failed to load day status' }); }
 });

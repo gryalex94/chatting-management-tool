@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, FileSpreadsheet, Check, CircleCheck, X, Loader2, MessageSquare, Users, Sparkles } from 'lucide-react';
+import { Upload, FileSpreadsheet, Check, CircleCheck, X, Loader2, MessageSquare, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -12,7 +12,6 @@ import { yesterday } from '@/utils/dates';
 
 const REPORTS = [
   { key:'message-dashboard', label:'Message dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare },
-  { key:'creator-stats',     label:'Creator statistics', desc:'Optional: comes from the Infloww API every hour', icon:Users },
 ];
 
 function ReportCard({ report, selected, uploaded, onSelect }) {
@@ -96,28 +95,31 @@ export default function ReportsPage() {
 
   const todayImports = imports.filter(i=>i.report_date===date);
   const getUploaded = key => todayImports.find(i=>
-    (key==='message-dashboard'&&i.report_type==='message_dashboard')||
-    (key==='creator-stats'&&i.report_type==='creator_statistics')
+    key==='message-dashboard'&&i.report_type==='message_dashboard'
   );
-  const bothReady = getUploaded('message-dashboard')?.status==='completed' && getUploaded('creator-stats')?.status==='completed';
+  // Page stats come from the Infloww API, so the chat export is the only upload.
+  const bothReady = getUploaded('message-dashboard')?.status==='completed';
 
-  // One-click daily pipeline (temporary): recompute metrics → AI compliance report
-  // per chatter (progress bar) → build & rank tasks — for the selected report date.
+  // One-click daily pipeline, run as a job on the server (metrics → daily check →
+  // AI review of every chatter → task queue): this page starts it and follows it.
   async function createDailyTasks() {
     setProgress({ stage:'calc' });
     try {
-      const { data:run } = await api.post('/api/daily-check/run', { report_date:date, recompute:true });
-      const chatters = run.chatters || [];
-      for (let i=0;i<chatters.length;i++){
-        const c = chatters[i];
-        setProgress({ stage:'evaluate', done:i, total:chatters.length, current:c.chatter_name });
-        try { await api.post('/api/daily-check/evaluate', { chatter_id:c.chatter_id, report_date:date, eval_type:'compliance', model:'sonnet', prompt_version:'A' }); }
-        catch { /* skip a chatter that fails, keep going */ }
+      await api.post('/api/daily-check/review', { report_date:date, model:'sonnet' });
+      for (;;) {
+        await new Promise(r=>setTimeout(r,2500));
+        const { data } = await api.get('/api/daily-check/review/status');
+        const st = data?.status;
+        if (!st || st.report_date!==date) break;
+        if (st.finished_at) {
+          if (st.error) throw new Error(st.error);
+          toast.success(`Daily tasks created${st.result ? ` (${st.result.created} new)` : ''} — see them on Home / Tasks`);
+          break;
+        }
+        setProgress(st.stage==='tasks' ? { stage:'build', done:st.total, total:st.total }
+          : st.stage==='calc' ? { stage:'calc' } : { stage:'evaluate', done:st.done, total:st.total, current:st.current });
       }
-      setProgress({ stage:'build', done:chatters.length, total:chatters.length });
-      await api.post('/api/review-tasks/rebuild', { report_date:date });
-      toast.success('Daily tasks created — see them on Home / Tasks');
-    } catch(e){ toast.error(e?.response?.data?.error || 'Failed to create daily tasks'); }
+    } catch(e){ toast.error(e?.response?.data?.error || e?.message || 'Failed to create daily tasks'); }
     finally { setProgress(null); }
   }
 
@@ -141,7 +143,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Report type cards */}
-      <div className='grid gap-3 sm:grid-cols-2'>
+      <div className='grid gap-3'>
         {REPORTS.map(r=><ReportCard key={r.key} report={r} selected={selected===r.key} uploaded={getUploaded(r.key)} onSelect={setSelected}/>)}
       </div>
 

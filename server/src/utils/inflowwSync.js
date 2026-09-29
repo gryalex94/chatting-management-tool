@@ -1,6 +1,7 @@
 const { supabaseAdmin } = require('./supabase');
 const infloww = require('../integrations/infloww');
 const { applyInflowwSpend } = require('./inflowwChecks');
+const { applyCreditToMetrics } = require('./inflowwCredit');
 
 /**
  * Pulls Infloww data into our tables (read-only on Infloww's side):
@@ -344,6 +345,12 @@ async function runInflowwSync({ days = 3 } = {}) {
     await step(orgId, 'sales', () => syncSales(orgId, pageMap, from, to), summary);
     await step(orgId, 'refunds', () => syncRefunds(orgId, pageMap, from, to), summary);
     await step(orgId, 'fan_ids', () => learnFanIds(orgId, from, to), summary);
+    // Chatter sales on the dashboard = Infloww's credit (last days keep changing).
+    await step(orgId, 'sales_credit', () => {
+      const dates = [];
+      for (let d = Date.parse(amsDate(from) + 'T00:00:00Z'); d <= Date.parse(amsDate(to) + 'T00:00:00Z'); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+      return applyCreditToMetrics(orgId, dates);
+    }, summary);
     await step(orgId, 'page_stats', () => syncPageStats(orgId, pageMap, platformMap(apiPages, pageMap), from, to,
       { onlyMissing: days > 7 }), summary);
     // the recent days are always refreshed, even during a backfill

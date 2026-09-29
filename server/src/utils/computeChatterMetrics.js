@@ -214,6 +214,13 @@ async function computeChatterDailyMetrics(organisationId, { dates } = {}) {
   }
 
   console.log(`[Metrics] Wrote ${written} rows${only ? ` for ${[...only].join(', ')}` : ''} (${Object.keys(dayGroups).length} chatter-days in history)`);
+  // Sales: Infloww's own credit replaces the chat-export number where it can.
+  try {
+    const { applyCreditToMetrics } = require('./inflowwCredit');
+    const days = only ? [...only] : [...new Set(rows.map(r => r.report_date))];
+    const n = await applyCreditToMetrics(organisationId, days);
+    if (n) console.log(`[Metrics] Infloww sales credit applied to ${n} rows`);
+  } catch (e) { console.error('[Metrics] Infloww sales credit:', e.message); }
   return { computed: written };
 }
 

@@ -225,8 +225,6 @@ export default function DashboardPage() {
         </div>
       ) },
     { key: 'sales', label: 'Sales', align: 'right', sortVal: r => r.metrics?.sales ?? -1, render: r => r.has_data ? <Cell val={r.metrics.sales} delta={r.vs_prev?.sales} money /> : <Dash /> },
-    // What Infloww credits the chatter with (its own attribution, incl. tips), next to our PPV-from-chats number
-    { key: 'credited', label: 'Credited', align: 'right', sortVal: r => r.credited ?? -1, render: r => r.credited != null ? <span className='font-mono tabular-nums'>{money(r.credited)}</span> : <Dash /> },
     { key: 'ppvs', label: 'PPVs', align: 'right', sortVal: r => r.metrics?.ppvs ?? -1, render: r => r.has_data ? <Cell val={r.metrics.ppvs} delta={r.vs_prev?.ppvs} /> : <Dash /> },
     { key: 'unlock', label: 'Unlock', align: 'right', sortVal: r => r.metrics?.unlock ?? -1, render: r => r.has_data ? <Cell val={r.metrics.unlock} delta={r.vs_prev?.unlock} suffix='%' /> : <Dash /> },
     { key: 'golden', label: 'Golden', align: 'right', sortVal: r => r.metrics?.golden ?? -1, render: r => r.has_data ? <Cell val={r.metrics.golden} delta={r.vs_prev?.golden} suffix='%' /> : <Dash /> },
@@ -364,7 +362,6 @@ export default function DashboardPage() {
             <div className='grid grid-cols-2 gap-4 lg:grid-cols-5'>
               {[
                 { l: 'Team sales today', v: money(tt.sales), d: tt.sales_vs_prev_pct, suffix: '%' },
-                ...(tt.credited ? [{ l: 'Credited in Infloww', v: money(tt.credited) }] : []),
                 { l: 'PPVs sent', v: tt.ppvs?.toLocaleString() },
                 { l: 'Messages', v: tt.messages?.toLocaleString() },
                 { l: 'Avg unlock', v: `${tt.unlock_avg}%` },

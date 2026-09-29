@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Check, FileSpreadsheet, Loader2, MessagesSquare, Upload, UserRound, X } from 'lucide-react';
+import { Check, FileSpreadsheet, Loader2, MessagesSquare, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -11,7 +11,6 @@ import { yesterday } from '@/utils/dates';
 
 const reportTypes = [
   { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: MessagesSquare },
-  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Optional: page stats now come from the Infloww API every hour', icon: UserRound },
 ];
 
 export default function UploadsPage() {
@@ -114,7 +113,7 @@ export default function UploadsPage() {
       </div>
 
       {/* Step 1: Select report type */}
-      <div className='grid gap-3 sm:grid-cols-2'>
+      <div className='grid gap-3'>
         {reportTypes.map(rt => {
           const on = selectedType === rt.key;
           return (
