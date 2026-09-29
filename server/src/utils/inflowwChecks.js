@@ -209,4 +209,68 @@ async function newSubsUnmessaged(orgId, reportDate, { creators = {} } = {}) {
   }));
 }
 
-module.exports = { applyInflowwSpend, fanChargebacks, newSubsUnmessaged };
+/**
+ * Big spenders gone quiet: a fan who spent QUIET_MIN+ on a page over the 90 days
+ * before the last QUIET_DAYS, buying at least 3 times, and then nothing at all
+ * for QUIET_DAYS (up to QUIET_MAX days — longer and they're gone, not going).
+ * One flag per fan and page, for the chatter who last sold to
+ * them. Its identity includes the last purchase date, so it stays one task while
+ * the fan stays quiet and becomes a new one if they buy and go quiet again.
+ * (Late Sep 2026: 24 such fans, $42.7k of spend in the prior 90 days.)
+ */
+const QUIET_MIN = 1000, QUIET_DAYS = 14, QUIET_WINDOW = 90;
+const QUIET_MAX = 45;          // silent longer than this: already gone, not "going quiet"
+async function spendersGoingQuiet(orgId, reportDate, { creators = {}, chatters = {} } = {}) {
+  // End of the report day (Amsterdam) in real time, approximately: +1 day covers it.
+  const end = Date.parse(reportDate + 'T00:00:00Z') + DAY_MS;
+  const quietFrom = end - QUIET_DAYS * DAY_MS;
+  const windowFrom = quietFrom - QUIET_WINDOW * DAY_MS;
+  const sales = await pageAll(() => supabaseAdmin.from('infloww_sales')
+    .select('fan_id, fan_name, creator_id, created_at, amount, employee_id, status')
+    .eq('organisation_id', orgId).neq('status', 'undo').gt('amount', 0)
+    .gte('created_at', new Date(windowFrom).toISOString()).lt('created_at', new Date(end).toISOString()).order('id'));
+  const fans = {};
+  for (const s of sales) {
+    if (!s.fan_id || !s.creator_id) continue;
+    const t = Date.parse(s.created_at);
+    const f = (fans[`${s.fan_id}|${s.creator_id}`] ||= { fan_id: s.fan_id, creator_id: s.creator_id, name: s.fan_name, prior: 0, buys: 0, recent: 0, last: null });
+    if (t >= quietFrom) f.recent += Number(s.amount);
+    else { f.prior += Number(s.amount); f.buys++; }
+    if (!f.last || t > Date.parse(f.last.created_at)) f.last = s;
+  }
+  const quiet = Object.values(fans).filter(f => f.prior >= QUIET_MIN && f.buys >= 3 && f.recent === 0
+    && end - Date.parse(f.last.created_at) <= QUIET_MAX * DAY_MS);
+  if (!quiet.length) return [];
+
+  const namesFor = await usernamesById(orgId);
+  const emps = await pageAll(() => supabaseAdmin.from('infloww_employees').select('employee_id, name, chatter_id')
+    .eq('organisation_id', orgId).order('employee_id'));
+  const empById = Object.fromEntries(emps.map(e => [e.employee_id, e]));
+  return quiet.map(f => {
+    const emp = f.last?.employee_id ? empById[f.last.employee_id] : null;
+    const chatterId = emp?.chatter_id || null;
+    const seller = emp ? (chatters[chatterId] || emp.name) : null;
+    const usernames = namesFor(f.fan_id);
+    const lastDate = amsDate(f.last.created_at);
+    const quietDays = Math.floor((end - Date.parse(f.last.created_at)) / DAY_MS);
+    const every = Math.max(1, Math.round(QUIET_WINDOW / f.buys));
+    const page = creators[f.creator_id] || 'this page';
+    return {
+      scope: chatterId ? 'chatter' : 'page', creator_id: f.creator_id, chatter_id: chatterId, report_date: reportDate,
+      flag_type: 'spender_quiet', severity: 'high', organisation_id: orgId, status: 'open', score: 0,
+      evidence: `Big spender gone quiet on ${page}: ${fmtMoney(f.prior)} in the previous ${QUIET_WINDOW} days (${f.buys} purchases, about every ${every} days), nothing for ${quietDays} days`
+        + `${seller ? ` — last sold by ${seller}` : ''}. Reach out personally, not with a mass message.`,
+      details: {
+        key: `${f.fan_id}:${lastDate}`, spend_90: Math.round(f.prior), purchases: f.buys, quiet_days: quietDays, seller: seller || null,
+        hits: [{
+          fan_username: usernames.find(u => !/^u\d+$/.test(u)) || usernames[0], fan_nickname: f.name || null,
+          sent_at: toStoreTime(f.last.created_at).toISOString(),
+          matched: `${fmtMoney(f.prior)} in ${QUIET_WINDOW}d, quiet ${quietDays}d`,
+          message: `last purchase ${lastDate}${seller ? `, sold by ${seller}` : ''}`,
+        }],
+      },
+    };
+  });
+}
+
+module.exports = { applyInflowwSpend, fanChargebacks, newSubsUnmessaged, spendersGoingQuiet };

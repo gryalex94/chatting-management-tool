@@ -440,7 +440,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
           <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} names={ctx.names}
-            label={ctx.flag_type === 'new_sub_unmessaged' ? 'New subs to message' : ctx.flag_type === 'fan_chargeback' ? 'Fan to look up' : 'Messages to check'}
+            label={ctx.flag_type === 'new_sub_unmessaged' ? 'New subs to message' : ctx.flag_type === 'fan_chargeback' ? 'Fan to look up' : ctx.flag_type === 'spender_quiet' ? 'Fan to win back' : 'Messages to check'}
             inflowwHref={(fan) => inflowwLink(task.creator_id, task.creator_name, fan)} />
         )}
 

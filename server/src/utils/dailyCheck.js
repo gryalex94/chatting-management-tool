@@ -1,6 +1,6 @@
 const { supabaseAdmin } = require('./supabase');
 const { fanNameInfo } = require('./fanNames');
-const { fanChargebacks, newSubsUnmessaged } = require('./inflowwChecks');
+const { fanChargebacks, newSubsUnmessaged, spendersGoingQuiet } = require('./inflowwChecks');
 const { dayWindow } = require('../ai/evalShared');
 const { matchOffPlatform, matchAge, knownPlatforms, clean } = require('./keywordScan');
 
@@ -225,6 +225,7 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
       extra = [
         ...await fanChargebacks(orgId, reportDate, { creators, chatters }),
         ...await newSubsUnmessaged(orgId, reportDate, { creators }),
+        ...await spendersGoingQuiet(orgId, reportDate, { creators, chatters }),
       ];
     } catch (e) { console.error('[DailyCheck] Infloww checks:', e.message); }
     const refundPages = new Set(extra.filter(f => f.flag_type === 'fan_chargeback').map(f => f.creator_id));

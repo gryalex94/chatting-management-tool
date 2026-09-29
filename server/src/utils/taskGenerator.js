@@ -37,8 +37,11 @@ const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders'];
 const FLAG_AREA = {
   chargeback: 'chargeback', keyword_offplatform: 'offplatform', keyword_age: 'age',
   ratio_below_5: 'ratio', ltv_drop: 'ltv', earnings_drop: 'revenue', earnings_spike: 'revenue',
-  fan_chargeback: 'chargeback', new_sub_unmessaged: 'new_sub',
+  fan_chargeback: 'chargeback', new_sub_unmessaged: 'new_sub', spender_quiet: 'retention',
 };
+// A state that lasts (a big spender staying quiet) must not reopen every day
+// after a manager has handled it; a new episode gets a new identity (details.key).
+const STICKY_FLAGS = new Set(['spender_quiet']);
 // Flags that describe something that HAPPENED on a day (a gap, a slow reply, a
 // keyword hit, a chargeback, a revenue swing) get one task per day: a new day is
 // new evidence, so dismissing Monday's under-18 hit must not silence Tuesday's.
@@ -375,6 +378,10 @@ async function buildTasksForDate(orgId, reportDate) {
     } else if (ex.status === 'completed') {
       // regression — it came back on a later day after being fixed
       if (!laterDay) continue;
+      if (STICKY_FLAGS.has(c.context?.flag_type)) {
+        await supabaseAdmin.from('review_tasks').update({ last_seen_date: lastSeen, updated_at: now }).eq('id', ex.id);
+        continue;
+      }
       await supabaseAdmin.from('review_tasks').update({
         status: 'open', regressed: true, detail: c.detail, title: c.title, context: c.context, severity: c.severity,
         first_seen_date: reportDate, last_seen_date: reportDate, days_open: 1,

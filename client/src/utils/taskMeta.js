@@ -24,6 +24,7 @@ export const AREA_META = {
   offplatform:  { label: 'Off-platform',   c: '#ef4444' },
   chargeback:   { label: 'Chargeback',     c: '#ef4444' },
   new_sub:      { label: 'New subs',       c: '#ec4899' },
+  retention:    { label: 'Win back',       c: '#8b5cf6' },
   needs_review: { label: 'Needs review',   c: '#ef4444' },
   // money owed / work ethic
   custom:       { label: 'Custom pending', c: '#f97316' },
