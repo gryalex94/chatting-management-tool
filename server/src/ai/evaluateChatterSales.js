@@ -1,5 +1,5 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES } = require('./evalShared');
 
 // ── Strategy review (communication + sales craft) → TASKS ───────────────────
 // Not a grader. This layer reads FULL conversations against Rice Media's strategy
@@ -11,6 +11,8 @@ const SALES_PROMPT = `You are an experienced OnlyFans agency chat manager review
 ${UNTRUSTED_RULE}
 
 ${READING_RULE}
+
+${NEW_SUB_RULES}
 
 Each conversation header shows the fan's recorded spend ("[u123, spent $250]" or "no recorded spend") and which PAGE the fan is on ("(page: Leya)"). Use the spend to pick the right playbook and to weigh how much a miss matters. A chatter works SEVERAL pages, each with its OWN content scope — never flag a difference BETWEEN pages as an inconsistency.
 
@@ -64,7 +66,7 @@ Turn each deviation into an issue:
 Return JSON with this exact shape:
 {
   "overall": "one short paragraph: the main strategy gaps to coach today",
-  "issues": [{"area":"sales | communication | abandon | quality","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null",${EVIDENCE_FIELDS}}]
+  "issues": [{"area":"sales | new_sub | communication | abandon | quality","severity":"critical | high | medium | low","detail":"what happened + quote + what the strategy expected; name every fan by username","fan":"the fan's USERNAME from the conversation header brackets (e.g. u573778077), or null",${EVIDENCE_FIELDS}}]
 }
 If the chatter followed the strategy well, return an empty issues list. Do not invent issues to fill the list.`;
 

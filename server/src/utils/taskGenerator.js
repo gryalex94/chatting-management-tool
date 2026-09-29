@@ -76,6 +76,7 @@ function tenureTier(createdAt, onDate) {
 function keepByTenure(c, tier) {
   if (c.source_type === 'flag' || c.source_type === 'creator') return true;   // apply to everyone
   if (PROTECTED_AREAS.has((c.area || '').toLowerCase())) return true;         // protected always
+  if ((c.area || '').toLowerCase() === 'new_sub') return true;               // the new-sub playbook applies to everyone
   const rank = SEV_RANK[c.severity];
   if (rank === undefined) return true;                                        // unrecognised severity → keep, a human looks
   return rank <= SEV_RANK[TENURE_MIN_SEV[tier] || 'high'];
@@ -89,7 +90,7 @@ function defaultPriority(sev, source, area) {
   if (sev === 'critical') return 1;
   if (a === 'chargeback') return 1;                            // money left the business — always look it up
   if (a === 'needs_review') return 2;                          // AI used an unknown label — a human checks it
-  if (a === 'new_sub') return 2;                               // new subs first: nobody messaged them
+  if (a === 'new_sub') return sev === 'high' || sev === 'critical' ? 2 : sev === 'medium' ? 4 : 5;   // new subs first
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
   if (a === 'custom') return sev === 'high' ? 2 : 3;          // paid custom undelivered — money owed / chargeback risk
   if (a === 'abandon') return sev === 'high' ? 2 : 3;         // chatter left a warm conversation early
@@ -200,6 +201,42 @@ async function loadDecisionHistory(orgId, reportDate) {
 }
 
 /**
+ * New-sub coaching points (area new_sub, medium/low: menu-selling, abrupt pitch,
+ * walking away after a sale, caving on a "no") are bundled into ONE task per
+ * chatter per day, so the playbook shows up as a coaching list instead of
+ * flooding the queue. High ones (an engaged new sub never offered anything)
+ * stay separate: those fans can still be won back the same day.
+ */
+function bundleNewSubCoaching(candidates, reportDate) {
+  const groups = new Map();
+  for (const c of candidates) {
+    if ((c.area || '').toLowerCase() !== 'new_sub' || !c.chatter_id) continue;
+    if (c.severity !== 'medium' && c.severity !== 'low') continue;
+    if (!groups.has(c.chatter_id)) groups.set(c.chatter_id, []);
+    groups.get(c.chatter_id).push(c);
+  }
+  const drop = new Set();
+  const bundled = [];
+  for (const [chatterId, list] of groups) {
+    if (list.length < 2) continue;
+    list.forEach(c => drop.add(c));
+    const first = list[0];
+    const fans = list.flatMap(c => (c.context?.fans?.length ? c.context.fans : c.fan_username ? [{ username: c.fan_username, sent_at: c.context?.sent_at }] : []));
+    const names = Object.assign({}, ...list.map(c => c.context?.names || {}));
+    bundled.push({
+      ...first,
+      fingerprint: `newsubcoach:ch=${chatterId}:d=${reportDate}`,
+      fan_username: null,
+      severity: list.some(c => c.severity === 'medium') ? 'medium' : 'low',
+      title: shortTitle(`${list.length} new-sub coaching points for ${first.chatter_name || 'this chatter'}`),
+      detail: `${list.length} moments where the new-sub playbook wasn't followed today:\n\n` + list.map(c => `• ${c.detail}`).join('\n\n'),
+      context: { ...(first.context || {}), message: null, sent_at: null, evidence: null, fans, names, bundled: list.length },
+    });
+  }
+  return candidates.filter(c => !drop.has(c)).concat(bundled);
+}
+
+/**
  * Build/refresh the task queue for a day from the stored AI reports + engine flags.
  * Idempotent and cross-day aware:
  *  - same issue recurring  -> carry the existing task forward (days_open++, carried_over)
@@ -298,11 +335,11 @@ async function buildTasksForDate(orgId, reportDate) {
 
   // drop anything tied to an ignored account/chatter (e.g. "Paul B"), then gate
   // dialogue tasks by the chatter's tenure (experienced → serious items only).
-  const kept = collapseCrossChatter(candidates.filter(c => {
+  const kept = bundleNewSubCoaching(collapseCrossChatter(candidates.filter(c => {
     if (ignoreSet.has(_norm(c.chatter_name)) || ignoreSet.has(_norm(c.fan_username))) return false;
     const tier = c.chatter_id ? (tenureById[c.chatter_id] || 'experienced') : 'new';
     return keepByTenure(c, tier);
-  }));
+  })), reportDate);
 
   // Learn from what managers already decided (last 30 days), AI findings only,
   // never the protected safety areas:
