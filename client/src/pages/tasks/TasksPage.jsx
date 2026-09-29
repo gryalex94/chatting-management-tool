@@ -471,6 +471,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
             <Button size='sm' variant='outline' onClick={() => onAction(task, 'complete')}><CircleCheck />Complete</Button>
           )}
           {task.status === 'taken' && <Button size='sm' onClick={() => onAction(task, 'complete')}>Complete</Button>}
+          {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'not_issue')}>Not an issue</Button>}
           {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'dismiss')}>Dismiss</Button>}
           {!live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'reopen')}><RotateCcw />Reopen</Button>}
           {/* Page-level tasks can't be saved for coaching; keep the slot anyway so
@@ -628,7 +629,7 @@ const UNDOABLE = { complete: 'Completed', dismiss: 'Dismissed', archive: 'Archiv
 const OUTCOMES = [['coached', 'Coached the chatter'], ['fixed', 'Fixed it'], ['noted', 'Just noted']];
 const OUTCOME_LABEL = Object.fromEntries(OUTCOMES);
 const SHORTCUTS = [
-  ['j / k', 'Next / previous task'], ['t', 'Take'], ['c', 'Complete'], ['d', 'Dismiss, then 1–6 for the reason'],
+  ['j / k', 'Next / previous task'], ['t', 'Take'], ['c', 'Complete'], ['n', 'Not an issue'], ['d', 'Dismiss, then 1–6 for the reason'],
   ['o', 'Open the conversation'], ['x', 'Select for a bulk action'], ['Esc', 'Clear the selection'],
 ];
 
@@ -644,6 +645,38 @@ function applyAction(t, action, extra, userId) {
   if (action === 'dismiss') { next.dismiss_reason_code = extra.reason_code; next.dismiss_reason = extra.reason || null; }
   if (action === 'reopen' || action === 'undo') { next.dismiss_reason_code = null; next.dismiss_reason = null; }
   return next;
+}
+
+// After a one-tap "Not an issue": say why, in a sentence. Optional, but these notes
+// are what the weekly AI-rules draft learns from.
+function NoteDialog({ task, onClose, onSave }) {
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    if (!note.trim() || saving) return;
+    setSaving(true);
+    const ok = await onSave(note.trim());
+    setSaving(false);
+    if (ok) onClose();
+  };
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className='sm:max-w-lg'>
+        <DialogHeader>
+          <DialogTitle>Why isn&apos;t it an issue?</DialogTitle>
+          <DialogDescription>A sentence is enough. Notes like this are drafted into the AI&apos;s rules each week, once you approve them.</DialogDescription>
+        </DialogHeader>
+        <p className='rounded-md bg-muted px-3 py-2 text-sm leading-relaxed text-muted-foreground'>{task.detail || task.title}</p>
+        <Textarea id='not-issue-note' autoFocus value={note} onChange={e => setNote(e.target.value)}
+          placeholder="e.g. Content sent after a tip isn't free content"
+          onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save(); }} />
+        <DialogFooter>
+          <Button variant='ghost' onClick={onClose}>Skip</Button>
+          <Button disabled={!note.trim() || saving} onClick={save}>{saving ? 'Saving…' : 'Save note'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 export default function TasksPage() {
@@ -664,6 +697,7 @@ export default function TasksPage() {
   const [selPages, setSelPages] = useState(saved.selPages || []);
   const [selChatters, setSelChatters] = useState(saved.selChatters || []);
   const [dismiss, setDismiss] = useState(null);        // a task, or { bulk: [tasks] }
+  const [noteFor, setNoteFor] = useState(null);        // a task just marked "Not an issue", to add why
   const [showCustom, setShowCustom] = useState(false);
   const [meta, setMeta] = useState(null);              // pages/chatters/members for the custom-task form
   const [chat, setChat] = useState(null);              // { task, fan }
@@ -743,7 +777,9 @@ export default function TasksPage() {
 
   // One action on one task. Complete / dismiss / archive offer Undo, which puts the
   // task back exactly where it was (open, or still taken by the same person).
-  const act = async (task, action, extra = {}) => {
+  // opts.quick: the one-tap "Not an issue" (a dismiss as "it's fine"), which offers
+  // a note instead of the reason picker.
+  const act = async (task, action, extra = {}, opts = {}) => {
     // When the focused task leaves this tab, focus moves on to the next one.
     if (task.id === focusId && ['take', 'complete', 'dismiss', 'archive', 'reopen'].includes(action)) {
       const i = orderedIds.indexOf(task.id);
@@ -766,8 +802,11 @@ export default function TasksPage() {
         toast(tt => (
           <span className='flex flex-col gap-2'>
             <span className='flex items-center gap-3'>
-              {UNDOABLE[action]}
+              {opts.quick ? 'Marked not an issue' : UNDOABLE[action]}
               <Button size='sm' variant='outline' className='h-7' onClick={() => { toast.dismiss(tt.id); act(task, 'undo', { to }); }}>Undo</Button>
+              {opts.quick && (
+                <Button size='sm' variant='ghost' className='h-7' onClick={() => { toast.dismiss(tt.id); setNoteFor(task); }}>Add why</Button>
+              )}
             </span>
             {action === 'complete' && (
               <span className='flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
@@ -778,7 +817,7 @@ export default function TasksPage() {
               </span>
             )}
           </span>
-        ), { duration: action === 'complete' ? 9000 : 6000 });
+        ), { duration: action === 'complete' || opts.quick ? 9000 : 6000 });
       } else {
         toast.success(action === 'coach' ? 'Saved for coaching' : action === 'uncoach' ? 'Removed from coaching' : action === 'undo' ? 'Undone' : 'Updated');
       }
@@ -787,7 +826,21 @@ export default function TasksPage() {
       if (e?.response?.status === 409) loadLive();       // someone else took it: show the real state
     }
   };
-  const onAction = (task, action) => { if (action === 'dismiss') setDismiss(task); else act(task, action); };
+  const notAnIssue = (task) => act(task, 'dismiss', { reason_code: 'allowed' }, { quick: true });
+  const onAction = (task, action) => {
+    if (action === 'dismiss') setDismiss(task);
+    else if (action === 'not_issue') notAnIssue(task);
+    else act(task, action);
+  };
+  // The "why" for a task already marked not an issue: it feeds the AI rules.
+  const saveNote = async (task, note) => {
+    try {
+      const { data } = await api.patch(`/api/review-tasks/${task.id}`, { action: 'note', reason: note });
+      setTasks(ts => ts.map(t => (t.id === task.id ? { ...t, dismiss_reason: data.dismiss_reason } : t)));
+      toast.success('Note saved');
+      return true;
+    } catch (e) { toast.error(e?.response?.data?.error || 'Could not save the note'); return false; }
+  };
   const openChat = (task, fan = null) => setChat({ task, fan });
 
   // Bulk: the same action on every selected task, then one Undo for all of them.
@@ -881,7 +934,7 @@ export default function TasksPage() {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       const el = e.target;
       if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return;
-      if (dismiss || chat || showCustom || !orderedIds.length) return;
+      if (dismiss || noteFor || chat || showCustom || !orderedIds.length) return;
       const i = orderedIds.indexOf(effectiveFocus);
       const current = ordered[i] || null;
       const liveCurrent = current && LIVE.includes(current.status);
@@ -890,6 +943,7 @@ export default function TasksPage() {
         case 'k': setFocusId(orderedIds[i < 0 ? 0 : Math.max(i - 1, 0)]); break;
         case 't': if (current?.status === 'open') act(current, 'take'); else return; break;
         case 'c': if (liveCurrent) act(current, 'complete'); else return; break;
+        case 'n': if (liveCurrent) notAnIssue(current); else return; break;
         case 'd': if (liveCurrent) setDismiss(current); else return; break;
         case 'o': {
           const fan = current?.fan_username || current?.context?.fans?.[0]?.username;
@@ -980,6 +1034,7 @@ export default function TasksPage() {
         <div className='sticky top-16 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-card px-4 py-2.5 shadow-sm'>
           <span className='text-sm font-medium'>{selectedLive.length} selected</span>
           <Button size='sm' variant='outline' onClick={() => bulk('complete')}><CircleCheck />Complete</Button>
+          <Button size='sm' variant='outline' onClick={() => bulk('dismiss', { reason_code: 'allowed' })}>Not an issue</Button>
           <Button size='sm' variant='outline' onClick={() => setDismiss({ bulk: selectedLive })}>Dismiss</Button>
           <Button size='sm' variant='outline' onClick={() => bulk('archive')}><Archive />Archive</Button>
           <Button size='sm' variant='ghost' className='ms-auto' onClick={() => setSelected(new Set())}>Clear<X /></Button>
@@ -1036,6 +1091,7 @@ export default function TasksPage() {
             setDismiss(null);
           }} />
       )}
+      {noteFor && <NoteDialog task={noteFor} onClose={() => setNoteFor(null)} onSave={(note) => saveNote(noteFor, note)} />}
       {showCustom && <CustomTaskDialog meta={meta || { creators: [], chatters: [], members }} onClose={() => setShowCustom(false)} onCreate={createCustom} />}
       {chat && <DialogueSheet task={chat.task} fan={chat.fan} onClose={() => setChat(null)} onLinked={onLinked} />}
     </div>

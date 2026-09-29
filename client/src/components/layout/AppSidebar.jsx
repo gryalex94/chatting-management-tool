@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ShieldCheck, ListChecks, CalendarClock, FileUp, Settings,
+  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings,
   ChevronsUpDown, LogOut, Sun, Moon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -24,6 +24,7 @@ export const NAV_GROUPS = [
       { url: '/', title: 'Dashboard', icon: LayoutDashboard },
       { url: '/daily', title: 'Daily Check', icon: ShieldCheck },
       { url: '/tasks', title: 'Tasks', icon: ListChecks },
+      { url: '/rules', title: 'AI Rules', icon: BookCheck },
     ],
   },
   {

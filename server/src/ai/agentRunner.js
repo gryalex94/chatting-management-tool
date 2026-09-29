@@ -87,7 +87,7 @@ const JSON_ONLY = '\n\nCRITICAL: Your entire response must be ONLY valid JSON. N
  * read from cache at a tenth of the price (Sonnet 4.6 caches prompts of 1024+
  * tokens; the review prompts are ~2-3k).
  */
-function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings }) {
+function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings, temperature }) {
   const cfg = settings || MODEL_SETTINGS[model] || {};
   const params = {
     model,
@@ -96,6 +96,8 @@ function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', m
     messages: [{ role: 'user', content: userContent }],
   };
   if (cfg.thinking) params.thinking = cfg.thinking;
+  // A fixed answer where consistency matters (e.g. drafting AI rules); not allowed with thinking.
+  else if (temperature != null) params.temperature = temperature;
   if (cfg.effort) params.output_config = { effort: cfg.effort };
   return params;
 }

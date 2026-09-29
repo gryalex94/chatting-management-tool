@@ -3,7 +3,7 @@
 // stops re-raising what was dismissed (taskGenerator). Mirrors DISMISS_REASONS in
 // client/src/utils/taskMeta.js — keep the two in step.
 const DISMISS_LABEL = {
-  allowed: "It's fine / allowed",
+  allowed: "Not an issue / it's fine",
   already_handled: 'Already handled / sent',
   ppv_sent: 'A PPV was sent',
   misread: 'AI misread it',

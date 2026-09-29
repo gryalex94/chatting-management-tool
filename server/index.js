@@ -127,6 +127,9 @@ app.use('/api/review-tasks', staffOnly, reviewTaskRoutes);
 const integrationRoutes = require('./src/routes/integrations');
 app.use('/api/integrations', protect, integrationRoutes);
 
+const aiRuleRoutes = require('./src/routes/aiRules');
+app.use('/api/ai-rules', staffOnly, aiRuleRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------
@@ -159,6 +162,22 @@ if (inflowwConfigured()) {
   const { runInflowwSync } = require('./src/utils/inflowwSync');
   cron.schedule('20 * * * *', () => { runInflowwSync({ days: 3 }).catch(e => console.error('[InflowwSync]', e.message)); });
   console.log('[InflowwSync] hourly sync scheduled');
+}
+
+// AI rules: every Monday morning, the week's dismissal notes are drafted into
+// rules for the owner to approve on the AI Rules page (src/ai/houseRules.js).
+if (process.env.ANTHROPIC_API_KEY) {
+  const cron = require('node-cron');
+  const { supabaseAdmin } = require('./src/utils/supabase');
+  const { draftRules } = require('./src/ai/houseRules');
+  cron.schedule('0 7 * * 1', async () => {
+    const { data: orgs } = await supabaseAdmin.from('organisations').select('id');
+    for (const o of orgs || []) {
+      try { console.log('[AiRules] drafted', JSON.stringify(await draftRules(o.id))); }
+      catch (e) { console.error('[AiRules] drafting failed:', e.message); }
+    }
+  }, { timezone: 'Europe/Amsterdam' });
+  console.log('[AiRules] weekly drafting scheduled');
 }
 
 const server = app.listen(PORT, () => {

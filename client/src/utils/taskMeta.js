@@ -63,7 +63,7 @@ export const areaLabel = (area) => areaMeta(area).label;
 // is the 1–9 keyboard order in the dismiss dialog. "Already handled", "A PPV was
 // sent" and "Duplicate" were the most common free-text reasons under "Other".
 export const DISMISS_REASONS = [
-  { key: 'allowed', label: "It's fine / allowed" },
+  { key: 'allowed', label: "Not an issue / it's fine" },
   { key: 'already_handled', label: 'Already handled / sent' },
   { key: 'ppv_sent', label: 'A PPV was sent' },
   { key: 'misread', label: 'AI misread it' },

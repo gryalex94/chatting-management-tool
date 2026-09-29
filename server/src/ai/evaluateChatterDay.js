@@ -1,5 +1,6 @@
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES } = require('./evalShared');
+const { loadHouseRules, houseRulesBlock } = require('./houseRules');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -110,22 +111,25 @@ async function prepareChatterDay({ orgId, chatterId, reportDate, creatorId = nul
 
   const { enrichIssue, spendByUser, creatorNames, creatorInstructions, creatorContext } = await buildEnrichment(orgId, loaded.msgs);
   const { tags: fanTags, earlier } = await loadFanContext(orgId, loaded.msgs, reportDate);
+  // Tips and unseen purchases from Infloww, placed in each fan's conversation.
+  const payments = await loadPayments(orgId, loaded.msgs, reportDate).catch(() => []);
   // Show each fan's recorded spend, tags (whale / new sub) AND which page (creator)
   // they're on, so the AI can weigh a missed sale and never mistake a cross-page
   // content difference for a single-page inconsistency. Safety-net hits always
   // make the cut.
-  const { threadList, threadCount, totalThreads, droppedThreads, forcedThreads } = buildThreadList(loaded.msgs, {
+  const { threadList, threadCount, totalThreads, droppedThreads, forcedThreads } = buildThreadList(withPayments(loaded.msgs, payments), {
     lineCap: 40, threadCap: 30, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames,
     mustInclude: keywordFans(loaded.msgs, creatorContext), fanTags, earlier,
   });
 
   const systemPrompt = PROMPTS[promptVersion] || PROMPT_A;
-  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
+  const houseRules = await loadHouseRules(orgId);
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext, houseRules.byPage);
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';
   const past = corrections ?? await loadCorrections(orgId, reportDate);
-  const userContent = `${pageInstr}${past}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const userContent = `${houseRulesBlock(houseRules)}${pageInstr}${past}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   const finish = (result, usage, elapsedMs) => {
@@ -166,4 +170,4 @@ async function evaluateChatterDay(opts) {
   }
 }
 
-module.exports = { evaluateChatterDay, prepareChatterDay };
+module.exports = { evaluateChatterDay, prepareChatterDay, SPOTLIGHT_BODY };

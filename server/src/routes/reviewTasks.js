@@ -322,7 +322,7 @@ router.patch('/:id', async (req, res) => {
     const { action, reason } = req.body;
     const now = new Date().toISOString();
     const update = { updated_at: now };
-    let onlyIfOpen = false;
+    let onlyIfOpen = false, onlyIfDismissed = false;
     if (action === 'take') { update.status = 'taken'; update.taken_by = req.user.id; update.taken_at = now; onlyIfOpen = true; }
     else if (action === 'complete') { update.status = 'completed'; update.completed_at = now; update.resolved_by = req.user.id; }
     else if (action === 'dismiss') {
@@ -363,15 +363,22 @@ router.patch('/:id', async (req, res) => {
       if (outcome === 'coached') { update.coach_flag = true; update.coached_at = now; }
     }
     else if (action === 'uncoached') { update.coached_at = null; }
+    // A note added after a one-tap "Not an issue": why it's fine, for the AI rules.
+    else if (action === 'note') {
+      const note = reason ? String(reason).trim().slice(0, 1000) : '';
+      update.dismiss_reason = note || null;
+      onlyIfDismissed = true;
+    }
     else return res.status(400).json({ error: 'Invalid action' });
 
     // Taking only succeeds while the task is still open, so two managers can't
     // silently take the same task.
     let q = supabaseAdmin.from('review_tasks').update(update).eq('id', req.params.id).eq('organisation_id', req.user.organisationId);
     if (onlyIfOpen) q = q.eq('status', 'open');
+    if (onlyIfDismissed) q = q.eq('status', 'dismissed');
     const { data, error } = await q.select().maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
-    if (!data) return res.status(409).json({ error: onlyIfOpen ? 'Someone else already took this task' : 'Task not found' });
+    if (!data) return res.status(409).json({ error: onlyIfOpen ? 'Someone else already took this task' : onlyIfDismissed ? 'This task is no longer dismissed' : 'Task not found' });
     res.json(data);
   } catch {
     res.status(500).json({ error: 'Failed to update task' });

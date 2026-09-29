@@ -1,5 +1,6 @@
+const { loadHouseRules, houseRulesBlock } = require('./houseRules');
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments } = require('./evalShared');
 
 // ── Strategy review (communication + sales craft) → TASKS ───────────────────
 // Not a grader. This layer reads FULL conversations against Rice Media's strategy
@@ -84,14 +85,17 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
   // Cap raised 25 -> 40: at 25 roughly a third of a busy chatter's conversations
   // were never reviewed at all, and this is the review that judges missed sales.
   const { tags: fanTags, earlier } = await loadFanContext(orgId, loaded.msgs, reportDate);
-  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(loaded.msgs, { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames, fanTags, earlier });
+  // Tips and unseen purchases from Infloww, placed in each fan's conversation.
+  const payments = await loadPayments(orgId, loaded.msgs, reportDate).catch(() => []);
+  const { threadList, threadCount, totalThreads, droppedThreads } = buildThreadList(withPayments(loaded.msgs, payments), { lineCap: 80, threadCap: 40, withSpend: true, spendByUser, withPage: true, pageNameByCreator: creatorNames, fanTags, earlier });
 
-  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext);
+  const houseRules = await loadHouseRules(orgId);
+  const pageInstr = buildPageInstructions(loaded.msgs, creatorNames, creatorInstructions, creatorContext, houseRules.byPage);
   const coverage = droppedThreads
     ? `NOTE ON COVERAGE: you are seeing the ${threadCount} highest-value conversations of ${totalThreads} this chatter had. Judge only what you see; never conclude anything about the rest of their day.\n\n`
     : '';
   const corrections = await loadCorrections(orgId, reportDate);
-  const userContent = `${pageInstr}${corrections}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
+  const userContent = `${houseRulesBlock(houseRules)}${pageInstr}${corrections}${coverage}Chatter conversations for ${reportDate}${creatorId ? ' (one page)' : ' (all pages)'}:\n\n${threadList}`;
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   try {
