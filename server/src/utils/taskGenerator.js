@@ -66,6 +66,14 @@ const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offpla
 // time/AFK), page-health, and protected ToS items always come through.
 const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
 const TENURE_MIN_SEV = { new: 'low', learning: 'medium', experienced: 'high' };
+// Page name -> page ID. Old merged/renamed pages can share a name with the live
+// one ("Tania" twice); the active page must win, or tasks land on the old copy,
+// which has no Infloww page ID (no "Open in Infloww" button).
+function setPageByName(map, c) {
+  const k = _norm(c.name);
+  if (c.is_active !== false || !map[k]) map[k] = c.id;
+}
+
 function tenureTier(createdAt, onDate) {
   if (!createdAt) return 'experienced';                    // unknown join date → treat as light
   const days = Math.round((new Date(onDate + 'T00:00:00Z') - new Date(createdAt)) / 86400000);
@@ -246,11 +254,11 @@ function bundleNewSubCoaching(candidates, reportDate) {
 async function buildTasksForDate(orgId, reportDate) {
   // name lookups
   const [{ data: creators }, { data: chatters }] = await Promise.all([
-    supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
+    supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId),
     supabaseAdmin.from('chatters').select('id, name, created_at').eq('organisation_id', orgId),
   ]);
   const creatorNameById = {}; const creatorIdByName = {};
-  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; creatorIdByName[_norm(c.name)] = c.id; });
+  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; setPageByName(creatorIdByName, c); });
   const chatterNameById = {}; const tenureById = {};
   (chatters || []).forEach(c => { chatterNameById[c.id] = c.name; tenureById[c.id] = tenureTier(c.created_at, reportDate); });
 
@@ -500,9 +508,9 @@ async function buildSpenderDevelopmentTasks(orgId, reportDate, opts = {}) {
   // a fan's sale rows (which used to mis-bucket them into "Unassigned page"), and
   // we skip rows whose creator_name is blank.
   const users = stalling.map(s => s.username);
-  const { data: creators } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
+  const { data: creators } = await supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId);
   const creatorIdByName = {}; const creatorNameById = {};
-  (creators || []).forEach(c => { creatorIdByName[_norm(c.name)] = c.id; creatorNameById[c.id] = c.name; });
+  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; setPageByName(creatorIdByName, c); });
 
   const pageOf = {};
   for (let i = 0; i < users.length; i += 200) {
@@ -625,14 +633,14 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   const src = SOURCE[evalType] || 'sales';
   const [{ data: ch }, { data: creators }, ignoreSet] = await Promise.all([
     supabaseAdmin.from('chatters').select('name').eq('id', chatterId).eq('organisation_id', orgId).maybeSingle(),
-    supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
+    supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId),
     loadIgnoreSet(orgId),
   ]);
   if (!ch) return { created: 0, updated: 0 };                  // not this organisation's chatter
   const chatterName = ch.name || null;
   if (ignoreSet.has(_norm(chatterName))) return { created: 0, updated: 0 };
   const creatorNameById = {}; const creatorIdByName = {};
-  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; creatorIdByName[_norm(c.name)] = c.id; });
+  (creators || []).forEach(c => { creatorNameById[c.id] = c.name; setPageByName(creatorIdByName, c); });
 
   const now = new Date().toISOString();
   let created = 0, updated = 0;

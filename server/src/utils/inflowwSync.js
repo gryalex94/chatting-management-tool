@@ -329,6 +329,72 @@ async function learnFanIds(orgId, from, to) {
   return upsertChunks('fan_infloww_ids', rows, 'organisation_id,username');
 }
 
+/**
+ * Renamed fans whose Infloww name differs from the chat export's (a common case:
+ * the name check above then never matches). Instead, match the PATTERN of a
+ * fan's purchases: every PPV he bought in our chats (page, exact price, sold
+ * within 48 h of sending) against Infloww's PPV sales. When one Infloww fan
+ * explains at least 2 of his purchases and half of them, and no other fan comes
+ * close, that's him. Checked on fans whose ID is known from a default username:
+ * 528 right out of 529. Fills only fans with no ID yet; a pasted link or an
+ * earlier match is never overwritten.
+ */
+async function learnFanIdsByPattern(orgId) {
+  const all = async (q) => {
+    const out = [];
+    for (let off = 0; ; off += 1000) {
+      const { data, error } = await q().range(off, off + 999);
+      if (error) throw new Error(error.message);
+      out.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  };
+  const sales = await all(() => supabaseAdmin.from('infloww_sales')
+    .select('creator_id, fan_id, amount, created_at')
+    .eq('organisation_id', orgId).eq('type', 'Messages').not('fan_id', 'is', null).order('id'));
+  if (!sales.length) return 0;
+  const idx = {};                                      // page|cents -> sales by time
+  let minT = Infinity;
+  for (const s of sales) {
+    const t = Date.parse(s.created_at);
+    if (t < minT) minT = t;
+    (idx[`${s.creator_id}|${Math.round(Number(s.amount) * 100)}`] ||= []).push({ t, f: String(s.fan_id) });
+  }
+  for (const k in idx) idx[k].sort((a, b) => a.t - b.t);
+
+  const { data: existing } = await supabaseAdmin.from('fan_infloww_ids').select('username').eq('organisation_id', orgId);
+  const known = new Set((existing || []).map(r => r.username));
+  const buys = await all(() => supabaseAdmin.from('messages')
+    .select('creator_id, sent_to_username, sent_datetime, price')
+    .eq('organisation_id', orgId).eq('purchased', true).gt('price', 0)
+    .gte('sent_datetime', new Date(minT - 48 * 3600e3).toISOString()).order('id'));
+  const byUser = {};
+  for (const b of buys) {
+    const u = b.sent_to_username;
+    if (!u || known.has(u) || /^u\d+$/.test(u)) continue;
+    (byUser[u] ||= []).push(b);
+  }
+
+  const firstAt = (arr, t) => { let a = 0, z = arr.length; while (a < z) { const m = (a + z) >> 1; if (arr[m].t < t) a = m + 1; else z = m; } return a; };
+  const rows = [];
+  for (const [u, bs] of Object.entries(byUser)) {
+    if (bs.length < 2) continue;
+    const hits = {};
+    for (const b of bs) {
+      const arr = idx[`${b.creator_id}|${Math.round(Number(b.price) * 100)}`];
+      if (!arr) continue;
+      const t = Date.parse(b.sent_datetime), seen = new Set();
+      for (let i = firstAt(arr, t - 3 * 3600e3); i < arr.length && arr[i].t <= t + 48 * 3600e3; i++) seen.add(arr[i].f);
+      for (const f of seen) hits[f] = (hits[f] || 0) + 1;
+    }
+    const [best, second] = Object.entries(hits).sort((a, b) => b[1] - a[1]);
+    if (!best || best[1] < 2 || best[1] < bs.length / 2 || (second && second[1] > best[1] / 2)) continue;
+    rows.push({ organisation_id: orgId, username: u, of_user_id: best[0], source: 'sales_pattern', created_at: new Date().toISOString() });
+  }
+  return upsertChunks('fan_infloww_ids', rows, 'organisation_id,username');
+}
+
 /** One full sync over the last `days` days. Only one runs at a time. */
 async function runInflowwSync({ days = 3 } = {}) {
   if (!infloww.configured()) return { skipped: 'not configured' };
@@ -360,6 +426,7 @@ async function runInflowwSync({ days = 3 } = {}) {
     const { data: sp } = await supabaseAdmin.from('infloww_sync_state').select('last_ok_at')
       .eq('organisation_id', orgId).eq('resource', 'spend').maybeSingle();
     if (days > 3 || !sp?.last_ok_at || Date.now() - Date.parse(sp.last_ok_at) > 6 * 3600e3) {
+      await step(orgId, 'fan_ids_pattern', () => learnFanIdsByPattern(orgId), summary);
       await step(orgId, 'spend', () => applyInflowwSpend(orgId), summary);
     }
     summary.finished_at = new Date().toISOString();
@@ -380,4 +447,4 @@ async function runInflowwSync({ days = 3 } = {}) {
 const inflowwSyncRunning = () => running;
 const inflowwLastResult = () => lastResult;
 
-module.exports = { runInflowwSync, inflowwSyncRunning, inflowwLastResult };
+module.exports = { runInflowwSync, inflowwSyncRunning, inflowwLastResult, learnFanIdsByPattern };

@@ -19,7 +19,7 @@ router.get('/infloww', requireMinRole('admin'), async (req, res) => {
   const [sales, refunds, employees, linkedEmployees, fanIdsSales, fanIdsPasted] = await Promise.all([
     count('infloww_sales', orgId), count('infloww_refunds', orgId), count('infloww_employees', orgId),
     count('infloww_employees', orgId, q => q.not('chatter_id', 'is', null)),
-    count('fan_infloww_ids', orgId, q => q.eq('source', 'sales')),
+    count('fan_infloww_ids', orgId, q => q.in('source', ['sales', 'sales_pattern'])),
     count('fan_infloww_ids', orgId, q => q.eq('source', 'chat_link')),
   ]);
   // The address Infloww sees this server at, for the key's IP allow-list

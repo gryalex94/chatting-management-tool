@@ -10,6 +10,7 @@ const RESOURCES = [
   ['sales', 'Sales'],
   ['refunds', 'Refunds'],
   ['fan_ids', 'Fan IDs learned'],
+  ['fan_ids_pattern', 'Fan IDs by purchases'],
   ['spend', 'Fan spend'],
 ];
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
