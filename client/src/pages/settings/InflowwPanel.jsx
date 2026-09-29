@@ -65,6 +65,11 @@ export default function InflowwPanel() {
         </div>
       </div>
 
+      {info.last_result?.error && (
+        <p className='rounded-md border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad'>
+          Last sync ({fmt(info.last_result.finished_at)}) failed: {info.last_result.error}
+        </p>
+      )}
       {info.server_ip && (
         <p className='text-sm text-muted-foreground'>
           This server reaches Infloww from <code className='font-semibold text-foreground'>{info.server_ip}</code>. If your API key has IP

@@ -2,7 +2,7 @@ const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const { configured } = require('../integrations/infloww');
-const { runInflowwSync, inflowwSyncRunning } = require('../utils/inflowwSync');
+const { runInflowwSync, inflowwSyncRunning, inflowwLastResult } = require('../utils/inflowwSync');
 
 // A missing table (migration 023 not run) must come back as null, and a
 // head-only count doesn't report that, so ask for one row too.
@@ -31,6 +31,7 @@ router.get('/infloww', requireMinRole('admin'), async (req, res) => {
   } catch { /* optional */ }
   res.json({
     configured: configured(), running: inflowwSyncRunning(), server_ip: serverIp,
+    last_result: inflowwLastResult(),
     tables_ready: sales !== null && fanIdsSales !== null,   // migration 023 applied
     state: state || [],
     totals: { sales, refunds, employees, linked_employees: linkedEmployees, fan_ids_from_sales: fanIdsSales, fan_ids_pasted: fanIdsPasted },

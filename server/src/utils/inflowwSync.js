@@ -16,6 +16,7 @@ const { applyInflowwSpend } = require('./inflowwChecks');
  */
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 let running = null;                       // the sync in progress, if any
+let lastResult = null;                    // the last sync's summary, errors included
 
 async function upsertChunks(table, rows, onConflict) {
   let n = 0;
@@ -220,15 +221,20 @@ async function runInflowwSync({ days = 3 } = {}) {
     }
     summary.finished_at = new Date().toISOString();
     console.log('[InflowwSync]', JSON.stringify(summary));
+    lastResult = summary;
     return summary;
   } catch (e) {
+    // e.g. the server's address not allowed, or a missing key: this fails before
+    // we know the organisation, so it's kept here for the Settings tab to show
     console.error('[InflowwSync] failed:', e.message);
-    return { ...summary, error: e.message };
+    lastResult = { ...summary, error: e.message, finished_at: new Date().toISOString() };
+    return lastResult;
   } finally {
     running = null;
   }
 }
 
 const inflowwSyncRunning = () => running;
+const inflowwLastResult = () => lastResult;
 
-module.exports = { runInflowwSync, inflowwSyncRunning };
+module.exports = { runInflowwSync, inflowwSyncRunning, inflowwLastResult };
