@@ -36,6 +36,9 @@ const SLOW_DAY_RT_SEC = 150;   // day avg reply slower than this = "slow"
 // (dayWindow in ai/evalShared.js) — a fixed +1h put winter days an hour off.
 // `dates` limits the (re)written days, e.g. the days an upload touched. All
 // history is still read, because new-sub detection needs each fan's first contact.
+// Half of an emoji pair (a lone UTF-16 surrogate), as JSON.stringify writes it.
+const LONE_SURROGATE = /(?<!\\)\\ud[89a-f][0-9a-f]{2}/gi;   // well-formed pairs are written as-is, only halves get escaped
+
 async function computeChatterDailyMetrics(organisationId, { dates } = {}) {
   const only = dates?.length ? new Set(dates) : null;
   console.log('[Metrics] Computing chatter daily metrics (merged-day model, Amsterdam day)...');
@@ -192,13 +195,22 @@ async function computeChatterDailyMetrics(organisationId, { dates } = {}) {
   }
 
   // Saved in bulk: one row at a time was thousands of round trips per run.
+  // Message snippets cut mid-emoji leave half a character, which Postgres
+  // rejects as JSON — and in a batch one such row fails all 500. So clean them,
+  // and if a batch still fails, save it row by row so only a bad row is lost.
+  const clean = (row) => JSON.parse(JSON.stringify(row).replace(LONE_SURROGATE, ''));
+  const upsert = (chunk) => supabaseAdmin.from('chatter_daily_metrics')
+    .upsert(chunk, { onConflict: 'chatter_id,creator_id,report_date' });
   for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500);
-    const { error } = await supabaseAdmin
-      .from('chatter_daily_metrics')
-      .upsert(chunk, { onConflict: 'chatter_id,creator_id,report_date' });
-    if (error) console.error(`[Metrics] upsert error:`, error.message);
-    else written += chunk.length;
+    const chunk = rows.slice(i, i + 500).map(clean);
+    const { error } = await upsert(chunk);
+    if (!error) { written += chunk.length; continue; }
+    console.error('[Metrics] batch save failed, saving row by row:', error.message);
+    for (const row of chunk) {
+      const { error: e } = await upsert([row]);
+      if (e) console.error(`[Metrics] skipped ${row.chatter_id} ${row.report_date}:`, e.message);
+      else written++;
+    }
   }
 
   console.log(`[Metrics] Wrote ${written} rows${only ? ` for ${[...only].join(', ')}` : ''} (${Object.keys(dayGroups).length} chatter-days in history)`);

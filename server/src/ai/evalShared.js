@@ -81,17 +81,26 @@ const stripPpvTags = (s) => String(s || '').normalize('NFKC')
   .replace(/[\u200B-\u200D\u2060\uFEFF]/g, '')
   .replace(FORGED_PPV, ' ').replace(STRAY_PPV, '$1');
 
-// The day window the metrics use (computeChatterMetrics.js): the DB stores CET,
-// the manager's day is Amsterdam local, so in summer (CEST) it starts 23:00 the
-// previous day.
+// The report day in the chat exports' own clock. Each Message Dashboard file is
+// one Amsterdam calendar day, but Infloww changed the clock it writes times in:
+//  - files up to 2026-08-10: CET (UTC+1 all year), so in summer a day runs
+//    23:00 the previous day → 22:59;
+//  - files from 2026-08-11: Amsterdam local time, so a day runs 00:00 → 23:59.
+// Verified on every uploaded file (26 old-style, 42 new-style), and the new
+// window reproduces Infloww's own per-chatter message counts. Before the fix the
+// new-style days lost 23:00–24:00 to the next day.
+const LOCAL_CLOCK_FROM = '2026-08-11';
 function dayWindow(reportDate) {
+  if (reportDate >= LOCAL_CLOCK_FROM) {
+    const start = Date.parse(reportDate + 'T00:00:00Z');
+    return { start: new Date(start).toISOString(), end: new Date(start + 86400000).toISOString() };
+  }
   const d = new Date(reportDate + 'T12:00:00Z');
   const am = parseInt(d.toLocaleString('en', { timeZone: 'Europe/Amsterdam', hour: 'numeric', hour12: false }), 10);
   const off = (am - d.getUTCHours()) - 1;          // 1 in summer, 0 in winter
   const start = Date.parse(reportDate + 'T00:00:00Z') - off * 3600000;
   return { start: new Date(start).toISOString(), end: new Date(start + 86400000).toISOString() };
 }
-
 // The report day a stored timestamp belongs to, by the same dayWindow — so the
 // metrics and the AI review always put a message on the same day. Try the
 // summer (+1h) day first; if its window starts after the message, it's winter.
@@ -100,6 +109,8 @@ function reportDateOf(datetime) {
   const s = String(datetime);
   const ts = Date.parse(/[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(' ', 'T') + 'Z');   // no zone = stored as UTC
   if (!Number.isFinite(ts)) return s.slice(0, 10);
+  const own = new Date(ts).toISOString().slice(0, 10);
+  if (own >= LOCAL_CLOCK_FROM) return own;                  // local-clock files: the date as written
   const cand = new Date(ts + 3600000).toISOString().slice(0, 10);
   const start = (_winStart[cand] ??= Date.parse(dayWindow(cand).start));
   return ts >= start ? cand : new Date(ts).toISOString().slice(0, 10);
