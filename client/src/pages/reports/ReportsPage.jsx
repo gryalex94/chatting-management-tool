@@ -12,7 +12,7 @@ import { yesterday } from '@/utils/dates';
 
 const REPORTS = [
   { key:'message-dashboard', label:'Message dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare },
-  { key:'creator-stats',     label:'Creator statistics', desc:'Per-creator revenue, subs, fan tiers',       icon:Users },
+  { key:'creator-stats',     label:'Creator statistics', desc:'Optional: comes from the Infloww API every hour', icon:Users },
 ];
 
 function ReportCard({ report, selected, uploaded, onSelect }) {

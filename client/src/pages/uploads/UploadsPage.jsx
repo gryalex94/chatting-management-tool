@@ -11,7 +11,7 @@ import { yesterday } from '@/utils/dates';
 
 const reportTypes = [
   { key: 'message-dashboard', label: 'Message Dashboard', desc: 'Chat logs with all messages', icon: MessagesSquare },
-  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Creator-level revenue & ratios', icon: UserRound },
+  { key: 'creator-stats', label: 'Creator Statistics', desc: 'Optional: page stats now come from the Infloww API every hour', icon: UserRound },
 ];
 
 export default function UploadsPage() {

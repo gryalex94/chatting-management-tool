@@ -2,6 +2,40 @@ const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const { ownedBy, allOwned } = require('../utils/ownership');
+const { creditByChatter } = require('../utils/inflowwCredit');
+
+// GET /api/chatters/:id/credit?days=30 — sales Infloww credits to this chatter,
+// per day, page, type and attribution rule, next to our chat-based sales.
+router.get('/:id/credit', async (req, res) => {
+  try {
+    const orgId = req.user.organisationId;
+    const { data: ch } = await supabaseAdmin.from('chatters').select('id').eq('id', req.params.id).eq('organisation_id', orgId).maybeSingle();
+    if (!ch) return res.status(404).json({ error: 'Chatter not found' });
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const to = new Date(Date.now() - 86400000).toISOString().slice(0, 10);          // up to yesterday
+    const from = new Date(Date.parse(to + 'T00:00:00Z') - (days - 1) * 86400000).toISOString().slice(0, 10);
+    const [{ data: link }, credit, { data: ours }, { data: pages }] = await Promise.all([
+      supabaseAdmin.from('infloww_employees').select('employee_id').eq('organisation_id', orgId).eq('chatter_id', ch.id).limit(1),
+      creditByChatter(orgId, from, to, { chatterId: ch.id }),
+      supabaseAdmin.from('chatter_daily_metrics').select('report_date, sales_today').eq('chatter_id', ch.id).gte('report_date', from).lte('report_date', to),
+      supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId),
+    ]);
+    const c = credit[ch.id] || { total: 0, count: 0, byDay: {}, byPage: {}, byRule: {}, byType: {} };
+    const chatSales = {};
+    (ours || []).forEach(r => { chatSales[r.report_date] = Math.round(((chatSales[r.report_date] || 0) + (parseFloat(r.sales_today) || 0)) * 100) / 100; });
+    const pageName = Object.fromEntries((pages || []).map(p => [p.id, p.name]));
+    const dates = [];
+    for (let d = Date.parse(from + 'T00:00:00Z'); d <= Date.parse(to + 'T00:00:00Z'); d += 86400000) dates.push(new Date(d).toISOString().slice(0, 10));
+    res.json({
+      linked: !!link?.length, from, to,
+      total: c.total, count: c.count, by_type: c.byType, by_rule: c.byRule,
+      by_page: Object.entries(c.byPage).map(([id, v]) => ({ name: pageName[id] || 'Unknown', credited: v })).sort((a, b) => b.credited - a.credited),
+      days: dates.map(d => ({ date: d, ...(c.byDay[d] || { credited: 0 }), chat_sales: chatSales[d] || 0 })),
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Could not load sales credit' });
+  }
+});
 
 // GET /api/chatters - List all chatters in org
 router.get('/', async (req, res) => {

@@ -87,6 +87,72 @@ const TimeStamp = ({ children }) => (
   <span className='inline-flex items-center gap-1 font-medium text-link'><Clock className='size-3' />{children}</span>
 );
 
+/* ═══ INFLOWW SALES CREDIT ════════════════════════ */
+// What Infloww credits this chatter with over the last 30 days — its own
+// attribution (message sender, last chatter, on shift, manual), tips included —
+// next to our number from the chat exports (PPVs bought in the chats).
+const CREDIT_TYPES = [['ppv', 'PPVs'], ['tips', 'Tips'], ['subs', 'Subscriptions'], ['other', 'Other']];
+function InflowwCredit({ chatterId }) {
+  const [c, setC] = useState(null);
+  useEffect(() => {
+    api.get(`/api/chatters/${chatterId}/credit?days=30`).then(r => setC(r.data)).catch(() => setC({ error: true }));
+  }, [chatterId]);
+  if (!c || c.error || (!c.linked && !c.total)) return null;
+  const max = Math.max(1, ...c.days.map(d => Math.max(d.credited || 0, d.chat_sales || 0)));
+  const chatTotal = c.days.reduce((a, d) => a + (d.chat_sales || 0), 0);
+  const money = (n) => `$${Math.round(n || 0).toLocaleString()}`;
+  return (
+    <Panel title='Sales credited in Infloww' meta={`last 30 days · ${c.count} sales`}>
+      <div className='grid gap-4 p-4 lg:grid-cols-[1fr_1.4fr]'>
+        <div className='grid content-start gap-3'>
+          <div>
+            <p className='text-2xl font-semibold tabular-nums'>{money(c.total)}</p>
+            <p className='text-xs text-muted-foreground'>credited by Infloww · {money(chatTotal)} in PPVs bought in our chat exports</p>
+          </div>
+          <div className='flex flex-wrap gap-1.5'>
+            {CREDIT_TYPES.filter(([k]) => c.by_type[k]).map(([k, l]) => (
+              <Badge key={k} variant='secondary' className='font-normal'>{l} <b className='ms-1 tabular-nums'>{money(c.by_type[k])}</b></Badge>
+            ))}
+          </div>
+          {Object.keys(c.by_rule).length > 0 && (
+            <div className='flex flex-wrap gap-1.5'>
+              {Object.entries(c.by_rule).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                <Badge key={k} variant='outline' className='font-normal'>{k} <span className='ms-1 tabular-nums'>{money(v)}</span></Badge>
+              ))}
+            </div>
+          )}
+          {c.by_page.length > 0 && (
+            <div className='grid gap-1 text-sm'>
+              {c.by_page.slice(0, 6).map(p => (
+                <div key={p.name} className='flex justify-between gap-4'><span>{p.name}</span><span className='font-mono tabular-nums'>{money(p.credited)}</span></div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <div className='flex h-32 items-end gap-0.5'>
+            {c.days.map(d => (
+              <Tooltip key={d.date}>
+                <TooltipTrigger asChild>
+                  <div className='flex h-full flex-1 items-end gap-px'>
+                    <div className='flex-1 rounded-t-sm bg-link/70' style={{ height: `${(100 * (d.credited || 0)) / max}%` }} />
+                    <div className='flex-1 rounded-t-sm bg-muted-foreground/30' style={{ height: `${(100 * (d.chat_sales || 0)) / max}%` }} />
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>{d.date}: credited {money(d.credited)} · chats {money(d.chat_sales)}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
+          <div className='mt-2 flex gap-3 text-xs text-muted-foreground'>
+            <span className='inline-flex items-center gap-1'><span className='size-2 rounded-sm bg-link/70' />Credited in Infloww</span>
+            <span className='inline-flex items-center gap-1'><span className='size-2 rounded-sm bg-muted-foreground/30' />PPVs in chat exports</span>
+          </div>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
 /* ═══ TOP ZONE ═══════════════════════════════════ */
 
 function AIScoreCard({ icon: Icon, label, score, trend, color }) {
@@ -966,6 +1032,9 @@ export default function ChatterProfile() {
         <KPI label='Mistakes, last 30 days' value={mistakes30} color={mistakes30>3?'text-bad':''}/>
         <KPI label='Last review' value={reviews.length>0?`${Math.floor((Date.now()-new Date(reviews[0].created_at))/(86400000))}d ago`:'Never'}/>
       </div>
+
+      {/* ═══ INFLOWW CREDIT ═══ */}
+      <InflowwCredit chatterId={id} />
 
       {/* ═══ AI SUMMARY + PER-PAGE ═══ */}
       <div className='grid items-start gap-4 lg:grid-cols-[1fr_1.2fr]'>

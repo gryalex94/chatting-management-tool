@@ -49,6 +49,13 @@ async function step(orgId, resource, fn, summary) {
 }
 
 /** Which organisation this key belongs to, and our page id for each Infloww page id. */
+// Infloww's reports name pages by platform id; map those to our page ids.
+function platformMap(apiPages, pageMap) {
+  const out = {};
+  for (const p of apiPages) if (pageMap[p.id] && p.platformPid != null) out[String(p.platformPid)] = pageMap[p.id];
+  return out;
+}
+
 async function resolvePages(apiPages) {
   const ids = apiPages.map(p => String(p.id));
   const { data: ours } = await supabaseAdmin.from('creators').select('id, name, organisation_id, infloww_creator_id');
@@ -128,6 +135,130 @@ async function syncRefunds(orgId, pageMap, from, to) {
       n += await upsertChunks('infloww_refunds', rows, 'organisation_id,id');
     }
   }
+  return n;
+}
+
+/**
+ * Daily page stats (what the Creator Statistics upload used to fill), per
+ * Amsterdam day, into creator_daily_stats:
+ *  - earnings by type, spenders, averages: from our synced sales (matched the
+ *    uploads within ~1% on 62 of 65 page-days, counted per Amsterdam day)
+ *  - refunds: from our synced refunds, by the day of the refund
+ *  - new / renewed subs, active & expired fans, auto-renew, subscription length,
+ *    ranking: from Infloww's creator reports
+ * The hourly run refreshes the last few days (Infloww's reports can lag up to a
+ * day). A backfill only fills days that have no stats yet (e.g. days nobody
+ * uploaded) and never rewrites what was uploaded.
+ */
+const amsDate = (d) => infloww.toStoreTime(d).toISOString().slice(0, 10);
+const round2 = (n) => Math.round(n * 100) / 100;
+
+async function syncPageStats(orgId, pageMap, pidMap, from, to, { onlyMissing = false } = {}) {
+  const dFrom = amsDate(from), dTo = amsDate(to);
+  const inRange = (d) => d >= dFrom && d <= dTo;
+
+  // Sales and refunds are already in our tables (synced just before).
+  const sales = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabaseAdmin.from('infloww_sales')
+      .select('creator_id, created_at, type, amount, fan_id')
+      .eq('organisation_id', orgId).gte('created_at', new Date(from.getTime() - 86400000).toISOString())
+      .order('id').range(off, off + 999);
+    if (error) throw new Error(error.message);
+    sales.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  const { data: refunds } = await supabaseAdmin.from('infloww_refunds').select('creator_id, refund_time, amount')
+    .eq('organisation_id', orgId).gte('refund_time', new Date(from.getTime() - 86400000).toISOString());
+
+  const { data: names } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId);
+  const nameOf = Object.fromEntries((names || []).map(c => [c.id, c.name]));
+  const rows = {};                                          // creator|date -> row
+  const row = (creatorId, date) => (rows[`${creatorId}|${date}`] ||= {
+    organisation_id: orgId, creator_id: creatorId, creator_name: nameOf[creatorId] || null, report_date: date,
+    total_earnings_gross: 0, total_subscription_gross: 0, subscription_gross: 0, recurring_subscriptions_gross: 0,
+    tips_gross: 0, message_gross: 0, refund_gross: 0, _spenders: new Set(), _tx: 0,
+  });
+  for (const s of sales) {
+    if (!s.created_at || !s.creator_id) continue;
+    const date = amsDate(s.created_at);
+    if (!inRange(date)) continue;
+    const r = row(s.creator_id, date), amt = Number(s.amount) || 0;
+    r.total_earnings_gross += amt;
+    if (s.type === 'Subscription') { r.subscription_gross += amt; r.total_subscription_gross += amt; }
+    else if (s.type === 'RecurringSubscription') { r.recurring_subscriptions_gross += amt; r.total_subscription_gross += amt; }
+    else if (s.type === 'Tips') r.tips_gross += amt;
+    else if (s.type === 'Messages') r.message_gross += amt;
+    if (amt > 0) { r._tx++; if (s.fan_id) r._spenders.add(s.fan_id); }
+  }
+  for (const f of (refunds || [])) {
+    if (!f.refund_time || !f.creator_id) continue;
+    const date = amsDate(f.refund_time);
+    if (inRange(date)) row(f.creator_id, date).refund_gross += Number(f.amount) || 0;
+  }
+
+  // Infloww's creator reports (≤10 pages and ≤31 days per call), keyed by platform id.
+  const ids = Object.keys(pageMap);
+  const report = async (path) => {
+    const out = [];
+    for (const [ws, we] of infloww.windows(new Date(dFrom + 'T00:00:00Z'), new Date(Date.parse(dTo + 'T00:00:00Z') + 86400000), 31)) {
+      for (let i = 0; i < ids.length; i += 10) {
+        const body = await infloww.get(path, { creatorIds: ids.slice(i, i + 10), startTime: ws.toISOString().slice(0, 10), endTime: new Date(we.getTime() - 86400000).toISOString().slice(0, 10) });
+        out.push(...(body.data?.list || []));
+      }
+    }
+    return out;
+  };
+  const put = (list, fn) => {
+    for (const x of list) {
+      const creatorId = pidMap[String(x.platformPid)];
+      if (creatorId && x.date && inRange(x.date)) fn(row(creatorId, x.date), x);
+    }
+  };
+  const num = (v) => (v == null || v === '' ? null : Number(String(v).replace(/[^0-9.-]/g, '')));
+  put(await report('/v1/creator-report/fans/subscriber-count'), (r, x) => {
+    r.new_subscribers = num(x.newSubscribers); r.new_fans = r.new_subscribers; r.subscriber_renewals = num(x.subscriberRenewals);
+  });
+  const fanCounts = await report('/v1/creator-report/fans/count');
+  put(fanCounts, (r, x) => { r.active_fans = num(x.activeFans); r._expired = num(x.expiredFans); });
+  put(await report('/v1/creator-report/fans/renew-on'), (r, x) => { r.fans_renew_on = num(x.fansWithRenewOn); });
+  put(await report('/v1/creator-report/fans/avg-subscription-length'), (r, x) => { r.avg_subscription_length_days = num(x.avgSubscriptionLength); });
+  put(await report('/v1/creator-report/rank'), (r, x) => { r.of_ranking = num(x.performanceRank); });
+
+  // Derived fields, then drop the helpers.
+  const expiredByKey = {};
+  for (const r of Object.values(rows)) if (r._expired != null) expiredByKey[`${r.creator_id}|${r.report_date}`] = r._expired;
+  const prevDay = (d) => new Date(Date.parse(d + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);
+  let out = Object.values(rows).map(r => {
+    const spenders = r._spenders.size;
+    const o = {
+      ...r,
+      total_earnings_gross: round2(r.total_earnings_gross), total_subscription_gross: round2(r.total_subscription_gross),
+      subscription_gross: round2(r.subscription_gross), recurring_subscriptions_gross: round2(r.recurring_subscriptions_gross),
+      tips_gross: round2(r.tips_gross), message_gross: round2(r.message_gross), refund_gross: round2(r.refund_gross),
+      number_of_spenders: spenders,
+      avg_spend_per_spender_gross: spenders ? round2(r.total_earnings_gross / spenders) : 0,
+      avg_spend_per_transaction_gross: r._tx ? round2(r.total_earnings_gross / r._tx) : 0,
+    };
+    if (o.active_fans && o.fans_renew_on != null) o.renew_on_pct = round2(100 * o.fans_renew_on / o.active_fans);
+    const prev = expiredByKey[`${r.creator_id}|${prevDay(r.report_date)}`];
+    if (r._expired != null && prev != null) o.expired_fan_change = r._expired - prev;
+    delete o._spenders; delete o._tx; delete o._expired;
+    return o;
+  });
+
+  if (onlyMissing) {
+    const { data: have } = await supabaseAdmin.from('creator_daily_stats').select('creator_id, report_date')
+      .eq('organisation_id', orgId).gte('report_date', dFrom).lte('report_date', dTo);
+    const exists = new Set((have || []).map(h => `${h.creator_id}|${h.report_date}`));
+    out = out.filter(r => !exists.has(`${r.creator_id}|${r.report_date}`));
+  }
+  // Rows differ in which report fields they carry; PostgREST needs the same keys
+  // in one batch, so group by key set.
+  const groups = {};
+  for (const r of out) (groups[Object.keys(r).sort().join(',')] ||= []).push(r);
+  let n = 0;
+  for (const g of Object.values(groups)) n += await upsertChunks('creator_daily_stats', g, 'creator_id,report_date');
   return n;
 }
 
@@ -213,6 +344,11 @@ async function runInflowwSync({ days = 3 } = {}) {
     await step(orgId, 'sales', () => syncSales(orgId, pageMap, from, to), summary);
     await step(orgId, 'refunds', () => syncRefunds(orgId, pageMap, from, to), summary);
     await step(orgId, 'fan_ids', () => learnFanIds(orgId, from, to), summary);
+    await step(orgId, 'page_stats', () => syncPageStats(orgId, pageMap, platformMap(apiPages, pageMap), from, to,
+      { onlyMissing: days > 7 }), summary);
+    // the recent days are always refreshed, even during a backfill
+    if (days > 7) await step(orgId, 'page_stats', () => syncPageStats(orgId, pageMap, platformMap(apiPages, pageMap),
+      new Date(to.getTime() - 3 * 86400000), to), summary);
     // Real spend per fan: a full pass over the year of sales, so not every hour.
     const { data: sp } = await supabaseAdmin.from('infloww_sync_state').select('last_ok_at')
       .eq('organisation_id', orgId).eq('resource', 'spend').maybeSingle();

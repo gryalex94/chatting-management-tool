@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('./supabase');
 const { runDailyCheck } = require('./dailyCheck');
+const { creditByChatter } = require('./inflowwCredit');
 
 const shiftDays = (date, n) => { const d = new Date(date + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const W = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -134,6 +135,10 @@ async function buildOverview(orgId, reportDate) {
     unlock_avg: teamAvg.unlock, working: todayM.length, total: (allChatters || []).length,
   };
 
+  // Infloww's own sales credit per chatter for the day (empty until the sync has data)
+  const credit = await creditByChatter(orgId, reportDate, reportDate).catch(() => ({}));
+  teamTotals.credited = Math.round(Object.values(credit).reduce((a, c) => a + c.total, 0));
+
   const chatters = (allChatters || []).map(c => {
     const t = metricOf(c.id, reportDate);
     const y = metricOf(c.id, prev);
@@ -142,6 +147,7 @@ async function buildOverview(orgId, reportDate) {
     return {
       chatter_id: c.id, name: c.name,
       has_data: !!t,
+      credited: credit[c.id] ? Math.round(credit[c.id].total) : null,
       metrics: t,
       vs_prev: t && y ? { sales: t.sales - y.sales, ppvs: t.ppvs - y.ppvs, messages: t.messages - y.messages, reply: t.reply - y.reply, unlock: t.unlock - y.unlock, golden: Math.round((t.golden - y.golden) * 10) / 10, fans: t.fans - y.fans } : null,
       vs_avg: t ? { sales: t.sales - teamAvg.sales, unlock: t.unlock - teamAvg.unlock } : null,
