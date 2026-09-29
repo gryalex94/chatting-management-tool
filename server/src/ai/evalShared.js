@@ -8,6 +8,8 @@ const { toStoreTime } = require('../integrations/infloww');
 // daily findings fell from ~70-97 to ~20-38 and high/critical ones nearly vanished,
 // so experienced chatters (gated to high+) got almost no tasks. Don't switch again
 // without re-running the same days on both models and comparing what managers keep.
+// Sonnet 5.5 was tested that way on 2026-09-29 and kept the same pattern (fewer
+// findings, far fewer high/critical ones): see MODEL_SETTINGS in agentRunner.js.
 const MODELS = {
   haiku: 'claude-haiku-4-5',
   sonnet: 'claude-sonnet-4-6',

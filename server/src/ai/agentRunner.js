@@ -73,10 +73,20 @@ function salvageJson(text) {
 //              the default is Sonnet 4.6 again (see MODELS in evalShared.js).
 //   Opus 5.5 - thinking can't be turned off; "medium" is its default, set
 //              explicitly so it doesn't drift if the default changes.
+//   Sonnet 5.5 (29 Sep 2026, same 10 chatter-days, same input as Sonnet 4.6):
+//              at "high" (its default, as Anthropic recommends for rule-applying
+//              JSON work) 24% fewer findings and 42% fewer high/critical ones,
+//              re-finding fewer of what the manager kept, for 21% more money;
+//              at "medium" 62% fewer high/critical, 25% cheaper, 4x faster. No
+//              refusals on the adult content. Not switched: the manager keeps
+//              ~98% of findings, so fewer findings means missed ones.
 const MODEL_SETTINGS = {
   'claude-sonnet-5': { thinking: { type: 'adaptive' }, effort: 'low', thinkingHeadroom: 16000 },
+  'claude-sonnet-5-5': { thinking: { type: 'adaptive' }, effort: 'high', thinkingHeadroom: 16000 },
   'claude-opus-5-5': { thinking: { type: 'adaptive' }, effort: 'medium', thinkingHeadroom: 16000 },
 };
+// Only these models take a temperature; newer ones reject any non-default value.
+const TAKES_TEMPERATURE = /^claude-(sonnet|haiku)-4-[56]/;
 
 const JSON_ONLY = '\n\nCRITICAL: Your entire response must be ONLY valid JSON. No preamble, no markdown fences, no explanation. Start your response with { and end with }.';
 
@@ -96,8 +106,9 @@ function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', m
     messages: [{ role: 'user', content: userContent }],
   };
   if (cfg.thinking) params.thinking = cfg.thinking;
-  // A fixed answer where consistency matters (e.g. drafting AI rules); not allowed with thinking.
-  else if (temperature != null) params.temperature = temperature;
+  // A fixed answer where consistency matters (e.g. drafting AI rules); not allowed
+  // with thinking, nor on models from 4.7 on.
+  else if (temperature != null && TAKES_TEMPERATURE.test(model)) params.temperature = temperature;
   if (cfg.effort) params.output_config = { effort: cfg.effort };
   return params;
 }
