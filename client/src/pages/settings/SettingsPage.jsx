@@ -11,6 +11,7 @@ import { setInflowwOffset, getInflowwOffset } from '@/utils/displaySettings';
 import { fmtSentAt } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import CreatorDetailModal from './CreatorDetailModal';
+import InflowwPanel from './InflowwPanel';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -264,7 +265,7 @@ export default function SettingsPage() {
   const inviteLink = inviteToken ? `${window.location.origin}/invite/${inviteToken}` : '';
   const copyToken = () => { try { navigator.clipboard?.writeText(inviteLink); toast.success('Invite link copied'); } catch { /* ignore */ } };
 
-  const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles']];
+  const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles'], ...(isAdmin ? [['infloww','Infloww']] : [])];
 
   if(loading) return (
     <div className='flex flex-col gap-4 sm:gap-6'>
@@ -663,6 +664,13 @@ export default function SettingsPage() {
             </div>
           </Section>
         </TabsContent>
+        {isAdmin && (
+          <TabsContent value='infloww'>
+            <Section title='Infloww API' sub='Sales, refunds and employees pulled from Infloww, read-only'>
+              <InflowwPanel />
+            </Section>
+          </TabsContent>
+        )}
       </Tabs>
 
       {creatorDetail && (

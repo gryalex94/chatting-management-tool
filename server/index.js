@@ -124,6 +124,9 @@ app.use('/api/daily-check', staffOnly, dailyCheckRoutes);
 const reviewTaskRoutes = require('./src/routes/reviewTasks');
 app.use('/api/review-tasks', staffOnly, reviewTaskRoutes);
 
+const integrationRoutes = require('./src/routes/integrations');
+app.use('/api/integrations', protect, integrationRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------
@@ -148,6 +151,16 @@ app.use((req, res) => {
 // ---------------------
 // START SERVER
 // ---------------------
+// Infloww API sync: every hour, the last 3 days (recent sales keep changing for
+// ~12 h). Only when INFLOWW_API_KEY and INFLOWW_OID are set.
+const { configured: inflowwConfigured } = require('./src/integrations/infloww');
+if (inflowwConfigured()) {
+  const cron = require('node-cron');
+  const { runInflowwSync } = require('./src/utils/inflowwSync');
+  cron.schedule('20 * * * *', () => { runInflowwSync({ days: 3 }).catch(e => console.error('[InflowwSync]', e.message)); });
+  console.log('[InflowwSync] hourly sync scheduled');
+}
+
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

@@ -142,9 +142,9 @@ router.post('/fan-link', async (req, res) => {
         .eq('organisation_id', orgId).eq('sent_to_username', `u${fid}`);
       if (count) return res.status(400).json({ error: `This link is for a different fan (u${fid})` });
       const { error } = await supabaseAdmin.from('fan_infloww_ids').upsert(
-        { organisation_id: orgId, username, of_user_id: fid, created_by: req.user.id, created_at: new Date().toISOString() },
+        { organisation_id: orgId, username, of_user_id: fid, created_by: req.user.id, created_at: new Date().toISOString(), source: 'chat_link' },
         { onConflict: 'organisation_id,username' });
-      if (error) return res.status(500).json({ error: 'Could not save (has migration 022 been run?)' });
+      if (error) return res.status(500).json({ error: 'Could not save (has migration 023 been run?)' });
     }
 
     // The page's Infloww ID, if it isn't known yet.
