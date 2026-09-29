@@ -22,8 +22,15 @@ router.get('/infloww', requireMinRole('admin'), async (req, res) => {
     count('fan_infloww_ids', orgId, q => q.eq('source', 'sales')),
     count('fan_infloww_ids', orgId, q => q.eq('source', 'chat_link')),
   ]);
+  // The address Infloww sees this server at, for the key's IP allow-list
+  // (Cloudflare's trace page on Infloww's API host answers even without a key).
+  let serverIp = null;
+  try {
+    const t = await (await fetch('https://openapi.infloww.com/cdn-cgi/trace', { signal: AbortSignal.timeout(5000) })).text();
+    serverIp = /^ip=(.+)$/m.exec(t)?.[1] || null;
+  } catch { /* optional */ }
   res.json({
-    configured: configured(), running: inflowwSyncRunning(),
+    configured: configured(), running: inflowwSyncRunning(), server_ip: serverIp,
     tables_ready: sales !== null && fanIdsSales !== null,   // migration 023 applied
     state: state || [],
     totals: { sales, refunds, employees, linked_employees: linkedEmployees, fan_ids_from_sales: fanIdsSales, fan_ids_pasted: fanIdsPasted },

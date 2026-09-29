@@ -64,6 +64,12 @@ export default function InflowwPanel() {
         </div>
       </div>
 
+      {info.server_ip && (
+        <p className='text-sm text-muted-foreground'>
+          This server reaches Infloww from <code className='font-semibold text-foreground'>{info.server_ip}</code>. If your API key has IP
+          restrictions, that address must be on its list (on Railway, switch on a static outbound IP first so it doesn&apos;t change).
+        </p>
+      )}
       {!info.configured && (
         <p className='text-sm text-muted-foreground'>
           Add <code>INFLOWW_API_KEY</code> and <code>INFLOWW_OID</code> to the server&apos;s variables (Railway → backend → Variables).
