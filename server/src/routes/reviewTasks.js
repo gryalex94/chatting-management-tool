@@ -172,13 +172,42 @@ router.post('/fan-link', async (req, res) => {
   }
 });
 
-// GET /api/review-tasks/:id/dialogue?fan=<username>&days=1
+// GET /api/review-tasks/:id/dialogue?fan=<username>
 // The conversation behind a task, so a manager can judge it without leaving the
-// app: every message with that fan from `days` days before the task's day
-// through the day after, each labelled with its page, plus who the fan is and
-// every other task about them. `fan` picks one fan out of a multi-fan task.
-// (No page filter: an AI task's page can be the chatter's main page rather than
-// the fan's, which hid the whole conversation.)
+// app. The first call returns the flagged message with MSG_PAGE messages before
+// and after it (each labelled with its page), plus who the fan is and every
+// other task about them. "Load more" then pages through the rest:
+//   &before=<time>&before_id=<id>  the next MSG_PAGE older messages
+//   &after=<time>&after_id=<id>    the next MSG_PAGE newer ones
+// `fan` picks one fan out of a multi-fan task. (No page filter: an AI task's page
+// can be the chatter's main page rather than the fan's, which hid the whole
+// conversation.)
+const MSG_PAGE = 50;
+const MSG_COLS = 'id, sent_datetime, sender_name, fan_message_text, creator_message_text, price, purchased, creator_id';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const cursorTime = (v) => (v && Number.isFinite(Date.parse(v)) ? new Date(Date.parse(v)).toISOString() : null);
+
+// One batch of a fan's messages next to a point in time, oldest first.
+// dir 'older': before the point (with an id: strictly before that message; without:
+// up to and including the time). dir 'newer': strictly after. Messages at the same
+// second are ordered by id, so paging never skips or repeats one.
+async function messageBatch(orgId, fan, dir, time, id) {
+  const older = dir === 'older';
+  let q = supabaseAdmin.from('messages').select(MSG_COLS).eq('organisation_id', orgId).eq('sent_to_username', fan);
+  if (time && id) {
+    const op = older ? 'lt' : 'gt';
+    q = q.or(`sent_datetime.${op}."${time}",and(sent_datetime.eq."${time}",id.${op}.${id})`);
+  } else if (time) {
+    q = older ? q.lte('sent_datetime', time) : q.gt('sent_datetime', time);
+  }
+  const { data, error } = await q.order('sent_datetime', { ascending: !older }).order('id', { ascending: !older })
+    .limit(MSG_PAGE + 1);
+  if (error) throw new Error(error.message);
+  const more = data.length > MSG_PAGE;
+  const rows = data.slice(0, MSG_PAGE);
+  return { rows: older ? rows.reverse() : rows, more };
+}
+
 router.get('/:id/dialogue', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
@@ -188,26 +217,41 @@ router.get('/:id/dialogue', async (req, res) => {
     if (!task) return res.status(404).json({ error: 'Task not found' });
     const fan = String(req.query.fan || task.fan_username || '').trim();
     if (!fan) return res.status(400).json({ error: "This task isn't about one fan" });
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 1, 0), 30);
 
-    const focus = task.context?.sent_at || null;
-    const day = focus ? focus.slice(0, 10) : (task.last_seen_date || task.first_seen_date);
-    const from = new Date(Date.parse(dayWindow(day).start) - days * 86400000).toISOString();
-    const to = new Date(Date.parse(dayWindow(day).end) + 86400000).toISOString();
+    // infloww_creator_id arrives with migration 021; fall back if it isn't there yet
+    const { data: pages } = await supabaseAdmin.from('creators').select('id, name, infloww_creator_id').eq('organisation_id', orgId)
+      .then(r => (r.error ? supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId) : r));
+    const pageName = Object.fromEntries((pages || []).map(c => [c.id, c.name]));
+    const pageInfloww = Object.fromEntries((pages || []).map(c => [c.id, c.infloww_creator_id || null]));
+    const shape = (m) => ({
+      id: m.id, sent_at: m.sent_datetime, sender_name: m.sender_name, page: pageName[m.creator_id] || null,
+      page_infloww_id: pageInfloww[m.creator_id] || null,
+      fan_message: m.fan_message_text ? stripTags(m.fan_message_text) : null,
+      chatter_message: m.creator_message_text ? stripTags(m.creator_message_text) : null,
+      price: parseFloat(m.price) || 0, purchased: !!m.purchased,
+    });
 
-    const rows = [];
-    for (let off = 0; off < 3000; off += 1000) {
-      const { data, error } = await supabaseAdmin.from('messages')
-        .select('id, sent_datetime, sender_name, fan_message_text, creator_message_text, price, purchased, creator_id')
-        .eq('organisation_id', orgId).eq('sent_to_username', fan)
-        .gte('sent_datetime', from).lt('sent_datetime', to)
-        .order('sent_datetime', { ascending: true }).order('id', { ascending: true }).range(off, off + 999);
-      if (error) return res.status(500).json({ error: 'Could not load the conversation' });
-      rows.push(...(data || []));
-      if (!data || data.length < 1000) break;
+    // "Load more": just the next batch.
+    for (const dir of ['before', 'after']) {
+      if (!req.query[dir]) continue;
+      const time = cursorTime(req.query[dir]);
+      const id = String(req.query[`${dir}_id`] || '');
+      if (!time || !UUID_RE.test(id)) return res.status(400).json({ error: 'Bad position in the conversation' });
+      const b = await messageBatch(orgId, fan, dir === 'before' ? 'older' : 'newer', time, id);
+      return res.json({ messages: b.rows.map(shape), [dir === 'before' ? 'has_older' : 'has_newer']: b.more });
     }
 
-    const [{ data: sub }, { data: firstMsg }, { data: related }, { data: pages }] = await Promise.all([
+    // First open: around the flagged message, else around the end of the task's day.
+    const focus = task.context?.sent_at || null;
+    const day = task.last_seen_date || task.first_seen_date;
+    const anchor = cursorTime(focus) || (day ? cursorTime(dayWindow(day).end) : null);
+    const [before, after] = await Promise.all([
+      messageBatch(orgId, fan, 'older', anchor, null),
+      anchor ? messageBatch(orgId, fan, 'newer', anchor, null) : { rows: [], more: false },
+    ]);
+    const rows = [...before.rows, ...after.rows];
+
+    const [{ data: sub }, { data: firstMsg }, { data: related }] = await Promise.all([
       supabaseAdmin.from('subscribers').select('total_spend, classification, last_spend_date')
         .eq('organisation_id', orgId).eq('username', fan).maybeSingle(),
       supabaseAdmin.from('messages').select('sent_datetime').eq('organisation_id', orgId).eq('sent_to_username', fan)
@@ -216,12 +260,7 @@ router.get('/:id/dialogue', async (req, res) => {
         .select('id, area, severity, status, dismiss_reason_code, first_seen_date, chatter_name, title')
         .eq('organisation_id', orgId).eq('fan_username', fan).neq('id', task.id)
         .order('first_seen_date', { ascending: false }).limit(15),
-      // infloww_creator_id arrives with migration 021; fall back if it isn't there yet
-      supabaseAdmin.from('creators').select('id, name, infloww_creator_id').eq('organisation_id', orgId)
-        .then(r => (r.error ? supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId) : r)),
     ]);
-    const pageName = Object.fromEntries((pages || []).map(c => [c.id, c.name]));
-    const pageInfloww = Object.fromEntries((pages || []).map(c => [c.id, c.infloww_creator_id || null]));
 
     // What to call the fan: their name, and whether other fans on the page share it
     const lastPage = rows.length ? rows[rows.length - 1].creator_id : null;
@@ -240,7 +279,11 @@ router.get('/:id/dialogue', async (req, res) => {
       fan_of_id: fanOfId,
       fan_name: nameInfo?.name || null,
       name_shared: nameInfo?.shared || null,
-      from, to, focus, days,
+      focus,
+      // the message to open on: the flagged one (or the last of the task's day)
+      anchor_id: before.rows.length ? before.rows[before.rows.length - 1].id : (after.rows[0]?.id || null),
+      has_older: before.more,
+      has_newer: after.more,
       fan_info: {
         total_spend: sub ? Math.round(parseFloat(sub.total_spend) || 0) : 0,
         classification: sub?.classification || null,
@@ -248,13 +291,7 @@ router.get('/:id/dialogue', async (req, res) => {
         first_seen: firstMsg?.[0]?.sent_datetime || null,
       },
       related: related || [],
-      messages: rows.map(m => ({
-        id: m.id, sent_at: m.sent_datetime, sender_name: m.sender_name, page: pageName[m.creator_id] || null,
-        page_infloww_id: pageInfloww[m.creator_id] || null,
-        fan_message: m.fan_message_text ? stripTags(m.fan_message_text) : null,
-        chatter_message: m.creator_message_text ? stripTags(m.creator_message_text) : null,
-        price: parseFloat(m.price) || 0, purchased: !!m.purchased,
-      })),
+      messages: rows.map(shape),
     });
   } catch {
     res.status(500).json({ error: 'Could not load the conversation' });

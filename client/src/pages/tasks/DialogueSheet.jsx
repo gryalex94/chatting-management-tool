@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { ExternalLink, History, Link2, Loader2 } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { ArrowDown, ExternalLink, History, Link2, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { fmtSentAt, areaMeta, reasonLabel, inflowwChatLink } from '@/utils/taskMeta';
@@ -11,55 +11,102 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
 import FanLabel from '@/components/shared/FanLabel';
 
-// How far back "Show earlier" reaches, step by step (days before the task's day).
-const DAY_STEPS = [1, 3, 7, 14, 30];
 const CLASS_LABEL = { whale: 'Whale', ps: 'Spender', regular: 'Buyer' };
 const STATUS_LABEL = { open: 'Open', taken: 'Taken', completed: 'Completed', dismissed: 'Dismissed', archived: 'Archived' };
 
 /**
  * The conversation behind a task, read in the app instead of copying the
  * username into Infloww. Shows who the fan is, every other task about them, and
- * the messages around the task's day with the flagged message highlighted.
+ * the messages around the flagged one (highlighted). "Load more" brings in the
+ * next batch of earlier messages, "Load newer" the later ones.
  * `fan` picks one fan out of a multi-fan task (reply-time / keyword rows).
  */
 export default function DialogueSheet({ task, fan, onClose, onLinked }) {
-  const [step, setStep] = useState(0);
   const [data, setData] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [hasNewer, setHasNewer] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(null);   // 'older' | 'newer' | null
   const [reload, setReload] = useState(0);
+  const listRef = useRef(null);
   const focusRef = useRef(null);
+  const openOnFocus = useRef(false);   // scroll to the flagged message after the first load
+  const keepPlace = useRef(null);      // scroll position to hold while older messages go in above
 
   useEffect(() => {
     let live = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true); setError('');
-    const q = new URLSearchParams({ days: String(DAY_STEPS[step]) });
+    const q = new URLSearchParams();
     if (fan) q.set('fan', fan);
     api.get(`/api/review-tasks/${task.id}/dialogue?${q}`)
-      .then(r => { if (live) setData(r.data); })
+      .then(r => {
+        if (!live) return;
+        openOnFocus.current = true;
+        setData(r.data);
+        setMessages(r.data.messages || []);
+        setHasOlder(!!r.data.has_older);
+        setHasNewer(!!r.data.has_newer);
+      })
       .catch(e => { if (live) setError(e?.response?.data?.error || 'Could not load the conversation'); })
       .finally(() => { if (live) setLoading(false); });
     return () => { live = false; };
-  }, [task.id, fan, step, reload]);
+  }, [task.id, fan, reload]);
 
-  // Bring the flagged message into view once the conversation is in.
-  useEffect(() => {
-    if (!loading && focusRef.current) focusRef.current.scrollIntoView({ block: 'center' });
-  }, [loading, data]);
+  const loadMore = async (dir) => {
+    if (loadingMore || !messages.length) return;
+    const edge = dir === 'older' ? messages[0] : messages[messages.length - 1];
+    const key = dir === 'older' ? 'before' : 'after';
+    const q = new URLSearchParams({ [key]: edge.sent_at, [`${key}_id`]: edge.id });
+    if (fan) q.set('fan', fan);
+    setLoadingMore(dir);
+    try {
+      const { data: r } = await api.get(`/api/review-tasks/${task.id}/dialogue?${q}`);
+      const have = new Set(messages.map(m => m.id));
+      const fresh = (r.messages || []).filter(m => !have.has(m.id));
+      if (dir === 'older') {
+        const el = listRef.current;
+        if (el) keepPlace.current = { height: el.scrollHeight, top: el.scrollTop };
+        setMessages(ms => [...fresh, ...ms]);
+        setHasOlder(!!r.has_older);
+      } else {
+        setMessages(ms => [...ms, ...fresh]);
+        setHasNewer(!!r.has_newer);
+      }
+    } catch (e) {
+      toast.error(e?.response?.data?.error || 'Could not load more messages');
+    } finally { setLoadingMore(null); }
+  };
 
-  const info = data?.fan_info;
   const focus = data?.focus;
   // The message the task points at: exact time match, else the nearest one.
   let focusId = null;
-  if (focus && data?.messages?.length) {
+  if (focus && messages.length) {
     const target = Date.parse(focus);
-    focusId = data.messages.reduce((best, m) =>
+    focusId = messages.reduce((best, m) =>
       Math.abs(Date.parse(m.sent_at) - target) < Math.abs(Date.parse(best.sent_at) - target) ? m : best).id;
   }
+  const openId = focusId || data?.anchor_id || null;
+
+  // After the first load, open on the flagged message; after "Load more", keep the
+  // reader's place instead of jumping (the new messages go in above).
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (keepPlace.current && el) {
+      el.scrollTop = keepPlace.current.top + (el.scrollHeight - keepPlace.current.height);
+      keepPlace.current = null;
+    } else if (openOnFocus.current && focusRef.current) {
+      focusRef.current.scrollIntoView({ block: 'center' });
+      openOnFocus.current = false;
+    }
+  }, [messages]);
+
+  const info = data?.fan_info;
 
   // Open this chat in Infloww, on the page of the flagged message (else the latest one).
-  const pageMsg = data?.messages?.find(m => m.id === focusId) || data?.messages?.[data.messages.length - 1];
+  const pageMsg = messages.find(m => m.id === focusId) || messages[messages.length - 1];
   const inflowwLink = inflowwChatLink(pageMsg?.page_infloww_id, data?.fan_username,
     data?.fan_of_id ? { [data.fan_username]: data.fan_of_id } : {});
 
@@ -73,7 +120,9 @@ export default function DialogueSheet({ task, fan, onClose, onLinked }) {
             ) : (fan || task.fan_username || 'Conversation')}
           </SheetTitle>
           <SheetDescription>
-            {data ? `${fmtSentAt(data.from)} to ${fmtSentAt(data.to)}` : 'Loading…'}
+            {!data ? 'Loading…' : messages.length
+              ? `${messages.length} message${messages.length === 1 ? '' : 's'} · ${fmtSentAt(messages[0].sent_at)} to ${fmtSentAt(messages[messages.length - 1].sent_at)}`
+              : 'No messages yet'}
           </SheetDescription>
           {info && (
             <div className='flex flex-wrap items-center gap-1.5 pt-1'>
@@ -90,7 +139,7 @@ export default function DialogueSheet({ task, fan, onClose, onLinked }) {
               <a href={inflowwLink}><ExternalLink />Open in Infloww{pageMsg?.page ? ` (${pageMsg.page})` : ''}</a>
             </Button>
           )}
-          {data && !inflowwLink && data.messages?.length > 0 && (
+          {data && !inflowwLink && messages.length > 0 && (
             <LinkToInfloww username={data.fan_username} missingFan={!data.fan_of_id} missingPage={!pageMsg?.page_infloww_id}
               onDone={(r) => { onLinked?.(r); setReload(n => n + 1); }} />
           )}
@@ -115,22 +164,24 @@ export default function DialogueSheet({ task, fan, onClose, onLinked }) {
           </details>
         )}
 
-        <div className='flex-1 overflow-y-auto px-4 py-3'>
-          {step < DAY_STEPS.length - 1 && !error && (
-            <Button variant='outline' size='sm' className='mb-3 w-full' disabled={loading} onClick={() => setStep(s => s + 1)}>
-              <History />Show earlier ({DAY_STEPS[step + 1]} days before)
-            </Button>
-          )}
+        <div ref={listRef} className='flex-1 overflow-y-auto px-4 py-3'>
           {error ? (
             <p className='py-8 text-center text-sm text-muted-foreground'>{error}</p>
           ) : loading && !data ? (
             <div className='space-y-3'>{[0, 1, 2, 3].map(i => <Skeleton key={i} className={cn('h-12', i % 2 ? 'ms-auto w-3/4' : 'w-2/3')} />)}</div>
-          ) : !data?.messages?.length ? (
-            <p className='py-8 text-center text-sm text-muted-foreground'>No messages with this fan in this window.</p>
+          ) : !messages.length ? (
+            <p className='py-8 text-center text-sm text-muted-foreground'>No messages with this fan in the uploaded chats.</p>
           ) : (
             <div className={cn('space-y-2', loading && 'opacity-50')}>
-              {data.messages.map(m => (
-                <div key={m.id} ref={m.id === focusId ? focusRef : undefined}
+              {hasOlder ? (
+                <Button variant='outline' size='sm' className='mb-1 w-full' disabled={!!loadingMore} onClick={() => loadMore('older')}>
+                  {loadingMore === 'older' ? <Loader2 className='animate-spin' /> : <History />}Load more
+                </Button>
+              ) : (
+                <p className='pb-1 text-center text-[11px] text-muted-foreground'>No earlier messages in the uploaded chats</p>
+              )}
+              {messages.map(m => (
+                <div key={m.id} ref={m.id === openId ? focusRef : undefined}
                   className={cn('space-y-1 rounded-md p-1', m.id === focusId && 'bg-warn/10 ring-1 ring-warn/50')}>
                   <p className='text-center text-[11px] text-muted-foreground'>{fmtSentAt(m.sent_at)}{m.page ? ` · ${m.page}` : ''}{m.sender_name ? ` · ${m.sender_name}` : ''}</p>
                   {m.fan_message && (
@@ -148,6 +199,11 @@ export default function DialogueSheet({ task, fan, onClose, onLinked }) {
                   )}
                 </div>
               ))}
+              {hasNewer && (
+                <Button variant='outline' size='sm' className='mt-1 w-full' disabled={!!loadingMore} onClick={() => loadMore('newer')}>
+                  {loadingMore === 'newer' ? <Loader2 className='animate-spin' /> : <ArrowDown />}Load newer
+                </Button>
+              )}
             </div>
           )}
           {loading && data && <Loader2 className='mx-auto mt-3 size-4 animate-spin text-muted-foreground' />}
