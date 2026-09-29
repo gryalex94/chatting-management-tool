@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('./supabase');
 const infloww = require('../integrations/infloww');
+const { applyInflowwSpend } = require('./inflowwChecks');
 
 /**
  * Pulls Infloww data into our tables (read-only on Infloww's side):
@@ -211,6 +212,12 @@ async function runInflowwSync({ days = 3 } = {}) {
     await step(orgId, 'sales', () => syncSales(orgId, pageMap, from, to), summary);
     await step(orgId, 'refunds', () => syncRefunds(orgId, pageMap, from, to), summary);
     await step(orgId, 'fan_ids', () => learnFanIds(orgId, from, to), summary);
+    // Real spend per fan: a full pass over the year of sales, so not every hour.
+    const { data: sp } = await supabaseAdmin.from('infloww_sync_state').select('last_ok_at')
+      .eq('organisation_id', orgId).eq('resource', 'spend').maybeSingle();
+    if (days > 3 || !sp?.last_ok_at || Date.now() - Date.parse(sp.last_ok_at) > 6 * 3600e3) {
+      await step(orgId, 'spend', () => applyInflowwSpend(orgId), summary);
+    }
     summary.finished_at = new Date().toISOString();
     console.log('[InflowwSync]', JSON.stringify(summary));
     return summary;

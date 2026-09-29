@@ -10,6 +10,7 @@ const RESOURCES = [
   ['sales', 'Sales'],
   ['refunds', 'Refunds'],
   ['fan_ids', 'Fan IDs learned'],
+  ['spend', 'Fan spend'],
 ];
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
 
@@ -76,7 +77,7 @@ export default function InflowwPanel() {
         </p>
       )}
 
-      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-4'>
+      <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-5'>
         {RESOURCES.map(([key, label]) => {
           const s = state[key];
           return (

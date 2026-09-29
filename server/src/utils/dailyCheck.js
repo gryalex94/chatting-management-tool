@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('./supabase');
 const { fanNameInfo } = require('./fanNames');
+const { fanChargebacks, newSubsUnmessaged } = require('./inflowwChecks');
 const { dayWindow } = require('../ai/evalShared');
 const { matchOffPlatform, matchAge, knownPlatforms, clean } = require('./keywordScan');
 
@@ -213,6 +214,37 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
       (page.chatters[f.chatter_id]?.flags || page.flags).push(f);
     }
     flags.push(f);
+  }
+
+  // ============ INFLOWW API ============
+  // Per-fan chargebacks (with who sold it) and new paid subs nobody messaged.
+  // They replace the page-level chargeback total for pages where they found any.
+  if (persist) {
+    let extra = [];
+    try {
+      extra = [
+        ...await fanChargebacks(orgId, reportDate, { creators, chatters }),
+        ...await newSubsUnmessaged(orgId, reportDate, { creators }),
+      ];
+    } catch (e) { console.error('[DailyCheck] Infloww checks:', e.message); }
+    const refundPages = new Set(extra.filter(f => f.flag_type === 'fan_chargeback').map(f => f.creator_id));
+    for (let i = flags.length - 1; i >= 0; i--) {
+      if (flags[i].flag_type === 'chargeback' && refundPages.has(flags[i].creator_id)) {
+        const p = pages[flags[i].creator_id];
+        if (p) p.flags = p.flags.filter(f => f !== flags[i]);
+        flags.splice(i, 1);
+      }
+    }
+    for (const f of extra) {
+      if (f.creator_id) {
+        const page = pages[f.creator_id] ||= {
+          creator_id: f.creator_id, creator_name: creators[f.creator_id] || 'Unknown',
+          is_free: null, metrics: null, flags: [], chatters: {},
+        };
+        (page.chatters[f.chatter_id]?.flags || page.flags).push(f);
+      }
+      flags.push(f);
+    }
   }
 
   // ---- fan names: what to call each fan (Infloww's name, or the username when

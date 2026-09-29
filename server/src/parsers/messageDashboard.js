@@ -235,5 +235,11 @@ async function rebuildSubscriberSpend(orgId) {
     written++;
   }
   console.log(`[Subscribers] Rebuilt spend for ${written} fans (PPV only, recomputed from all messages)`);
+  // Fans Infloww knows get their real total (all purchase types) back on top.
+  try {
+    const { applyInflowwSpend } = require('../utils/inflowwChecks');
+    const n = await applyInflowwSpend(orgId);
+    if (n) console.log(`[Subscribers] Infloww spend applied to ${n} fans`);
+  } catch (e) { console.error('[Subscribers] Infloww spend:', e.message); }
 }
 module.exports = { parseMessageDashboard, rebuildSubscriberSpend };

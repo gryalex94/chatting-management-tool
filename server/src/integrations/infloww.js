@@ -101,4 +101,15 @@ function windows(from, to, days = 30) {
   return out;
 }
 
-module.exports = { configured, get, getAll, toDate, toDollars, windows, InflowwError };
+// Our chat exports store times as Amsterdam wall-clock labelled as UTC; Infloww
+// returns real UTC. Shift a real UTC time into the exports' frame to compare.
+const AMS = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+});
+function toStoreTime(d) {
+  const p = Object.fromEntries(AMS.formatToParts(new Date(d)).map(x => [x.type, x.value]));
+  return new Date(Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second));
+}
+
+module.exports = { configured, get, getAll, toDate, toDollars, windows, toStoreTime, InflowwError };

@@ -289,10 +289,10 @@ function AfkIncidents({ incidents, taskId, onOpenChat, inflowwLink, names }) {
 
 // Safety-net flags (off-platform / under-18 keywords) carry context.hits — the exact
 // messages that matched, so the manager can open each one and judge it.
-function KeywordHits({ hits, taskId, onOpenChat, inflowwHref, names }) {
+function KeywordHits({ hits, taskId, onOpenChat, inflowwHref, names, label = 'Messages to check' }) {
   const [done, toggle] = useChecklist(`hitsDone:${taskId}`);
   return (
-    <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label='Messages to check'
+    <ReviewList count={hits.length} defaultOpen={hits.length <= 4} label={label}
       doneLabel={done.size ? `${done.size} of ${hits.length} reviewed` : null}>
       {hits.map((h, i) => (
         <ReviewRow key={i} done={done.has(String(i))} onToggle={() => toggle(String(i))}>
@@ -440,6 +440,7 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
         )}
         {Array.isArray(ctx.hits) && ctx.hits.length > 0 && (
           <KeywordHits hits={ctx.hits} taskId={task.id} onOpenChat={(fan) => onOpenChat(task, fan)} names={ctx.names}
+            label={ctx.flag_type === 'new_sub_unmessaged' ? 'New subs to message' : ctx.flag_type === 'fan_chargeback' ? 'Fan to look up' : 'Messages to check'}
             inflowwHref={(fan) => inflowwLink(task.creator_id, task.creator_name, fan)} />
         )}
 

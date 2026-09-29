@@ -37,6 +37,7 @@ const PAGE_HEALTH = ['revenue', 'ratio', 'ltv', 'churn', 'spenders'];
 const FLAG_AREA = {
   chargeback: 'chargeback', keyword_offplatform: 'offplatform', keyword_age: 'age',
   ratio_below_5: 'ratio', ltv_drop: 'ltv', earnings_drop: 'revenue', earnings_spike: 'revenue',
+  fan_chargeback: 'chargeback', new_sub_unmessaged: 'new_sub',
 };
 // Flags that describe something that HAPPENED on a day (a gap, a slow reply, a
 // keyword hit, a chargeback, a revenue swing) get one task per day: a new day is
@@ -44,7 +45,7 @@ const FLAG_AREA = {
 // The rest describe an ongoing state (ratio/LTV) and carry one task across days.
 const DAILY_FLAGS = new Set([
   'keyword_age', 'keyword_offplatform', 'chargeback', 'afk_gap', 'high_response_time',
-  'earnings_drop', 'earnings_spike',
+  'earnings_drop', 'earnings_spike', 'fan_chargeback', 'new_sub_unmessaged',
 ]);
 
 // Compliance/ToS classes that are NEVER auto-cleared (not AI-archived, not queue-
@@ -85,6 +86,7 @@ function defaultPriority(sev, source, area) {
   if (sev === 'critical') return 1;
   if (a === 'chargeback') return 1;                            // money left the business — always look it up
   if (a === 'needs_review') return 2;                          // AI used an unknown label — a human checks it
+  if (a === 'new_sub') return 2;                               // new subs first: nobody messaged them
   if (TOP_COMPLIANCE.has(a)) return sev === 'high' ? 2 : 3;   // protected ToS class → top
   if (a === 'custom') return sev === 'high' ? 2 : 3;          // paid custom undelivered — money owed / chargeback risk
   if (a === 'abandon') return sev === 'high' ? 2 : 3;         // chatter left a warm conversation early
@@ -263,7 +265,8 @@ async function buildTasksForDate(orgId, reportDate) {
 
   for (const f of (flags || [])) {
     const fp = `flag:${f.flag_type}:cr=${f.creator_id || '-'}:ch=${f.chatter_id || '-'}`
-      + (DAILY_FLAGS.has(f.flag_type) ? `:d=${reportDate}` : '');
+      + (DAILY_FLAGS.has(f.flag_type) ? `:d=${reportDate}` : '')
+      + (f.details?.key ? `:k=${f.details.key}` : '');                 // one task per refund
     candidates.push({
       fingerprint: fp,
       source_type: 'flag',
