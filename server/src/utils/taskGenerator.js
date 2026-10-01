@@ -391,9 +391,13 @@ async function buildTasksForDate(orgId, reportDate) {
 
   const inserts = []; let carried = 0, reopened = 0;
   const now = new Date().toISOString();
+  const isAi = (c) => c.source_type === 'compliance' || c.source_type === 'sales';
+  const sameDay = await sameDayTasks(orgId, reportDate,
+    [...new Set(uniq.filter(c => isAi(c) && !existing[c.fingerprint] && c.fan_username).map(c => c.chatter_id).filter(Boolean))]);
+  const matchedExactly = new Set(Object.values(existing).map(t => t.id));
 
   for (const c of uniq) {
-    const ex = existing[c.fingerprint];
+    const ex = existing[c.fingerprint] || (isAi(c) ? sameDay(c, matchedExactly) : null);
     if (!ex) {
       inserts.push({
         organisation_id: orgId, ...c,
@@ -461,6 +465,30 @@ async function buildTasksForDate(orgId, reportDate) {
   }
 
   return { created: inserts.length, carried, reopened, total_open: await countOpen(orgId) };
+}
+
+// A re-review of the same day can quote another line of the same conversation
+// for the same finding, which gave that finding a second task (the 29 Sep review
+// ran at 13:54 and again at 17:19 and raised one ignored "yes" twice). So an AI
+// finding with no exact match is matched to a task raised for the SAME day about
+// the same chatter, fan and topic. Returns a lookup that hands out each earlier
+// task once, skipping the ids in `skip` (tasks already matched exactly).
+async function sameDayTasks(orgId, reportDate, chatterIds) {
+  const byKey = {};
+  const keyOf = (t) => `${t.chatter_id}|${t.fan_username}|${String(t.area || '').toLowerCase()}`;
+  if (chatterIds.length) {
+    const { data } = await supabaseAdmin.from('review_tasks').select('*')
+      .eq('organisation_id', orgId).eq('first_seen_date', reportDate).in('source_type', ['compliance', 'sales'])
+      .in('chatter_id', chatterIds).not('fan_username', 'is', null);
+    for (const t of data || []) (byKey[keyOf(t)] ||= []).push(t);
+  }
+  const handedOut = new Set();
+  return (c, skip = new Set()) => {
+    if (!c.chatter_id || !c.fan_username) return null;
+    const t = (byKey[keyOf(c)] || []).find(x => !handedOut.has(x.id) && !skip.has(x.id));
+    if (t) handedOut.add(t.id);
+    return t || null;
+  };
 }
 
 async function countOpen(orgId) {
@@ -649,6 +677,8 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
     return [{ username: it.fan_username, creatorId: cid }, ...(it.fans || []).map(f => ({ username: f.username, creatorId: cid, nickname: f.nickname }))];
   });
   const names = await fanNameInfo(orgId, pairs, reportDate).catch(() => ({}));
+  const sameDay = await sameDayTasks(orgId, reportDate, [chatterId]);
+  const matched = new Set();
   for (const it of issues) {
     const fan = it.fan_username || null;
     const creatorId = it.creator ? creatorIdByName[_norm(it.creator)] : null;
@@ -666,8 +696,10 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
       },
       last_seen_date: reportDate,
     };
-    const { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')
+    let { data: ex } = await supabaseAdmin.from('review_tasks').select('id, status')
       .eq('organisation_id', orgId).eq('fingerprint', fp).maybeSingle();
+    if (ex) matched.add(ex.id);
+    else ex = sameDay({ chatter_id: chatterId, fan_username: fan, area: row.area }, matched);
     if (!ex) {
       await supabaseAdmin.from('review_tasks').insert({
         ...row, status: 'open', first_seen_date: reportDate, days_open: 1,
@@ -676,7 +708,9 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
       });
       created++;
     } else if (ex.status === 'open' || ex.status === 'taken') {
-      await supabaseAdmin.from('review_tasks').update({ ...row, updated_at: now }).eq('id', ex.id);
+      // keep the task's own fingerprint when it was matched by day, not by message
+      const { fingerprint: _fp, ...rest } = row;
+      await supabaseAdmin.from('review_tasks').update({ ...rest, updated_at: now }).eq('id', ex.id);
       updated++;
     }
     // dismissed / archived / completed → leave as the manager set it

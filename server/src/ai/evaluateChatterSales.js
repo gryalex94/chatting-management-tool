@@ -42,7 +42,7 @@ SALES roadmap:
 - Respect spending history: if he bought a video at ~$60 once, he expects ~$60 next — don't over-scale beyond his established range (length/explicitness aside).
 - Pricing: naked photos $45-55, videos $70+, long videos $100+, customs $800+. Ladder: free teaser → $10 → $25 → $50.
 - PPV descriptions MUST create curiosity — describe but leave something hidden.
-- When the fan says "yes"/"sure"/"always"/👍 → SEND THE PPV, don't ask another question.
+- When the fan says "yes"/"sure"/"always"/👍 → ONE short check that he's ready and willing to buy right now (alone, has time, up for it), then SEND THE PPV as soon as he confirms. Don't stack more questions or change the subject.
 - NO FREE SEXTING (even text-only) unless it's a whale or a sub that recently spent a lot.
 - Don't hard-push spenders (they should initiate). Push higher prices if a sub buys fast without negotiating.
 - Aftercare after every sale — EXCEPT during active sexting/horny sessions where momentum is high; a quick follow-up PPV then is correct, don't force aftercare.
@@ -54,6 +54,7 @@ IMPORTANT CALIBRATION — these are NOT misses; do NOT flag them:
 - One follow-up after a sent PPV is enough. If the fan opened/viewed the PPV and then went quiet, that is NOT the chatter's fault — do not flag "no re-engagement."
 - If the fan says they can't spend / card maxed / broke, backing off and staying warm is the CORRECT play — not a miss.
 - A conversation that ends on the chatter's own open-ended question is fine — do NOT flag it as "let the conversation die."
+- A readiness check right after the fan's "yes" ("are you alone right now?") is the required step before the PPV, not an ignored signal. If the fan went quiet after it, that is NOT a miss, and a "still there?" follow-up is correct.
 - Content sent after a fan tips is PAID content; a tip-then-content exchange is not "free."
 
 ABANDONING A CONVERSATION EARLY:
