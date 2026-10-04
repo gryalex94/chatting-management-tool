@@ -1,6 +1,6 @@
 const { runAgentDetailed } = require('./agentRunner');
 const { loadHouseRules, houseRulesBlock } = require('./houseRules');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments, capGuessedNewSubs } = require('./evalShared');
 
 // ── Spotlight prompts (compliance + work ethic) ────────────────────────────
 // The AI's job is to SPOTLIGHT moments worth the manager's eyes (quote + name
@@ -58,6 +58,7 @@ DO NOT FLAG (allowed here, or the AI cannot judge it — stay silent):
 - Wrong name for a fan: skip UNLESS the fan themselves points out the name is wrong.
 - Copy-paste / repeated scripts / canned lines / echoing the fan back — not a concern.
 - Content-scope differences between fans on DIFFERENT pages; ordinary discounts (≤50% off); previews/teasers; routine reassurance; promises of already-available content.
+- Anything you yourself judge the chatter handled correctly (e.g. "the chatter deflected appropriately"): handled well means it is not an issue — leave it out, in the protected areas too.
 
 LOWER PRIORITY (worth a glance, keep severity "low"):
 - Bare tip solicitation with no content/PPV attached. → area "quality", severity low.
@@ -134,7 +135,8 @@ async function prepareChatterDay({ orgId, chatterId, reportDate, creatorId = nul
   const baseModelId = MODELS[model] || MODELS.sonnet;
 
   const finish = (result, usage, elapsedMs) => {
-    const { kept: issues, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
+    const { kept, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
+    const issues = capGuessedNewSubs(kept, fanTags);
     return {
       ok: true,
       eval_type: 'compliance',

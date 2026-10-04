@@ -758,6 +758,20 @@ function verifyIssues(issues) {
   return { kept, dropped };
 }
 
+// "NEW SUB?" is a guess (no Infloww record of the subscription), so its new-sub
+// findings are at most medium. The prompt says so, but the model still marked 7
+// of 45 high new-sub tasks high on a guess (week to 3 Oct) — enforced here.
+// A fan is a confirmed new sub when a page tag "NEW SUB (day N, …)" exists for them.
+function capGuessedNewSubs(issues, fanTags = {}) {
+  const confirmed = new Set(Object.entries(fanTags)
+    .filter(([k, v]) => k.includes('|') && String(v).startsWith('NEW SUB ('))
+    .map(([k]) => k.split('|')[0]));
+  for (const i of issues) {
+    if (i.area === 'new_sub' && (i.severity === 'high' || i.severity === 'critical') && !confirmed.has(i.fan_username)) i.severity = 'medium';
+  }
+  return issues;
+}
+
 // The named buckets of per-page context, and how each is introduced to the model.
 // Each exists because a missing fact caused a real false positive: content that
 // does exist on the page read as a ToS breach, a legitimate second account or
@@ -798,4 +812,4 @@ function buildPageInstructions(msgs, creatorNames = {}, creatorInstructions = {}
   return `PER-PAGE CONTEXT — these are FACTS about specific pages, set by the manager. They OVERRIDE your general assumptions for that page's conversations. Apply each page's context only to conversations on that page:\n${blocks.join('\n')}\n\n`;
 }
 
-module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, reportDateOf, stripPpvTags, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, trimLines, NEW_SUB_RULES, nicknameMentioned, nameBlocklist, wholeWord, loadPayments, withPayments };
+module.exports = { MODELS, stripTags, _norm, extractQuote, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, bestOverlap, sigTokens, oneLine, normaliseLabels, dayWindow, reportDateOf, stripPpvTags, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, keywordFans, loadFanContext, loadCorrections, verifyIssues, trimLines, NEW_SUB_RULES, nicknameMentioned, nameBlocklist, wholeWord, loadPayments, withPayments, capGuessedNewSubs };

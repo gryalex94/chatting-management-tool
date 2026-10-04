@@ -3,6 +3,9 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { PROTECTED_AREAS, defaultPriority } = require('../utils/taskGenerator');
 const { oneLine, MODELS } = require('./evalShared');
 
+// Areas the manager must see whatever their tier: never archived by the AI.
+const NEVER_ARCHIVE = new Set(['new_sub', 'custom', 'gift']);
+
 // Titles are AI-written and may quote fans: one line, capped, JSON-quoted.
 const TITLE_CAP = 120;
 const quoteTitle = (s) => { const t = oneLine(s); return JSON.stringify(t.length > TITLE_CAP ? t.slice(0, TITLE_CAP - 1) + '…' : t); };
@@ -16,6 +19,7 @@ PRIORITY TIERS:
 - P1 Critical / safety: possible minor / edgy age, ToS breach, an explicit agreement or refusal to meet in real life, free content, off-platform contact, a CHARGEBACK (money left the business — always look up what happened), a page in revenue collapse. Always first.
 - P2 Serious work ethic: huge AFK with fans waiting, neglected new subs/whales; unusually deep (>50%) discounts; a paid CUSTOM not delivered (money owed — chargeback risk); a chatter ABANDONING a warm conversation early.
 - P3 Lost money (managers care a LOT about these): a clear missed sale, ignored buying signal, or no follow-up after a soft "no" — on a NEW SUB, whale, or spender. Never archive these; if anything, bump them up. A GIFT/package a fan is sending also sits here (handle it).
+- NEW SUBS (area new_sub) are the agency's #1 priority: an engaged new sub never offered anything sits at P2, and the per-chatter new-sub coaching tasks ("N new-sub coaching points for …") at P4 — they are what the manager coaches the team from. NEVER archive a new_sub task, whatever its tier.
 - P4 Communication breach: dry/banned replies, weak engagement, over-the-top explicit content.
 - P5 Sales craft / quality: skipped roadmap, weak follow-up, missing aftercare.
 - P6 Page-health watch: ratio/LTV drift, spender softening, churn.
@@ -34,7 +38,7 @@ ADJUST a task when:
 - It relates to something just completed — note it may already be handled (you can lower it).
 - A cluster is wrong — give it a better cluster_key ("chatter:Name", "page:Name", or "fan:username").
 
-ARCHIVE the least important tasks so the live queue stays focused and doesn't pile up day after day. Return up to 40 task ids that are genuinely low-value right now — P6/P7 polish, tiny one-off slips, redundant near-duplicates, stale items unlikely to be worth a manager's minute. NEVER archive critical or high severity, and NEVER archive a protected item (area tos/age/meeting/free_content/offplatform/chargeback/needs_review) at any tier. Archiving FILES them away (it is reversible and tracked), it does NOT delete them — so be willing to cull the long tail.
+ARCHIVE the least important tasks so the live queue stays focused and doesn't pile up day after day. Return up to 40 task ids that are genuinely low-value right now — P6/P7 polish, tiny one-off slips, redundant near-duplicates, stale items unlikely to be worth a manager's minute. NEVER archive critical or high severity, NEVER archive a protected item (area tos/age/meeting/free_content/offplatform/chargeback/needs_review) at any tier, and NEVER archive new_sub, custom or gift tasks (the manager has to act on or coach from them). Archiving FILES them away (it is reversible and tracked), it does NOT delete them — so be willing to cull the long tail.
 
 Return JSON with this exact shape:
 {
@@ -111,12 +115,15 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
   }
 
   // Archive the AI's least-important picks — never critical/high, never deletes.
+  // New-sub coaching was being archived as "low value" every morning (57 of 108
+  // new-sub tasks in the week to 3 Oct), so the manager never saw most of it.
   const archiveIds = Array.isArray(result.archive) ? result.archive : [];
   let archived = 0;
   for (const id of archiveIds) {
     if (!validIds.has(id)) continue;
     if (sevOf[id] === 'critical' || sevOf[id] === 'high') continue;
     if (PROTECTED_AREAS.has(areaOf[id])) continue;   // never archive protected ToS classes / needs_review
+    if (NEVER_ARCHIVE.has(areaOf[id])) continue;     // new-sub coaching, owed customs, incoming gifts
     const { data: up } = await supabaseAdmin.from('review_tasks')
       .update({ status: 'archived', completed_at: now, priority_reason: 'AI-archived: low value', updated_at: now })
       .eq('id', id).in('status', ['open', 'taken']).select('id');

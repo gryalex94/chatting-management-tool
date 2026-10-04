@@ -1,6 +1,6 @@
 const { loadHouseRules, houseRulesBlock } = require('./houseRules');
 const { runAgentDetailed } = require('./agentRunner');
-const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments } = require('./evalShared');
+const { MODELS, loadChatterMessages, buildThreadList, buildEnrichment, buildPageInstructions, UNTRUSTED_RULE, READING_RULE, EVIDENCE_FIELDS, loadFanContext, loadCorrections, verifyIssues, NEW_SUB_RULES, loadPayments, withPayments, capGuessedNewSubs } = require('./evalShared');
 
 // ── Strategy review (communication + sales craft) → TASKS ───────────────────
 // Not a grader. This layer reads FULL conversations against Rice Media's strategy
@@ -56,6 +56,7 @@ IMPORTANT CALIBRATION — these are NOT misses; do NOT flag them:
 - A conversation that ends on the chatter's own open-ended question is fine — do NOT flag it as "let the conversation die."
 - A readiness check right after the fan's "yes" ("are you alone right now?") is the required step before the PPV, not an ignored signal. If the fan went quiet after it, that is NOT a miss, and a "still there?" follow-up is correct.
 - Content sent after a fan tips is PAID content; a tip-then-content exchange is not "free."
+- Anything you yourself judge the chatter handled correctly is not an issue — leave it out.
 
 ABANDONING A CONVERSATION EARLY:
 - If the chatter exits a live, engaged conversation with an excuse ("I'm going to sleep", "gotta go", "I have to do X") after fewer than ~5-7 exchanged messages, flag it — they cut a warm conversation short instead of developing it. → area "abandon", severity high.
@@ -102,7 +103,8 @@ async function evaluateChatterSales({ orgId, chatterId, reportDate, creatorId = 
   try {
     const t0 = Date.now();
     const { result, usage } = await runAgentDetailed({ systemPrompt: SALES_PROMPT, userContent, model: baseModelId, maxTokens: 8000 });
-    const { kept: issues, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
+    const { kept, dropped } = verifyIssues(Array.isArray(result.issues) ? result.issues.map(enrichIssue) : []);
+    const issues = capGuessedNewSubs(kept, fanTags);
     return {
       ok: true,
       eval_type: 'sales_quality',

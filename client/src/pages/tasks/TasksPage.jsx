@@ -473,6 +473,10 @@ function TaskRow({ task, onAction, onOpenChat, memberName, focused, selected, on
           {task.status === 'taken' && <Button size='sm' onClick={() => onAction(task, 'complete')}>Complete</Button>}
           {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'not_issue')}>Not an issue</Button>}
           {live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'dismiss')}>Dismiss</Button>}
+          {/* "Not an issue" without a reason yet: the weekly AI-rules draft learns from the why */}
+          {task.status === 'dismissed' && task.dismiss_reason_code === 'allowed' && !task.dismiss_reason && (
+            <Button size='sm' variant='ghost' onClick={() => onAction(task, 'add_note')}>Add why</Button>
+          )}
           {!live && <Button size='sm' variant='outline' onClick={() => onAction(task, 'reopen')}><RotateCcw />Reopen</Button>}
           {/* Page-level tasks can't be saved for coaching; keep the slot anyway so
               Take / Complete / Dismiss line up across every card. */}
@@ -830,6 +834,7 @@ export default function TasksPage() {
   const onAction = (task, action) => {
     if (action === 'dismiss') setDismiss(task);
     else if (action === 'not_issue') notAnIssue(task);
+    else if (action === 'add_note') setNoteFor(task);
     else act(task, action);
   };
   // The "why" for a task already marked not an issue: it feeds the AI rules.
