@@ -65,6 +65,7 @@ const TOP_COMPLIANCE = new Set(['tos', 'age', 'meeting', 'free_content', 'offpla
 // periodically, per the workflow). Dialogue tasks are gated by this; flags (reply
 // time/AFK), page-health, and protected ToS items always come through.
 const SEV_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+const SPENDER_MIN = 100;                // recorded spend that makes a fan a spender (whales included)
 const TENURE_MIN_SEV = { new: 'low', learning: 'medium', experienced: 'high' };
 // Page name -> page ID. Old merged/renamed pages can share a name with the live
 // one ("Tania" twice); the active page must win, or tasks land on the old copy,
@@ -83,8 +84,16 @@ function tenureTier(createdAt, onDate) {
 }
 function keepByTenure(c, tier) {
   if (c.source_type === 'flag' || c.source_type === 'creator') return true;   // apply to everyone
-  if (PROTECTED_AREAS.has((c.area || '').toLowerCase())) return true;         // protected always
-  if ((c.area || '').toLowerCase() === 'new_sub') return true;               // the new-sub playbook applies to everyone
+  const area = (c.area || '').toLowerCase();
+  if (PROTECTED_AREAS.has(area)) return true;                                 // protected always
+  if (area === 'new_sub') return true;                                        // the new-sub playbook applies to everyone
+  // Agreed with the owner on 8 Oct (nearly every chatter counts as experienced, so
+  // these were all invisible): a fan sending something is for the manager to
+  // handle, not coaching; a missed sale on a spender or whale is money; dry
+  // replies are kept but merged into one coaching task per chatter (bundleCoaching).
+  // Laughing emojis and swearing stay out for experienced chatters.
+  if (area === 'gift' || area === 'communication') return true;
+  if (area === 'sales' && c.severity === 'medium' && Number(c.context?.spend) >= SPENDER_MIN) return true;
   const rank = SEV_RANK[c.severity];
   if (rank === undefined) return true;                                        // unrecognised severity → keep, a human looks
   return rank <= SEV_RANK[TENURE_MIN_SEV[tier] || 'high'];
@@ -92,7 +101,7 @@ function keepByTenure(c, tier) {
 
 // Deterministic default tier from severity + source + area (the priority rules,
 // encoded). The AI Task Manager then refines/bumps only where judgment is needed.
-function defaultPriority(sev, source, area) {
+function defaultPriority(sev, source, area, spend = null) {
   const a = (area || '').toLowerCase();
   const ph = PAGE_HEALTH.includes(a);
   if (sev === 'critical') return 1;
@@ -116,6 +125,7 @@ function defaultPriority(sev, source, area) {
     return 3;
   }
   if (sev === 'medium') {
+    if (a === 'sales' && Number(spend) >= SPENDER_MIN) return 4;   // money on a spender / whale
     if (a === 'compliance') return 3;
     if (a === 'budget') return 5;
     if (a === 'communication') return 4;
@@ -209,36 +219,46 @@ async function loadDecisionHistory(orgId, reportDate) {
 }
 
 /**
- * New-sub coaching points (area new_sub, medium/low: menu-selling, abrupt pitch,
- * walking away after a sale, caving on a "no") are bundled into ONE task per
- * chatter per day, so the playbook shows up as a coaching list instead of
- * flooding the queue. High ones (an engaged new sub never offered anything)
- * stay separate: those fans can still be won back the same day.
+ * Coaching points are bundled into ONE task per chatter per day and kind, so the
+ * playbook shows up as a coaching list instead of flooding the queue:
+ *  - new-sub points (area new_sub, medium/low: menu-selling, abrupt pitch,
+ *    walking away after a sale, caving on a "no"). High ones (an engaged new sub
+ *    never offered anything) stay separate: those fans can still be won the same day.
+ *  - dry or dead-end replies (area communication, medium/low).
+ * A chatter with a single point keeps it as its own task (quote and chat link).
  */
-function bundleNewSubCoaching(candidates, reportDate) {
+const COACHING_BUNDLES = {
+  new_sub: { prefix: 'newsubcoach', label: 'new-sub coaching points', lead: (n) => `${n} moments where the new-sub playbook wasn't followed today:` },
+  communication: { prefix: 'commcoach', label: 'communication coaching points', lead: (n) => `${n} replies that fell flat today (dry or dead-end):` },
+};
+function bundleCoaching(candidates, reportDate) {
   const groups = new Map();
   for (const c of candidates) {
-    if ((c.area || '').toLowerCase() !== 'new_sub' || !c.chatter_id) continue;
+    const area = (c.area || '').toLowerCase();
+    if (!COACHING_BUNDLES[area] || !c.chatter_id) continue;
     if (c.severity !== 'medium' && c.severity !== 'low') continue;
-    if (!groups.has(c.chatter_id)) groups.set(c.chatter_id, []);
-    groups.get(c.chatter_id).push(c);
+    const k = `${area}|${c.chatter_id}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(c);
   }
   const drop = new Set();
   const bundled = [];
-  for (const [chatterId, list] of groups) {
+  for (const [k, list] of groups) {
     if (list.length < 2) continue;
+    const [area, chatterId] = k.split('|');
+    const kind = COACHING_BUNDLES[area];
     list.forEach(c => drop.add(c));
     const first = list[0];
     const fans = list.flatMap(c => (c.context?.fans?.length ? c.context.fans : c.fan_username ? [{ username: c.fan_username, sent_at: c.context?.sent_at }] : []));
     const names = Object.assign({}, ...list.map(c => c.context?.names || {}));
     bundled.push({
       ...first,
-      fingerprint: `newsubcoach:ch=${chatterId}:d=${reportDate}`,
+      fingerprint: `${kind.prefix}:ch=${chatterId}:d=${reportDate}`,
       fan_username: null,
       severity: list.some(c => c.severity === 'medium') ? 'medium' : 'low',
-      title: shortTitle(`${list.length} new-sub coaching points for ${first.chatter_name || 'this chatter'}`),
-      detail: `${list.length} moments where the new-sub playbook wasn't followed today:\n\n` + list.map(c => `• ${c.detail}`).join('\n\n'),
-      context: { ...(first.context || {}), message: null, sent_at: null, evidence: null, fans, names, bundled: list.length },
+      title: shortTitle(`${list.length} ${kind.label} for ${first.chatter_name || 'this chatter'}`),
+      detail: `${kind.lead(list.length)}\n\n` + list.map(c => `• ${c.detail}`).join('\n\n'),
+      context: { ...(first.context || {}), message: null, sent_at: null, evidence: null, fans, names, spend: null, bundled: list.length },
     });
   }
   return candidates.filter(c => !drop.has(c)).concat(bundled);
@@ -306,7 +326,7 @@ async function buildTasksForDate(orgId, reportDate) {
         severity: it.severity || 'low',
         title: shortTitle(it.detail),
         detail: it.detail || '',
-        context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null, fans: it.fans || [], mentions: it.mentions || [], metrics },
+        context: { message: it.message || null, sent_at: it.sent_at || null, matched_who: it.matched_who || null, evidence: it.evidence || null, fans: it.fans || [], mentions: it.mentions || [], spend: it.spend ?? null, metrics },
       });
     }
   }
@@ -343,7 +363,7 @@ async function buildTasksForDate(orgId, reportDate) {
 
   // drop anything tied to an ignored account/chatter (e.g. "Paul B"), then gate
   // dialogue tasks by the chatter's tenure (experienced → serious items only).
-  const kept = bundleNewSubCoaching(collapseCrossChatter(candidates.filter(c => {
+  const kept = bundleCoaching(collapseCrossChatter(candidates.filter(c => {
     if (ignoreSet.has(_norm(c.chatter_name)) || ignoreSet.has(_norm(c.fan_username))) return false;
     const tier = c.chatter_id ? (tenureById[c.chatter_id] || 'experienced') : 'new';
     return keepByTenure(c, tier);
@@ -402,7 +422,7 @@ async function buildTasksForDate(orgId, reportDate) {
       inserts.push({
         organisation_id: orgId, ...c,
         status: 'open', first_seen_date: reportDate, last_seen_date: reportDate, days_open: 1,
-        priority: Math.min(7, defaultPriority(c.severity, c.source_type, c.area) + (c.demote || 0)),
+        priority: Math.min(7, defaultPriority(c.severity, c.source_type, c.area, c.context?.spend) + (c.demote || 0)),
         cluster_key: defaultCluster(c.chatter_name, c.creator_name),
       });
       continue;
@@ -434,14 +454,14 @@ async function buildTasksForDate(orgId, reportDate) {
       await supabaseAdmin.from('review_tasks').update({
         status: 'open', regressed: true, detail: c.detail, title: c.title, context: c.context, severity: c.severity,
         first_seen_date: reportDate, last_seen_date: reportDate, days_open: 1,
-        priority: defaultPriority(c.severity, c.source_type, c.area), updated_at: now,
+        priority: defaultPriority(c.severity, c.source_type, c.area, c.context?.spend), updated_at: now,
       }).eq('id', ex.id);
       reopened++;
     } else {
       // open or taken — carry forward (an older day's rebuild leaves it as is)
       if (ex.last_seen_date && reportDate < ex.last_seen_date) continue;
       const newDay = laterDay;
-      const base = defaultPriority(c.severity, c.source_type, c.area);
+      const base = defaultPriority(c.severity, c.source_type, c.area, c.context?.spend);
       await supabaseAdmin.from('review_tasks').update({
         last_seen_date: lastSeen,
         days_open: ex.days_open + (newDay ? 1 : 0),
@@ -703,7 +723,7 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
     if (!ex) {
       await supabaseAdmin.from('review_tasks').insert({
         ...row, status: 'open', first_seen_date: reportDate, days_open: 1,
-        priority: defaultPriority(row.severity, src, row.area),
+        priority: defaultPriority(row.severity, src, row.area, row.context?.spend),
         cluster_key: defaultCluster(row.chatter_name, row.creator_name),
       });
       created++;

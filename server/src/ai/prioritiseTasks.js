@@ -20,6 +20,7 @@ PRIORITY TIERS:
 - P2 Serious work ethic: huge AFK with fans waiting, neglected new subs/whales; unusually deep (>50%) discounts; a paid CUSTOM not delivered (money owed — chargeback risk); a chatter ABANDONING a warm conversation early.
 - P3 Lost money (managers care a LOT about these): a clear missed sale, ignored buying signal, or no follow-up after a soft "no" — on a NEW SUB, whale, or spender. Never archive these; if anything, bump them up. A GIFT/package a fan is sending also sits here (handle it).
 - NEW SUBS (area new_sub) are the agency's #1 priority: an engaged new sub never offered anything sits at P2, and the per-chatter new-sub coaching tasks ("N new-sub coaching points for …") at P4 — they are what the manager coaches the team from. NEVER archive a new_sub task, whatever its tier.
+- Per-chatter coaching tasks ("N … coaching points for …", e.g. communication) and missed sales on a spender or whale are never archived either, whatever their tier.
 - P4 Communication breach: dry/banned replies, weak engagement, over-the-top explicit content.
 - P5 Sales craft / quality: skipped roadmap, weak follow-up, missing aftercare.
 - P6 Page-health watch: ratio/LTV drift, spender softening, churn.
@@ -57,7 +58,7 @@ function shiftDays(date, n) {
 
 async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
   const { data: open } = await supabaseAdmin.from('review_tasks')
-    .select('id, severity, area, source_type, creator_name, chatter_name, fan_username, days_open, carried_over, regressed, title, priority, cluster_key')
+    .select('id, severity, area, source_type, creator_name, chatter_name, fan_username, days_open, carried_over, regressed, title, priority, cluster_key, fingerprint, spend:context->>spend')
     .eq('organisation_id', orgId).in('status', ['open', 'taken'])
     // The AI ranks only the DIALOGUE findings. Deterministic engine flags (reply
     // time / AFK / page health), manager customs, and weekly PS tasks pass through
@@ -89,10 +90,11 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
 
   const adjustments = Array.isArray(result.adjustments) ? result.adjustments : [];
   const validIds = new Set(open.map(t => t.id));
-  const sevOf = {}; const areaOf = {}; const prioOf = {};
+  const sevOf = {}; const areaOf = {}; const prioOf = {}; const fpOf = {}; const spendOf = {};
   open.forEach(t => {
     sevOf[t.id] = (t.severity || '').toLowerCase(); areaOf[t.id] = (t.area || '').toLowerCase();
-    prioOf[t.id] = t.priority ?? defaultPriority(sevOf[t.id], t.source_type, areaOf[t.id]);
+    fpOf[t.id] = t.fingerprint || ''; spendOf[t.id] = Number(t.spend) || 0;
+    prioOf[t.id] = t.priority ?? defaultPriority(sevOf[t.id], t.source_type, areaOf[t.id], spendOf[t.id]);
   });
   // Serious / protected tasks can be promoted by the AI, never demoted.
   const guarded = (id) => sevOf[id] === 'critical' || sevOf[id] === 'high' || PROTECTED_AREAS.has(areaOf[id]);
@@ -124,6 +126,8 @@ async function prioritiseTasks(orgId, reportDate, model = 'sonnet') {
     if (sevOf[id] === 'critical' || sevOf[id] === 'high') continue;
     if (PROTECTED_AREAS.has(areaOf[id])) continue;   // never archive protected ToS classes / needs_review
     if (NEVER_ARCHIVE.has(areaOf[id])) continue;     // new-sub coaching, owed customs, incoming gifts
+    if (/^(newsubcoach|commcoach):/.test(fpOf[id])) continue;              // a chatter's coaching list
+    if (areaOf[id] === 'sales' && spendOf[id] >= 100) continue;             // money on a spender / whale
     const { data: up } = await supabaseAdmin.from('review_tasks')
       .update({ status: 'archived', completed_at: now, priority_reason: 'AI-archived: low value', updated_at: now })
       .eq('id', id).in('status', ['open', 'taken']).select('id');
