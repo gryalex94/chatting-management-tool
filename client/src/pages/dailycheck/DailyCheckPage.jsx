@@ -22,7 +22,7 @@ import { yesterday } from '@/utils/dates';
 import FanLabel from '@/components/shared/FanLabel';
 
 
-const WORKLOAD_TONE = { overloaded: 'warn', underperforming: 'bad', healthy: 'good', light: 'info' };
+const WORKLOAD_TONE = { overloaded: 'warn', slow: 'warn', underperforming: 'bad', healthy: 'good', light: 'info' };
 const TIER_TONE = { new_sub: 'purple', whale: 'good', spender: 'info', low: 'neutral', new: 'neutral' };
 const TIER_LABEL = { new_sub: 'New sub', whale: 'Whale', spender: 'Spender', low: 'Low', new: '-' };
 const PUNCT_TONE = { late: 'bad', early: 'info', on_time: 'good', no_shift: 'neutral', no_activity: 'neutral' };

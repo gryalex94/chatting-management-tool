@@ -72,7 +72,11 @@ function Sparkline({ data, w = 74, h = 24, className = 'text-link' }) {
   );
 }
 
-const WL = { overloaded: { l: 'Overloaded', tone: 'bad' }, healthy: { l: 'Healthy', tone: 'good' }, light: { l: 'Light', tone: 'info' } };
+// Day statuses from computeChatterMetrics: how busy fans kept the chatter x reply speed.
+const WL = {
+  overloaded: { l: 'Overloaded', tone: 'warn' }, slow: { l: 'Slow', tone: 'warn' }, underperforming: { l: 'Slow, quiet day', tone: 'bad' },
+  healthy: { l: 'Healthy', tone: 'good' }, light: { l: 'Light', tone: 'info' },
+};
 function WorkloadChip({ s }) {
   const m = WL[s] || { l: s, tone: 'neutral' };
   return <Chip tone={m.tone}>{m.l}</Chip>;
@@ -230,7 +234,7 @@ export default function DashboardPage() {
     { key: 'golden', label: 'Golden', align: 'right', sortVal: r => r.metrics?.golden ?? -1, render: r => r.has_data ? <Cell val={r.metrics.golden} delta={r.vs_prev?.golden} suffix='%' /> : <Dash /> },
     { key: 'messages', label: 'Msgs', align: 'right', sortVal: r => r.metrics?.messages ?? -1, render: r => r.has_data ? <Cell val={r.metrics.messages} delta={r.vs_prev?.messages} /> : <Dash /> },
     { key: 'reply', label: 'Reply', align: 'right', sortVal: r => r.metrics?.reply ?? 1e9, render: r => r.has_data ? <Cell val={r.metrics.reply} delta={r.vs_prev?.reply} suffix='s' lowerBetter /> : <Dash /> },
-    { key: 'workload', label: 'Load', align: 'center', sortVal: r => ({ overloaded: 3, healthy: 2, light: 1 }[r.metrics?.workload] || 0), render: r => r.has_data && r.metrics?.workload ? <WorkloadChip s={r.metrics.workload} /> : <Dash /> },
+    { key: 'workload', label: 'Load', align: 'center', sortVal: r => ({ overloaded: 5, healthy: 4, slow: 3, light: 2, underperforming: 1 }[r.metrics?.workload] || 0), render: r => r.has_data && r.metrics?.workload ? <WorkloadChip s={r.metrics.workload} /> : <Dash /> },
     { key: 'spark', label: '7-day', sortVal: null, render: r => <Sparkline data={r.spark} /> },
     { key: 'tasks', label: 'Tasks', align: 'center', sortVal: r => r.concern, render: tasksCell },
   ];

@@ -181,7 +181,7 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
       const sev = (row.response_time_p90_seconds > 600 || hasKeyNeglect) ? 'high' : 'medium';
       const lens = row.workload_status ? ` (workload: ${row.workload_status})` : '';
       const tierTag = top.tier === 'new_sub' ? 'NEW SUB' : top.tier === 'whale' ? `whale $${top.spend}` : top.tier === 'spender' ? `spender $${top.spend}` : top.tier;
-      const headline = `kept ${slowInc.length} sub${slowInc.length === 1 ? '' : 's'} waiting (avg ${row.response_time_avg_seconds}s) — worst: ${top.fan_nickname} [${tierTag}] ${top.worst_reply_min}m at ${top.worst_time}${lens}`;
+      const headline = `kept ${slowInc.length} sub${slowInc.length === 1 ? '' : 's'} waiting (typical reply ${row.response_time_p50_seconds}s) — worst: ${top.fan_nickname} [${tierTag}] ${top.worst_reply_min}m at ${top.worst_time}${lens}`;
 
       // tag each waiting sub with its page — a chatter's subs span several pages.
       const subsWithPage = slowInc.map(s => ({ ...s, page: creators[s.creator_id] || null }));

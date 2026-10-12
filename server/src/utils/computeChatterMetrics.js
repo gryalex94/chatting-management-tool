@@ -14,13 +14,21 @@ const { reportDateOf } = require('../ai/evalShared');
  *
  *  Signals:
  *   - reply time: only genuine replies to a fan message (fan_message_text present).
- *   - workload: 2x2 of volume (msgs/active-hour, merged day) x reply speed:
- *       high vol + slow  -> overloaded   (drowning, forgivable)
- *       low  vol + slow  -> underperforming (no excuse) [stored as 'light' + low score, flagged separately]
- *       high vol + fast  -> healthy      (crushing it)
- *       low  vol + fast  -> light        (quiet, fine)
+ *   - workload: how busy FANS kept the chatter (fan messages per active hour)
+ *       x how fast they replied (typical reply + share of replies over 5 min):
+ *       slow + busy   -> overloaded       (fans really were writing a lot)
+ *       slow + normal -> slow
+ *       slow + quiet  -> underperforming  (slow on a quiet day: no excuse)
+ *       fast + quiet  -> light            (quiet, fine)
+ *       fast          -> healthy
+ *     Recalibrated 2026-10-12 on 30 days of chatter-days. The old version used the
+ *     chatter's OWN message count and the average reply (cut at the team's median),
+ *     so half of all days were "slow", a few long waits made a day slow, and
+ *     "overloaded" days had fewer fans writing than "healthy" ones. Counts and reply
+ *     times themselves match Infloww's own employee stats (within 1%; r=0.82 per chatter).
  *   - AFK: a merged-day gap > AFK_GAP_MIN that COINCIDES with waiting fans
- *       (reply times > WAITING_RT_SEC around the gap). A long quiet stretch
+ *       (reply times > WAITING_RT_SEC around the gap), AND is serious: an hour or
+ *       more, or 2+ fans waiting, or a fan waiting 20+ min. A long quiet stretch
  *       followed by snappy replies = no incoming work = NOT afk.
  *   - words/msg: cheap quality hint for the AI layer (not a judgment).
  */
@@ -28,9 +36,17 @@ const { reportDateOf } = require('../ai/evalShared');
 const AFK_GAP_MIN = 30;        // a silence longer than this is a candidate gap
 const MAX_GAP_MIN = 180;       // gaps longer than 3h are between-session/overnight, not AFK
 const WAITING_RT_SEC = 300;    // 5 min: fans waited this long => work was pending
-const HIGH_VOL_PER_HOUR = 40;  // >= this msgs/active-hour = high volume
-const HIGH_VOL_TOTAL = 250;    // OR >= this total messages/day = high volume regardless of rate
-const SLOW_DAY_RT_SEC = 150;   // day avg reply slower than this = "slow"
+// A candidate gap counts as AFK only if it is serious (half the old flags were a
+// ~40-min gap with one fan waiting ~14 min, and most of those tasks were archived):
+const AFK_LONG_GAP_MIN = 60;   // an hour or more, or
+const AFK_MIN_FANS = 2;        // 2+ fans left waiting, or
+const AFK_LONG_WAIT_SEC = 1200;// a fan waiting 20+ min
+// Workload lines, set from the 30 days to 11 Oct 2026 (323 chatter-days):
+const BUSY_FAN_PER_HOUR = 30;  // fans wrote this much or more per active hour: the busiest quarter of days
+const QUIET_FAN_PER_HOUR = 20; // under this: a quiet day (about the quietest 40%)
+const SLOW_TYPICAL_SEC = 140;  // typical (median) reply this slow or slower, or
+const SLOW_SHARE_OVER_5 = 0.2; // 20%+ of replies over 5 min  -> slow (about the slowest 18% of days)
+const MIN_REPLIES_TO_JUDGE = 10;  // too few replies to call a day slow
 
 // Report days use the same DST-aware CET/CEST window as the AI review
 // (dayWindow in ai/evalShared.js) — a fixed +1h put winter days an hour off.
@@ -336,17 +352,27 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
   }
   const spanHours = activeMs / 3600000;
   const msgsPerHour = spanHours > 0.25 ? chatterMsgs.length / spanHours : chatterMsgs.length;
+  // Demand: how many fan messages came in per active hour (what the chatter had to answer).
+  const fanMsgs = msgs.filter(m => m.fan_message_text && m.fan_message_text.trim()).length;
+  const fanPerHour = spanHours > 0.25 ? fanMsgs / spanHours : 0;
 
-  // workload 2x2 (volume x reply speed)
-  const highVol = msgsPerHour >= HIGH_VOL_PER_HOUR || chatterMsgs.length >= HIGH_VOL_TOTAL;
-  const slow = avg >= SLOW_DAY_RT_SEC;
+  // workload: demand x reply speed (see the header)
+  const shareOver5 = validRT.length ? validRT.filter(x => x > WAITING_RT_SEC).length / validRT.length : 0;
+  const slow = validRT.length >= MIN_REPLIES_TO_JUDGE && (dayRT.p50 >= SLOW_TYPICAL_SEC || shareOver5 >= SLOW_SHARE_OVER_5);
+  const busy = fanPerHour >= BUSY_FAN_PER_HOUR;
+  const quiet = fanPerHour < QUIET_FAN_PER_HOUR;
   let status, score;
-  if (highVol && slow) { status = 'overloaded'; score = 90; }
-  else if (!highVol && slow) { status = 'light'; score = 15; }
-  else if (highVol && !slow) { status = 'healthy'; score = 70; }
-  else { status = 'light'; score = 40; }
-  const underperforming = (!highVol && slow);
-  const workload = { status, score, msgs_per_hour: Math.round(msgsPerHour * 10) / 10, total_messages: chatterMsgs.length, underperforming };
+  if (slow && busy) { status = 'overloaded'; score = 90; }
+  else if (slow && quiet) { status = 'underperforming'; score = 15; }
+  else if (slow) { status = 'slow'; score = 30; }
+  else if (quiet) { status = 'light'; score = 40; }
+  else { status = 'healthy'; score = 70; }
+  const underperforming = status === 'underperforming';
+  const workload = {
+    status, score, underperforming,
+    msgs_per_hour: Math.round(msgsPerHour * 10) / 10, total_messages: chatterMsgs.length,
+    fan_msgs_per_hour: Math.round(fanPerHour * 10) / 10, share_replies_over_5min: Math.round(shareOver5 * 1000) / 10,
+  };
 
   // AFK INCIDENTS — gap (30min..3h) with waiting fans, full detail per gap
   const afkIncidents = [];
@@ -359,6 +385,10 @@ function computeDaySignals(dayMsgs, fanTier = {}) {
                                          m.replay_time_seconds && m.replay_time_seconds > WAITING_RT_SEC);
     const endWaited = curr.replay_time_seconds && curr.replay_time_seconds > WAITING_RT_SEC;
     if (!waitingFans.length && !endWaited) continue;
+    // serious only: long, or several fans left waiting, or a long wait
+    const fansWaiting = new Set([...waitingFans.map(m => m.sent_to_username || m.sent_to_nickname), ...(endWaited ? [curr.sent_to_username || curr.sent_to_nickname] : [])]).size;
+    const longestWait = Math.max(0, ...waitingFans.map(m => m.replay_time_seconds || 0), endWaited ? curr.replay_time_seconds : 0);
+    if (gapMin < AFK_LONG_GAP_MIN && fansWaiting < AFK_MIN_FANS && longestWait < AFK_LONG_WAIT_SEC) continue;
     const t = tierOf(curr.sent_to_username, priorContact.has(curr.sent_to_username));
     afkIncidents.push({
       gap_minutes: Math.round(gapMin),
