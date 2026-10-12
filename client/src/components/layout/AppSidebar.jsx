@@ -30,7 +30,7 @@ export const NAV_GROUPS = [
   {
     title: 'Team & data',
     items: [
-      { url: '/creators', title: 'Shifts Overview', icon: CalendarClock },
+      { url: '/shifts', title: 'Shifts', icon: CalendarClock },
       { url: '/reports', title: 'Reports', icon: FileUp },
     ],
   },

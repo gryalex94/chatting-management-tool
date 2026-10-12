@@ -13,6 +13,7 @@ import CreatorsPage from './pages/creators/CreatorsPage';
 import ReportsPage from './pages/reports/ReportsPage';
 import TasksPage from './pages/tasks/TasksPage';
 import RulesPage from './pages/rules/RulesPage';
+import ShiftsPage from './pages/shifts/ShiftsPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import ChatterProfile from './pages/chatters/ChatterProfile';
 
@@ -48,6 +49,7 @@ function AppRoutes() {
         <Route path="pulse" element={<PulsePage />} />
         <Route path="tasks" element={<TasksPage />} />
         <Route path="rules" element={<RulesPage />} />
+        <Route path="shifts" element={<ShiftsPage />} />
         <Route path="creators" element={<CreatorsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />

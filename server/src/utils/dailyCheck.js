@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('./supabase');
+const { shiftStartsFor } = require('./roster');
 const { fanNameInfo } = require('./fanNames');
 const { fanChargebacks, newSubsUnmessaged, spendersGoingQuiet } = require('./inflowwChecks');
 const { dayWindow } = require('../ai/evalShared');
@@ -298,7 +299,7 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
   // ---- shape output: BY CHATTER (chatters tab) ----
   // Re-index the SAME flags by person. Each chatter shows ALL pages they covered,
   // punctuality, and their flags pulled from wherever they were attached.
-  const shifts = await shiftStartMap(Object.keys(chatters));
+  const shifts = await shiftStartMap(Object.keys(chatters), orgId, reportDate);
   const grace = cfg.punctuality_grace_minutes;
 
   // chatter -> { pages:[{creator_id,name,messages}], flags:[], representative row }
@@ -338,7 +339,10 @@ async function runDailyCheck(orgId, reportDate, { persist = true } = {}) {
   // finalize: punctuality, sort pages, score
   const chatterList = Object.values(byChatter).map(c => {
     c.pages.sort((a, b) => b.messages - a.messages);
-    c.punctuality = computePunctuality(c.first_message_time, shifts[c.chatter_id], grace);
+    // With the roster: the first message inside their shift that day (an EU Prime
+    // chatter's first message of the calendar day is the tail of last night's shift).
+    const sh = shifts[c.chatter_id];
+    c.punctuality = computePunctuality(sh?.from_roster ? sh.first_in_shift : c.first_message_time, sh, grace);
     c.worst_score = Math.max(0, ...c.flags.map(f => f.score || 0));
     c.has_issues = c.flags.length > 0 || ['late'].includes(c.punctuality.state);
     delete c._repMsgs;
@@ -514,12 +518,32 @@ async function chatterNameMap(orgId) {
   const m = {}; (data || []).forEach(c => { m[c.id] = c.name; }); return m;
 }
 
-// Load each chatter's scheduled shift start (HH:MM) from their active assignment.
-// Returns { chatter_id -> { start: 'HH:MM', name } }. Best-effort: a chatter may
-// have no assignment (then punctuality is "shift not set").
-// Assignments carry no organisation, so scope them by this organisation's chatters.
-async function shiftStartMap(chatterIds) {
+// Load each chatter's scheduled shift start (HH:MM). From the Shifts roster when
+// it's in use (their shift that day, with the first message they sent inside it),
+// else from the old per-page assignment. Returns { chatter_id -> { start: 'HH:MM',
+// name, from_roster?, first_in_shift? } }. Best-effort: a chatter may have no shift
+// (then punctuality is "shift not set").
+async function shiftStartMap(chatterIds, orgId = null, reportDate = null) {
   if (!chatterIds.length) return {};
+  if (orgId && reportDate) {
+    const roster = await shiftStartsFor(orgId, reportDate).catch(() => null);
+    if (roster) {
+      const { data: names } = await supabaseAdmin.from('chatters').select('id, name').in('id', chatterIds);
+      const out = {};
+      for (const c of names || []) {
+        const sh = roster[c.id];
+        if (!sh) continue;
+        // from an hour before the shift starts to its end (shifts count as the day they start)
+        const start = Date.parse(`${reportDate}T${sh.start}:00Z`) - 3600000;
+        const { data: first } = await supabaseAdmin.from('messages').select('sent_datetime')
+          .eq('organisation_id', orgId).eq('sender_name', c.name).not('creator_message_text', 'is', null)
+          .gte('sent_datetime', new Date(start).toISOString()).lt('sent_datetime', new Date(start + 9 * 3600000).toISOString())
+          .order('sent_datetime').limit(1);
+        out[c.id] = { start: sh.start, name: sh.name, from_roster: true, first_in_shift: first?.[0] ? first[0].sent_datetime.slice(11, 16) : null };
+      }
+      return out;
+    }
+  }
   const { data: assigns } = await supabaseAdmin
     .from('chatter_creator_assignments')
     .select('chatter_id, shift_id, is_active')
@@ -545,7 +569,9 @@ function computePunctuality(firstMessageTime, shift, graceMin) {
   if (!shift || !shift.start) return { state: 'no_shift', label: 'shift not set' };
   if (!firstMessageTime) return { state: 'no_activity', label: 'no messages' };
   const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-  const diff = toMin(firstMessageTime) - toMin(shift.start);   // +late, -early
+  let diff = toMin(firstMessageTime) - toMin(shift.start);     // +late, -early
+  if (diff > 720) diff -= 1440;                                // a few minutes early across midnight
+  else if (diff < -720) diff += 1440;
   const grace = num(graceMin, 10);
   if (diff > grace) return { state: 'late', minutes: diff, label: `started ~${diff}m late`, shift_start: shift.start, first_message: firstMessageTime };
   if (diff < -grace) return { state: 'early', minutes: -diff, label: `started ~${-diff}m early`, shift_start: shift.start, first_message: firstMessageTime };

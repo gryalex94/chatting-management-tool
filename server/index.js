@@ -130,6 +130,9 @@ app.use('/api/integrations', protect, integrationRoutes);
 const aiRuleRoutes = require('./src/routes/aiRules');
 app.use('/api/ai-rules', staffOnly, aiRuleRoutes);
 
+const rosterRoutes = require('./src/routes/roster');
+app.use('/api/roster', staffOnly, rosterRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------

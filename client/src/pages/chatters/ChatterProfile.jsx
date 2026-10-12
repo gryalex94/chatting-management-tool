@@ -569,6 +569,46 @@ function PenaltyModal({ chatterId, onClose, onSaved }) {
   );
 }
 
+/* ─── Shifts (the roster on the Shifts page) ───────── */
+function RosterPanel({ roster, onOpen }) {
+  const slot = (sid) => (roster.slots || []).find(x => x.id === sid);
+  const page = (pid) => (roster.pages || []).find(x => x.id === pid)?.name || '—';
+  const rows = roster.assignments || [];
+  const workDays = new Set(rows.flatMap(a => a.weekdays || []));
+  const fmt = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return (
+    <Panel icon={Calendar} title='Shifts' meta={rows.length ? `${workDays.size} days a week` : 'not on the roster'} bodyClassName='space-y-3 p-4'>
+      {rows.length === 0 ? (
+        <EmptyState className='py-4'>Not on the roster yet.</EmptyState>
+      ) : rows.map(a => (
+        <div key={a.id} className='space-y-1.5 rounded-md border bg-muted/30 px-3 py-2'>
+          <div className='flex items-center justify-between gap-2 text-sm'>
+            <span className='font-medium'>{slot(a.shift_id)?.name || 'Shift'}</span>
+            <span className='text-xs text-muted-foreground tabular-nums'>{slot(a.shift_id)?.start}–{slot(a.shift_id)?.end}</span>
+          </div>
+          <div className='grid grid-cols-7 gap-1'>
+            {DAY_NUMBERS.map((d, i) => (
+              <span key={d} className={cn('rounded py-0.5 text-center text-[11px]', (a.weekdays || []).includes(d) ? 'bg-primary/10 font-medium' : 'text-muted-foreground/50')}>{DAY_LABELS[i]}</span>
+            ))}
+          </div>
+          <div className='flex flex-wrap gap-1'>{(a.creator_ids || []).map(p => <Badge key={p} variant='secondary' className='font-normal'>{page(p)}</Badge>)}</div>
+        </div>
+      ))}
+      {(roster.changes || []).length > 0 && (
+        <div className='space-y-1'>
+          <div className='text-sm font-medium'>Next two weeks</div>
+          {roster.changes.map(c => (
+            <div key={c.id} className='text-sm text-muted-foreground'>
+              <span className='font-medium text-foreground'>{fmt(c.date)}</span>: {c.kind === 'off' ? 'off' : `${slot(c.shift_id)?.name || 'a shift'} on ${(c.creator_ids || []).map(page).join(', ')}`}{c.note ? ` (${c.note})` : ''}
+            </div>
+          ))}
+        </div>
+      )}
+      <Button variant='link' size='sm' className='h-auto px-0' onClick={onOpen}>Change on the Shifts page</Button>
+    </Panel>
+  );
+}
+
 /* ─── Weekly Schedule ────────────────────────────── */
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const DAY_NUMBERS = [1, 2, 3, 4, 5, 6, 7];
@@ -860,6 +900,10 @@ export default function ChatterProfile() {
   const [evals, setEvals] = useState([]);
   const [runningQuality, setRunningQuality] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
+  const [roster, setRoster] = useState(null);         // the Shifts roster for this chatter (null until loaded)
+  useEffect(() => {
+    api.get(`/api/roster/chatter/${id}`).then(r => setRoster(r.data)).catch(() => setRoster({ ready: false }));
+  }, [id]);
 
   const load = useCallback(async () => {
     try {
@@ -895,9 +939,19 @@ export default function ChatterProfile() {
   const meta = STATUS_META[chatter.status] || STATUS_META.new;
   const assignments = chatter.chatter_creator_assignments?.filter(a=>a.is_active) || [];
   const regularAssignments = assignments.filter(a => a.day_of_week == null);   // not covers
-  const creatorNames = [...new Set(regularAssignments.map(a=>a.creators?.name).filter(Boolean))];
-  const shiftName = regularAssignments[0]?.shifts?.name || '—';
-  const shiftHours = regularAssignments[0]?.shifts ? `${regularAssignments[0].shifts.start_time?.slice(0,5)} – ${regularAssignments[0].shifts.end_time?.slice(0,5)}` : '';
+  // The Shifts roster, once it's in use, says which shift and pages; else the old assignments.
+  const rosterRows = roster?.ready ? roster.assignments || [] : [];
+  const rosterSlot = (sid) => (roster?.slots || []).find(x => x.id === sid);
+  const rosterPage = (pid) => (roster?.pages || []).find(x => x.id === pid)?.name;
+  const creatorNames = rosterRows.length
+    ? [...new Set(rosterRows.flatMap(a => (a.creator_ids || []).map(rosterPage)).filter(Boolean))]
+    : [...new Set(regularAssignments.map(a=>a.creators?.name).filter(Boolean))];
+  const shiftName = rosterRows.length
+    ? [...new Set(rosterRows.map(a => rosterSlot(a.shift_id)?.name).filter(Boolean))].join(' · ')
+    : regularAssignments[0]?.shifts?.name || '—';
+  const shiftHours = rosterRows.length
+    ? (rosterRows.length === 1 && rosterSlot(rosterRows[0].shift_id) ? `${rosterSlot(rosterRows[0].shift_id).start} – ${rosterSlot(rosterRows[0].shift_id).end}` : '')
+    : regularAssignments[0]?.shifts ? `${regularAssignments[0].shifts.start_time?.slice(0,5)} – ${regularAssignments[0].shifts.end_time?.slice(0,5)}` : '';
 
   const mistakes = chatter.mistakes || [];
   const penalties = chatter.penalties || [];
@@ -1055,7 +1109,9 @@ export default function ChatterProfile() {
 
         {/* Right */}
         <div className='flex min-w-0 flex-col gap-4'>
-          <WeeklySchedule chatterId={id} workDays={chatter.work_days} assignments={assignments} onUpdate={load}/>
+          {roster?.ready
+            ? <RosterPanel roster={roster} onOpen={() => navigate('/shifts')} />
+            : <WeeklySchedule chatterId={id} workDays={chatter.work_days} assignments={assignments} onUpdate={load}/>}
 
           {/* Daily reports — history of the daily (compliance) AI reports */}
           <ReportsTimeline chatterId={id} type='compliance' title='Daily reports' emptyText='No daily reports yet.'/>
