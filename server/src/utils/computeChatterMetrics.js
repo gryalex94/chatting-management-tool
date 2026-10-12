@@ -215,11 +215,22 @@ async function computeChatterDailyMetrics(organisationId, { dates } = {}) {
   // rejects as JSON — and in a batch one such row fails all 500. So clean them,
   // and if a batch still fails, save it row by row so only a bad row is lost.
   const clean = (row) => JSON.parse(JSON.stringify(row).replace(LONE_SURROGATE, ''));
+  // Until migration 026 widens it, the database only accepts the old statuses
+  // (overloaded / healthy / light / afk): then the nearest old one is stored, so a
+  // day's figures are never lost over a label.
+  const LEGACY_STATUS = { slow: 'overloaded', underperforming: 'light' };
+  let legacy = false;
+  const toLegacy = (row) => (LEGACY_STATUS[row.workload_status] ? { ...row, workload_status: LEGACY_STATUS[row.workload_status] } : row);
   const upsert = (chunk) => supabaseAdmin.from('chatter_daily_metrics')
-    .upsert(chunk, { onConflict: 'chatter_id,creator_id,report_date' });
+    .upsert(legacy ? chunk.map(toLegacy) : chunk, { onConflict: 'chatter_id,creator_id,report_date' });
   for (let i = 0; i < rows.length; i += 500) {
     const chunk = rows.slice(i, i + 500).map(clean);
-    const { error } = await upsert(chunk);
+    let { error } = await upsert(chunk);
+    if (error && !legacy && /workload_status_check/.test(error.message)) {
+      legacy = true;
+      console.warn('[Metrics] run migration 026: storing the old workload statuses for now');
+      ({ error } = await upsert(chunk));
+    }
     if (!error) { written += chunk.length; continue; }
     console.error('[Metrics] batch save failed, saving row by row:', error.message);
     for (const row of chunk) {
