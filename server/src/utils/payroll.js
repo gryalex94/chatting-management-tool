@@ -13,8 +13,9 @@ const R = require('./roster');
  *  - Hours: the shifts they worked, from the chat history (roster.shiftPieces):
  *    most of a shift (70%+) counts as the whole shift. A shift cut short counts from
  *    their first to their last message in it, quiet stretches included (no fans
- *    writing isn't a break), to the half hour — as the manager's reports do; other
- *    part shifts (overtime) count the time worked, to the hour. A shift belongs to the
+ *    writing isn't a break), to the half hour — as the manager's reports do. Overtime
+ *    is usually half a shift: most of a half (70%+) counts as the whole half (4 h),
+ *    else the time worked, to the hour. A shift belongs to the
  *    day it starts. Each day's main shift is regular
  *    time; anything extra is overtime (staying on into the next shift, coming in
  *    early, a second shift that day), paid at the overtime rate if one is set.
@@ -144,6 +145,8 @@ async function hoursFromChats(orgId, period, slots, chatterOf) {
     const half = (h) => Math.max(1, Math.round(h * 2) / 2);
     const shifts = every.filter(g => g.start >= from && g.start < to).map(g => {
       let { first, last } = g, hours = g.whole ? g.slot.hours : Math.max(1, Math.round(g.mins / 60));
+      const halfShift = g.slot.hours / 2;                 // overtime halves: most of one is the whole half
+      if (!g.whole && g.overtime && g.mins >= 0.7 * halfShift * 60 && g.mins <= (halfShift + 1) * 60) hours = halfShift;
       if (!g.whole && !g.overtime) {
         // cut short: from their first message in this shift to their last, quiet stretches included
         const end = g.start + g.slot.hours * H;

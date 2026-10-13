@@ -74,6 +74,7 @@ router.patch('/reports/:id', async (req, res) => {
     for (const [k, lim] of Object.entries(LIMITS)) {
       if (req.body[k] === undefined) continue;
       const f = field(req.body[k], lim);
+      if (f.error && k === 'additions' && Number(req.body[k]) < 0) return res.status(400).json({ error: 'Put money taken off under Deductions' });
       if (f.error) return res.status(400).json({ error: `Check the ${k.replace('_', ' ')}` });
       if (f.value === null && !NULLABLE.has(k)) return res.status(400).json({ error: `Fill in the ${k.replace('_', ' ')}` });
       update[k] = f.value;
