@@ -11,8 +11,11 @@ const R = require('./roster');
  *    another chatter by hand in Infloww counts for whoever has it now), credited to
  *    the chatter's Infloww account(s), refunds included — as Infloww's own numbers.
  *  - Hours: the shifts they worked, from the chat history (roster.shiftPieces):
- *    most of a shift (70%+) counts as the whole shift, less as the hours worked,
- *    rounded. A shift belongs to the day it starts. Each day's main shift is regular
+ *    most of a shift (70%+) counts as the whole shift. A shift cut short counts from
+ *    their first to their last message in it, quiet stretches included (no fans
+ *    writing isn't a break), to the half hour — as the manager's reports do; other
+ *    part shifts (overtime) count the time worked, to the hour. A shift belongs to the
+ *    day it starts. Each day's main shift is regular
  *    time; anything extra is overtime (staying on into the next shift, coming in
  *    early, a second shift that day), paid at the overtime rate if one is set.
  *  - Net = gross minus OnlyFans' cut (20%); commission = net × their %; hourly pay =
@@ -138,11 +141,21 @@ async function hoursFromChats(orgId, period, slots, chatterOf) {
       const lead = day.find(g => g.main && g.whole);
       for (const g of day) g.overtime = lead ? g !== lead : !g.main;
     }
-    const shifts = every.filter(g => g.start >= from && g.start < to).map(g => ({
-      date: g.date, shift: g.slot.name, from: g.slot.start, to: g.slot.end, whole: g.whole, overtime: g.overtime,
-      hours: g.whole ? g.slot.hours : Math.max(1, Math.round(g.mins / 60)),
-      first: hhmm(g.first), last: hhmm(g.last), active_min: Math.round(g.mins),
-    }));
+    const half = (h) => Math.max(1, Math.round(h * 2) / 2);
+    const shifts = every.filter(g => g.start >= from && g.start < to).map(g => {
+      let { first, last } = g, hours = g.whole ? g.slot.hours : Math.max(1, Math.round(g.mins / 60));
+      if (!g.whole && !g.overtime) {
+        // cut short: from their first message in this shift to their last, quiet stretches included
+        const end = g.start + g.slot.hours * H;
+        const inShift = list.map(m => Date.parse(m.sent_datetime)).filter(t => t >= g.start && t < end);
+        first = Math.min(first, inShift[0]); last = Math.max(last, inShift[inShift.length - 1]);
+        hours = Math.max(hours, half((last - first) / H));
+      }
+      return {
+        date: g.date, shift: g.slot.name, from: g.slot.start, to: g.slot.end, whole: g.whole, overtime: g.overtime,
+        hours, first: hhmm(first), last: hhmm(last), active_min: Math.round(g.mins),
+      };
+    });
     const sum = (ot) => shifts.filter(x => x.overtime === ot).reduce((s, x) => s + x.hours, 0);
     if (shifts.length) out[cid] = { hours: sum(false), overtime: sum(true), shifts };
   }
@@ -267,7 +280,8 @@ async function buildPeriod(orgId, start, userId = null) {
     const s = sold[cid] || { gross: 0, refunded: 0, pages: {} };
     const flags = [];
     if ((h.hours || h.overtime) && !accounts[cid]) flags.push('no_infloww_account');
-    const short = h.shifts.filter(x => x.whole && x.active_min < SHORT_SHIFT_MIN);
+    // worth a look against Infloww: full shifts with little chatting, and shifts cut short
+    const short = h.shifts.filter(x => (x.whole && x.active_min < SHORT_SHIFT_MIN) || (!x.whole && !x.overtime));
     if (short.length) flags.push('short_shifts');
     rows.push({
       organisation_id: orgId, chatter_id: cid, period_start: period.start, period_end: period.end,

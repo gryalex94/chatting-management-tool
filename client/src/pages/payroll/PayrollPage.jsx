@@ -267,6 +267,7 @@ function ReportDialog({ row, period, onClose, onSaved }) {
   const shifts = row.details?.shifts || [];
   const otShifts = shifts.filter(s => s.overtime ?? !s.whole);
   const short = shifts.filter(s => s.whole && s.active_min < 420);
+  const cut = shifts.filter(s => !s.whole && !(s.overtime ?? !s.whole));
   const flags = row.details?.flags || [];
 
   const save = async () => {
@@ -359,6 +360,11 @@ function ReportDialog({ row, period, onClose, onSaved }) {
               {short.length > 0 && (
                 <span className='text-warn'>
                   Counted as full shifts but short on chatting: {short.map(s => `${fmtDay(s.date)} ${s.shift} (${Math.floor(s.active_min / 60)}h ${s.active_min % 60}m)`).join(', ')}.
+                </span>
+              )}
+              {cut.length > 0 && (
+                <span className='text-warn'>
+                  Cut short, counted from the first to the last message: {cut.map(s => `${fmtDay(s.date)} ${s.shift} ${hoursText(s.hours)} h (${s.first}–${s.last})`).join(', ')}.
                 </span>
               )}
               {flags.includes('no_infloww_account') && <span className='text-bad'>No Infloww account is linked to this chatter, so their sales can't be counted.</span>}
