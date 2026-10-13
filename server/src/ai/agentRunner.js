@@ -97,7 +97,7 @@ const JSON_ONLY = '\n\nCRITICAL: Your entire response must be ONLY valid JSON. N
  * read from cache at a tenth of the price (Sonnet 4.6 caches prompts of 1024+
  * tokens; the review prompts are ~2-3k).
  */
-function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings, temperature }) {
+function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', maxTokens = 16000, settings, temperature, schema }) {
   const cfg = settings || MODEL_SETTINGS[model] || {};
   const params = {
     model,
@@ -110,6 +110,9 @@ function buildParams({ systemPrompt, userContent, model = 'claude-sonnet-4-6', m
   // with thinking, nor on models from 4.7 on.
   else if (temperature != null && TAKES_TEMPERATURE.test(model)) params.temperature = temperature;
   if (cfg.effort) params.output_config = { effort: cfg.effort };
+  // A JSON schema makes the API return exactly that shape, always valid JSON (structured
+  // outputs) — e.g. a quote copied into a text can't break the answer.
+  if (schema) params.output_config = { ...params.output_config, format: { type: 'json_schema', schema } };
   return params;
 }
 
