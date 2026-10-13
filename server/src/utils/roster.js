@@ -194,6 +194,40 @@ async function shiftStartsFor(orgId, date) {
 }
 
 /**
+ * When someone worked, shift by shift, from their messages (oldest first; times
+ * in the chat exports' Amsterdam clock). Messages with no 2h+ break form a block
+ * (15+ messages); a block counts in each shift it covers for an hour or more with
+ * 8+ messages there. Covering 70%+ of a shift is that whole shift (6h of 8 is the
+ * shift, not overtime); less is part of one. Returns pieces: { slot, start (the
+ * shift's start, ms), date (the day it starts), a, z (minutes from the shift's
+ * start), whole, msgs (the messages inside) }. Used for the roster draft and payroll.
+ */
+function shiftPieces(list, slots) {
+  const out = [];
+  const at = (m) => Date.parse(m.sent_datetime);
+  const close = (block) => {
+    if (block.length < 15) return;
+    const s = at(block[0]), e = at(block[block.length - 1]);
+    const day0 = Math.floor(s / DAY_MS) * DAY_MS;
+    for (const off of [-1, 0, 1, 2]) for (const sl of slots) {
+      const a0 = day0 + off * DAY_MS + toMin(sl.start) * 60000, z0 = a0 + sl.hours * 3600000;
+      if (Math.min(e, z0) - Math.max(s, a0) < 3600000) continue;          // under an hour of it: not a shift
+      const inside = block.filter(m => { const t = at(m); return t >= a0 && t < z0; });
+      if (inside.length < 8) continue;
+      const a = (Math.max(s, a0) - a0) / 60000, z = (Math.min(e, z0) - a0) / 60000;
+      out.push({ slot: sl, start: a0, date: new Date(a0).toISOString().slice(0, 10), a, z, whole: z - a >= 0.7 * slotLen(sl), msgs: inside });
+    }
+  };
+  let block = [];
+  for (const m of list) {
+    if (block.length && at(m) - at(block[block.length - 1]) > 2 * 3600000) { close(block); block = []; }
+    block.push(m);
+  }
+  close(block);
+  return out;
+}
+
+/**
  * The roster as the team actually works: from the last `days` days of chat
  * exports. Each chatter's working blocks (messages with no 2h+ break, 15+
  * messages) are split across the shifts they span: a 12-hour day is a whole
@@ -232,9 +266,8 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
   }
 
   const groups = {};   // chatter|shift|whole-or-part -> pieces of work
-  const addPiece = (chatterId, slot, slotStartMs, a, z, list) => {
+  const addPiece = (chatterId, { slot, start: slotStartMs, a, z, whole, msgs: list }) => {
     const len = slotLen(slot);
-    const whole = z - a >= 0.7 * len;                  // 6h of an 8h shift is the shift, not overtime
     const part = whole ? 'whole' : a <= 45 ? 'early' : z >= len - 45 ? 'late' : 'middle';
     const g = (groups[`${chatterId}|${slot.id}|${part}`] ||= { chatterId, slot, part, pieces: 0, weekdays: {}, pageMsgs: {}, pageBlocks: {}, msgs: 0, windows: {} });
     const startsOn = new Date(slotStartMs).toISOString().slice(0, 10);
@@ -245,24 +278,7 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
     for (const [p, k] of Object.entries(per)) { g.pageMsgs[p] = (g.pageMsgs[p] || 0) + k; if (k >= 3) g.pageBlocks[p] = (g.pageBlocks[p] || 0) + 1; }
   };
   for (const [chatterId, list] of Object.entries(byChatter)) {
-    let block = [list[0]];
-    const close = () => {
-      if (block.length < 15) return;
-      const s = Date.parse(block[0].sent_datetime), e = Date.parse(block[block.length - 1].sent_datetime);
-      const day0 = Math.floor(s / DAY_MS) * DAY_MS;
-      for (const off of [-1, 0, 1, 2]) for (const sl of slots) {
-        const a0 = day0 + off * DAY_MS + toMin(sl.start) * 60000, z0 = a0 + sl.hours * 3600000;
-        if (Math.min(e, z0) - Math.max(s, a0) < 3600000) continue;          // under an hour of it: not a shift
-        const inside = block.filter(m => { const t = Date.parse(m.sent_datetime); return t >= a0 && t < z0; });
-        if (inside.length < 8) continue;
-        addPiece(chatterId, sl, a0, (Math.max(s, a0) - a0) / 60000, (Math.min(e, z0) - a0) / 60000, inside);
-      }
-    };
-    for (let i = 1; i < list.length; i++) {
-      if (Date.parse(list[i].sent_datetime) - Date.parse(list[i - 1].sent_datetime) > 2 * 3600000) { close(); block = []; }
-      block.push(list[i]);
-    }
-    close();
+    for (const piece of shiftPieces(list, slots)) addPiece(chatterId, piece);
   }
 
   const minWeeks = Math.min(2, weeks);
@@ -303,5 +319,5 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
 
 module.exports = {
   isoWeekday, addDays, mondayOf, loadSlots, loadRoster, effectiveDay, dayBoard, normallyCovered,
-  weekView, shiftStartsFor, proposeFromActivity, windowIn, badWindow, READY_ERROR,
+  weekView, shiftStartsFor, proposeFromActivity, shiftPieces, windowIn, badWindow, READY_ERROR,
 };

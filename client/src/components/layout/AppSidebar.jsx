@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings,
+  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet,
   ChevronsUpDown, LogOut, Sun, Moon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -31,6 +31,7 @@ export const NAV_GROUPS = [
     title: 'Team & data',
     items: [
       { url: '/shifts', title: 'Shifts', icon: CalendarClock },
+      { url: '/payroll', title: 'Payroll', icon: Wallet, managerOnly: true },
       { url: '/reports', title: 'Reports', icon: FileUp },
     ],
   },
@@ -47,7 +48,7 @@ const initials = (name) =>
   String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')
 
 export function AppSidebar() {
-  const { user } = useAuth()
+  const { user, isManager } = useAuth()
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
   const orgName = user?.organisation?.name || 'Organisation'
@@ -77,7 +78,7 @@ export function AppSidebar() {
           <SidebarGroup key={group.title}>
             <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarMenu>
-              {group.items.map(item => (
+              {group.items.filter(item => !item.managerOnly || isManager).map(item => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={isActivePath(pathname, item.url)} tooltip={item.title}>
                     <Link to={item.url} onClick={() => setOpenMobile(false)}>

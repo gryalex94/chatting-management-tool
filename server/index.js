@@ -133,6 +133,10 @@ app.use('/api/ai-rules', staffOnly, aiRuleRoutes);
 const rosterRoutes = require('./src/routes/roster');
 app.use('/api/roster', staffOnly, rosterRoutes);
 
+// Pay is private: the router itself is managers and up.
+const payrollRoutes = require('./src/routes/payroll');
+app.use('/api/payroll', staffOnly, payrollRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------
