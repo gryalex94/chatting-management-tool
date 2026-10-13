@@ -200,11 +200,14 @@ async function shiftStartsFor(orgId, date) {
  * 8+ messages there. Covering 70%+ of a shift is that whole shift (6h of 8 is the
  * shift, not overtime); less is part of one. Returns pieces: { slot, start (the
  * shift's start, ms), date (the day it starts), a, z (minutes from the shift's
- * start), whole, msgs (the messages inside) }. Used for the roster draft and payroll.
+ * start), whole, msgs (the messages inside), block (which stretch of work, counting
+ * from 0: pieces of one block were worked without a break) }. Used for the roster
+ * draft and payroll.
  */
 function shiftPieces(list, slots) {
   const out = [];
   const at = (m) => Date.parse(m.sent_datetime);
+  let n = 0;
   const close = (block) => {
     if (block.length < 15) return;
     const s = at(block[0]), e = at(block[block.length - 1]);
@@ -215,8 +218,9 @@ function shiftPieces(list, slots) {
       const inside = block.filter(m => { const t = at(m); return t >= a0 && t < z0; });
       if (inside.length < 8) continue;
       const a = (Math.max(s, a0) - a0) / 60000, z = (Math.min(e, z0) - a0) / 60000;
-      out.push({ slot: sl, start: a0, date: new Date(a0).toISOString().slice(0, 10), a, z, whole: z - a >= 0.7 * slotLen(sl), msgs: inside });
+      out.push({ slot: sl, start: a0, date: new Date(a0).toISOString().slice(0, 10), a, z, whole: z - a >= 0.7 * slotLen(sl), msgs: inside, block: n });
     }
+    n++;
   };
   let block = [];
   for (const m of list) {

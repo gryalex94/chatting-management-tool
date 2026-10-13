@@ -57,8 +57,11 @@ function paint(ctx, r, period, draw) {
   text(periodTitle(period), W - PAD, y + 17, '13px', C.muted, 'right');
   y += 32;
 
-  // the main table
-  const shiftsCount = (r.details?.shifts || []).length;
+  // the main table (reports made before overtime was split out count part shifts as overtime)
+  const isOvertime = (x) => (x.overtime ?? !x.whole);
+  const shiftsCount = (r.details?.shifts || []).filter(x => !isOvertime(x)).length;
+  const ot = Number(r.overtime_paid) || 0;
+  const regularHours = Number(r.hours_paid) || 0;
   ctx.font = `14px ${FONT}`;
   const notes = r.notes ? wrap(ctx, r.notes, valueW - 24) : [];
   const rows = [
@@ -67,8 +70,9 @@ function paint(ctx, r, period, draw) {
     { label: 'Sales brutto:', value: money(r.sales_gross) },
     { label: `Sales netto (${pct(100 - r.of_cut_pct)}%):`, value: money(r.sales_net) },
     { label: `Commission (${pct(r.commission_pct)}%):`, value: money(r.commission) },
-    { label: 'Hours worked:', value: hoursText(r.hours_paid), extra: shiftsCount ? `(${shiftsCount} shift${shiftsCount === 1 ? '' : 's'})` : '' },
-    { label: 'Hourly pay:', value: money(r.hourly_pay), extra: `(${hoursText(r.hours_paid)} h × ${money(r.hourly_rate)})` },
+    { label: 'Hours worked:', value: hoursText(regularHours + ot), extra: `(${shiftsCount} shift${shiftsCount === 1 ? '' : 's'}${ot ? ` + ${hoursText(ot)} h overtime` : ''})` },
+    { label: 'Hourly pay:', value: money(r.hourly_pay), extra: `(${hoursText(regularHours)} h × ${money(r.hourly_rate)})` },
+    ...(ot ? [{ label: 'Overtime pay:', value: money(r.overtime_pay), extra: `(${hoursText(ot)} h × ${money(r.overtime_rate_paid)})` }] : []),
     { label: 'Other additions:', value: money(r.additions) },
     { label: 'Deductions:', value: money(r.deductions) },
     { label: 'Notes:', notes, minH: 48 },
@@ -120,7 +124,7 @@ function paint(ctx, r, period, draw) {
     text('Shifts worked', PAD, y, '13px', C.muted);
     y += 8;
     for (const s of shifts) {
-      const what = s.whole ? `${s.shift} ${s.from}–${s.to}` : `${s.shift} overtime, ${s.first}–${s.last}`;
+      const what = isOvertime(s) ? `${s.shift} overtime, ${s.first}–${s.last}` : s.whole ? `${s.shift} ${s.from}–${s.to}` : `${s.shift} ${s.first}–${s.last}`;
       text(fmtDay(s.date), PAD + 10, y + 19, '13px', C.soft);
       text(what, PAD + 130, y + 19, '13px', C.soft);
       text(`${hoursText(s.hours)} h`, W - PAD - 10, y + 19, '13px', C.soft, 'right');

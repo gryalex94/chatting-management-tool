@@ -12,15 +12,21 @@ const R = require('./roster');
  *    the chatter's Infloww account(s), refunds included — as Infloww's own numbers.
  *  - Hours: the shifts they worked, from the chat history (roster.shiftPieces):
  *    most of a shift (70%+) counts as the whole shift, less as the hours worked,
- *    rounded (overtime is usually half a shift). A shift belongs to the day it starts.
- *  - Net = gross minus OnlyFans' cut (20%); commission = net × their %; hourly pay
- *    = hours × their rate; total = commission + hourly pay + additions − deductions.
+ *    rounded. A shift belongs to the day it starts. Each day's main shift is regular
+ *    time; anything extra is overtime (staying on into the next shift, coming in
+ *    early, a second shift that day), paid at the overtime rate if one is set.
+ *  - Net = gross minus OnlyFans' cut (20%); commission = net × their %; hourly pay =
+ *    regular hours × their rate; overtime pay = overtime hours × their overtime rate
+ *    (else the hourly rate); total = commission + both + additions − deductions.
+ *  - Rates: the chatter's own, else the team's (daily_check_config payroll_*), else
+ *    $2/h and 5%; no overtime rate = overtime paid at the hourly rate.
  */
 
 const ANCHOR = '2026-09-28';          // a payroll period starts on this Monday, and every 14 days from it
 const PERIOD_DAYS = 14;
-const DEFAULT_RATE = 2;               // $ per hour, until a chatter's own rate is set
+const DEFAULT_RATE = 2;               // $ per hour, until the team's or a chatter's own rate is set
 const DEFAULT_COMMISSION = 5;         // % of net sales
+const RATE_KEYS = { hourly_rate: 'payroll_hourly_rate', commission_pct: 'payroll_commission_pct', overtime_rate: 'payroll_overtime_rate' };
 const SHORT_SHIFT_MIN = 7 * 60;       // a whole shift with less chatting than this is flagged for a look
 const H = 3600000, DAY_MS = 86400000;
 
@@ -48,15 +54,39 @@ function recentPeriods(n = 8, today = todayAms()) {
   return Array.from({ length: n + 1 }, (_, i) => ({ ...periodOf(R.addDays(cur.start, -i * PERIOD_DAYS)), running: i === 0 }));
 }
 
-/** What the report shows, from a saved row (hours_paid: the manager's hours, else the chats'). */
+/**
+ * What the report shows, from a saved row: hours_paid (regular) and overtime_paid
+ * are the manager's hours, else the chats'; overtime without its own rate is paid
+ * at the hourly rate.
+ */
 function totals(row) {
   const hours = num(row.hours, num(row.hours_auto, 0));
+  const overtime = num(row.overtime_hours, num(row.overtime_hours_auto, 0));
+  const otRate = num(row.overtime_rate, num(row.hourly_rate, 0));
   const net = r2(num(row.sales_gross, 0) * (100 - num(row.of_cut_pct, 20)) / 100);
   const commission = r2(net * num(row.commission_pct, 0) / 100);
   const hourlyPay = r2(hours * num(row.hourly_rate, 0));
-  const total = r2(commission + hourlyPay + num(row.additions, 0) - num(row.deductions, 0));
-  return { hours_paid: hours, sales_net: net, commission, hourly_pay: hourlyPay, total };
+  const overtimePay = r2(overtime * otRate);
+  const total = r2(commission + hourlyPay + overtimePay + num(row.additions, 0) - num(row.deductions, 0));
+  return { hours_paid: hours, overtime_paid: overtime, overtime_rate_paid: otRate, sales_net: net, commission, hourly_pay: hourlyPay, overtime_pay: overtimePay, total };
 }
+
+/** The team's rates (Pay rates): hourly, commission and overtime (null = the hourly rate). */
+async function teamRates(orgId) {
+  const { data } = await supabaseAdmin.from('daily_check_config').select('key, value').eq('organisation_id', orgId).in('key', Object.values(RATE_KEYS));
+  const v = Object.fromEntries((data || []).map(c => [c.key, c.value]));
+  return {
+    hourly_rate: num(v[RATE_KEYS.hourly_rate], DEFAULT_RATE),
+    commission_pct: num(v[RATE_KEYS.commission_pct], DEFAULT_COMMISSION),
+    overtime_rate: num(v[RATE_KEYS.overtime_rate], null),
+  };
+}
+// A chatter's rates: their own, else the team's.
+const ratesFor = (c, team) => ({
+  hourly_rate: num(c?.hourly_rate, team.hourly_rate),
+  commission_pct: num(c?.commission_pct, team.commission_pct),
+  overtime_rate: num(c?.overtime_rate, team.overtime_rate),
+});
 
 async function all(q) {
   const out = [];
@@ -86,23 +116,35 @@ async function hoursFromChats(orgId, period, slots, chatterOf) {
   }
   const out = {};
   for (const [cid, list] of Object.entries(byChatter)) {
+    const pieces = R.shiftPieces(list, slots);
+    // each stretch of work's main shift: its longest piece (the earliest on a tie)
+    const main = {};
+    for (const p of pieces) { const m = main[p.block]; if (!m || p.z - p.a > m.z - m.a) main[p.block] = p; }
     const groups = {};                                  // day|shift: one shift, even if worked in two stretches
-    for (const p of R.shiftPieces(list, slots)) {
-      if (p.start < from || p.start >= to) continue;
-      const g = (groups[`${p.date}|${p.slot.id}`] ||= { slot: p.slot, date: p.date, start: p.start, mins: 0, first: Infinity, last: -Infinity });
+    for (const p of pieces) {
+      const g = (groups[`${p.date}|${p.slot.id}`] ||= { slot: p.slot, date: p.date, start: p.start, mins: 0, first: Infinity, last: -Infinity, main: false });
       g.mins += p.z - p.a;
       g.first = Math.min(g.first, Date.parse(p.msgs[0].sent_datetime));
       g.last = Math.max(g.last, Date.parse(p.msgs[p.msgs.length - 1].sent_datetime));
+      if (main[p.block] === p) g.main = true;
     }
-    const shifts = Object.values(groups).sort((a, b) => a.start - b.start).map(g => {
-      const whole = g.mins >= 0.7 * g.slot.hours * 60;
-      return {
-        date: g.date, shift: g.slot.name, from: g.slot.start, to: g.slot.end, whole,
-        hours: whole ? g.slot.hours : Math.max(1, Math.round(g.mins / 60)),
-        first: hhmm(g.first), last: hhmm(g.last), active_min: Math.round(g.mins),
-      };
-    });
-    if (shifts.length) out[cid] = { hours: shifts.reduce((s, x) => s + x.hours, 0), shifts };
+    const every = Object.values(groups).sort((a, b) => a.start - b.start);
+    for (const g of every) g.whole = g.mins >= 0.7 * g.slot.hours * 60;
+    // regular time is the day's main shift (the first whole one); everything else that
+    // day is overtime. A day without a whole shift: main shifts were cut short (regular).
+    const byDay = {};
+    for (const g of every) (byDay[g.date] ||= []).push(g);
+    for (const day of Object.values(byDay)) {
+      const lead = day.find(g => g.main && g.whole);
+      for (const g of day) g.overtime = lead ? g !== lead : !g.main;
+    }
+    const shifts = every.filter(g => g.start >= from && g.start < to).map(g => ({
+      date: g.date, shift: g.slot.name, from: g.slot.start, to: g.slot.end, whole: g.whole, overtime: g.overtime,
+      hours: g.whole ? g.slot.hours : Math.max(1, Math.round(g.mins / 60)),
+      first: hhmm(g.first), last: hhmm(g.last), active_min: Math.round(g.mins),
+    }));
+    const sum = (ot) => shifts.filter(x => x.overtime === ot).reduce((s, x) => s + x.hours, 0);
+    if (shifts.length) out[cid] = { hours: sum(false), overtime: sum(true), shifts };
   }
   return { byChatter: out, perDay };
 }
@@ -158,11 +200,12 @@ async function salesFromCopy(orgId, period) {
  */
 async function buildPeriod(orgId, start, userId = null) {
   const period = periodOf(start);
-  const [slots, chatters, emps, cfg, existing] = await Promise.all([
+  const [slots, chatters, emps, cfg, team, existing] = await Promise.all([
     R.loadSlots(orgId),
-    all(() => supabaseAdmin.from('chatters').select('id, name, is_active, hourly_rate, commission_pct').eq('organisation_id', orgId).order('id')),
+    all(() => supabaseAdmin.from('chatters').select('*').eq('organisation_id', orgId).order('id')),   // '*': overtime_rate only after migration 029
     all(() => supabaseAdmin.from('infloww_employees').select('employee_id, name, chatter_id').eq('organisation_id', orgId).order('employee_id')),
     supabaseAdmin.from('daily_check_config').select('key, value').eq('organisation_id', orgId).in('key', ['ignored_accounts', 'of_commission_pct']),
+    teamRates(orgId),
     // before migration 028 there's nothing saved yet (saving then says so); any other failure stops here
     all(() => supabaseAdmin.from('payroll_reports').select('*').eq('organisation_id', orgId).eq('period_start', period.start).order('id'))
       .catch(e => { if (/payroll_reports/.test(e.message) && /schema cache|does not exist/.test(e.message)) return []; throw e; }),
@@ -220,17 +263,16 @@ async function buildPeriod(orgId, start, userId = null) {
   for (const cid of ids) {
     const c = chatterById[cid];
     if (!c || prev[cid]?.status === 'final' || ignored.has(c.name.toLowerCase().trim())) continue;
-    const h = hours[cid] || { hours: 0, shifts: [] };
+    const h = hours[cid] || { hours: 0, overtime: 0, shifts: [] };
     const s = sold[cid] || { gross: 0, refunded: 0, pages: {} };
     const flags = [];
-    if (c.hourly_rate == null || c.commission_pct == null) flags.push('default_rate');
-    if (h.hours && !accounts[cid]) flags.push('no_infloww_account');
+    if ((h.hours || h.overtime) && !accounts[cid]) flags.push('no_infloww_account');
     const short = h.shifts.filter(x => x.whole && x.active_min < SHORT_SHIFT_MIN);
     if (short.length) flags.push('short_shifts');
     rows.push({
       organisation_id: orgId, chatter_id: cid, period_start: period.start, period_end: period.end,
-      hours_auto: h.hours, sales_gross: r2(s.gross), refunded: r2(s.refunded),
-      hourly_rate: num(c.hourly_rate, DEFAULT_RATE), commission_pct: num(c.commission_pct, DEFAULT_COMMISSION), of_cut_pct: ofCut,
+      hours_auto: h.hours, overtime_hours_auto: h.overtime, sales_gross: r2(s.gross), refunded: r2(s.refunded),
+      ...ratesFor(c, team), of_cut_pct: ofCut,
       details: {
         pages: Object.entries(s.pages).map(([name, amount]) => ({ name, amount: r2(amount) })).filter(p => p.amount).sort((a, b) => b.amount - a.amount),
         shifts: h.shifts, flags, sales_source: source,
@@ -245,7 +287,13 @@ async function buildPeriod(orgId, start, userId = null) {
 async function calculatePeriod(orgId, start, userId = null) {
   const { period, rows, warnings, calculated_at } = await buildPeriod(orgId, start, userId);
   if (rows.length) {
-    const { error } = await supabaseAdmin.from('payroll_reports').upsert(rows, { onConflict: 'organisation_id,period_start,chatter_id' });
+    const save = (list) => supabaseAdmin.from('payroll_reports').upsert(list, { onConflict: 'organisation_id,period_start,chatter_id' });
+    let { error } = await save(rows);
+    if (error && /overtime_/.test(error.message)) {
+      // before migration 029 there's nowhere to keep overtime apart: it counts as ordinary hours
+      ({ error } = await save(rows.map(({ overtime_hours_auto: ot, overtime_rate: _r, ...r }) => ({ ...r, hours_auto: r.hours_auto + ot }))));
+      warnings.push('Run migration 029 in Supabase to pay overtime at its own rate. Until then overtime counts as ordinary hours.');
+    }
     if (error) throw new Error(error.message);
   }
   const { error: pe } = await supabaseAdmin.from('payroll_periods').upsert({
@@ -261,20 +309,98 @@ async function loadPeriod(orgId, start) {
   const [rows, { data: meta, error }, chatters] = await Promise.all([
     all(() => supabaseAdmin.from('payroll_reports').select('*').eq('organisation_id', orgId).eq('period_start', period.start).order('id')),
     supabaseAdmin.from('payroll_periods').select('warnings, calculated_at').eq('organisation_id', orgId).eq('period_start', period.start).maybeSingle(),
-    all(() => supabaseAdmin.from('chatters').select('id, name').eq('organisation_id', orgId).order('id')),
+    all(() => supabaseAdmin.from('chatters').select('id, name, hourly_rate').eq('organisation_id', orgId).order('id')),
   ]);
   if (error) throw new Error(error.message);
   const name = Object.fromEntries(chatters.map(c => [c.id, c.name]));
+  // "default rate": the chatter has no rate of their own yet (worked out now, so it's never stale)
+  const own = new Set(chatters.filter(c => c.hourly_rate != null).map(c => c.id));
+  const flagged = (r) => {
+    const flags = (r.details?.flags || []).filter(f => f !== 'default_rate');
+    return { ...r.details, flags: own.has(r.chatter_id) ? flags : ['default_rate', ...flags] };
+  };
   return {
     period: { ...period, running: todayAms() <= period.end },
     calculated_at: meta?.calculated_at || null,
     warnings: meta?.warnings || [],
-    rows: rows.map(r => ({ ...r, chatter_name: name[r.chatter_id] || '?', ...totals(r) }))
+    rows: rows.map(r => ({ ...r, details: flagged(r), chatter_name: name[r.chatter_id] || '?', ...totals(r) }))
       .sort((a, b) => a.chatter_name.localeCompare(b.chatter_name)),
   };
 }
 
+/** One saved report as the page shows it (name, live "default rate" flag, the money). */
+async function viewRow(row) {
+  const { data: c } = await supabaseAdmin.from('chatters').select('name, hourly_rate').eq('id', row.chatter_id).maybeSingle();
+  const flags = (row.details?.flags || []).filter(f => f !== 'default_rate');
+  return {
+    ...row, chatter_name: c?.name || '?', ...totals(row),
+    details: { ...row.details, flags: c?.hourly_rate != null ? flags : ['default_rate', ...flags] },
+  };
+}
+
+// ── Pay rates ───────────────────────────────────────────────────────────────
+async function setConfig(orgId, key, value) {
+  const { data: cur, error } = await supabaseAdmin.from('daily_check_config').select('id').eq('organisation_id', orgId).eq('key', key).maybeSingle();
+  if (error) throw new Error(error.message);
+  const q = value == null
+    ? (cur ? supabaseAdmin.from('daily_check_config').delete().eq('id', cur.id) : null)
+    : cur ? supabaseAdmin.from('daily_check_config').update({ value: String(value), updated_at: new Date().toISOString() }).eq('id', cur.id)
+      : supabaseAdmin.from('daily_check_config').insert({ organisation_id: orgId, key, value: String(value) });
+  if (q) { const { error: e } = await q; if (e) throw new Error(e.message); }
+}
+
+/**
+ * The team's rates and every active chatter's own (null = the team's). `overtime`
+ * is false until migration 029 adds the overtime rate.
+ */
+async function loadRates(orgId) {
+  const [team, chatters, { data: ign }] = await Promise.all([
+    teamRates(orgId),
+    all(() => supabaseAdmin.from('chatters').select('*').eq('organisation_id', orgId).order('id')),
+    supabaseAdmin.from('daily_check_config').select('value').eq('organisation_id', orgId).eq('key', 'ignored_accounts').maybeSingle(),
+  ]);
+  const ignored = new Set(String(ign?.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+  return {
+    team,
+    overtime: !chatters.length || 'overtime_rate' in chatters[0],
+    chatters: chatters.filter(c => c.is_active !== false && !ignored.has(c.name.toLowerCase().trim()))
+      .map(c => ({ id: c.id, name: c.name, hourly_rate: num(c.hourly_rate, null), commission_pct: num(c.commission_pct, null), overtime_rate: num(c.overtime_rate, null) }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/**
+ * Save the team's rates and the chatters' own ({ id, hourly_rate, commission_pct,
+ * overtime_rate }, null = the team's), then bring draft reports onto them (final
+ * reports keep the rates they were made with).
+ */
+async function saveRates(orgId, { team, chatters = [] }) {
+  const ready = (await loadRates(orgId)).overtime;
+  if (team) for (const [k, key] of Object.entries(RATE_KEYS)) if (team[k] !== undefined && (ready || k !== 'overtime_rate')) await setConfig(orgId, key, team[k]);
+  for (const c of chatters) {
+    const update = {};
+    for (const k of Object.keys(RATE_KEYS)) if (c[k] !== undefined && (ready || k !== 'overtime_rate')) update[k] = c[k];
+    if (!Object.keys(update).length) continue;
+    const { error } = await supabaseAdmin.from('chatters').update(update).eq('id', c.id).eq('organisation_id', orgId);
+    if (error) throw new Error(error.message);
+  }
+  const t = await teamRates(orgId);
+  const [drafts, people] = await Promise.all([
+    all(() => supabaseAdmin.from('payroll_reports').select('*').eq('organisation_id', orgId).eq('status', 'draft').order('id')),
+    all(() => supabaseAdmin.from('chatters').select('*').eq('organisation_id', orgId).order('id')),
+  ]);
+  const byId = Object.fromEntries(people.map(c => [c.id, c]));
+  for (const r of drafts) {
+    const want = ratesFor(byId[r.chatter_id], t);
+    if (!ready) delete want.overtime_rate;
+    if (Object.entries(want).every(([k, v]) => num(r[k], null) === v)) continue;
+    const { error } = await supabaseAdmin.from('payroll_reports').update({ ...want, updated_at: new Date().toISOString() }).eq('id', r.id);
+    if (error) throw new Error(error.message);
+  }
+  return loadRates(orgId);
+}
+
 module.exports = {
   ANCHOR, PERIOD_DAYS, DEFAULT_RATE, DEFAULT_COMMISSION,
-  periodOf, isPeriodStart, recentPeriods, totals, buildPeriod, calculatePeriod, loadPeriod, todayAms,
+  periodOf, isPeriodStart, recentPeriods, totals, buildPeriod, calculatePeriod, loadPeriod, viewRow, loadRates, saveRates, todayAms,
 };

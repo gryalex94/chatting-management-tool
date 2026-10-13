@@ -9,11 +9,16 @@ const P = require('../utils/payroll');
 router.use(requireMinRole('manager'));
 
 const NOT_READY = 'Run migration 028 (payroll) in Supabase to turn this on';
+const NO_OVERTIME = 'Run migration 029 (payroll overtime) in Supabase to set overtime';
 const missingTable = (msg) => /payroll_(reports|periods)|hourly_rate|commission_pct/.test(String(msg || ''));
 const fail = (res, e, what) => {
   console.error(`[payroll] ${what}:`, e.message);
+  if (/overtime_/.test(e.message)) return res.status(409).json({ error: NO_OVERTIME });
   return res.status(missingTable(e.message) ? 409 : 500).json({ error: missingTable(e.message) ? NOT_READY : `Could not ${what}` });
 };
+const LIMITS = { hours: { max: 400 }, overtime_hours: { max: 400 }, additions: {}, deductions: {}, hourly_rate: { max: 1000 }, commission_pct: { max: 100 }, overtime_rate: { max: 1000 } };
+const NULLABLE = new Set(['hours', 'overtime_hours', 'overtime_rate']);   // empty = from the chats / the hourly rate
+const RATES = ['hourly_rate', 'commission_pct', 'overtime_rate'];
 // A money/number field: null when empty, else a number within [min, max].
 function field(v, { min = 0, max = 1e6 } = {}) {
   if (v === null || v === '') return { value: null };
@@ -42,7 +47,6 @@ router.get('/', async (req, res) => {
     res.json({
       ...view,
       periods: periods.map(p => ({ ...p, ...(count[p.start] || { reports: 0, final: 0 }) })),
-      defaults: { hourly_rate: P.DEFAULT_RATE, commission_pct: P.DEFAULT_COMMISSION },
     });
   } catch (e) { fail(res, e, 'load the payroll'); }
 });
@@ -56,9 +60,9 @@ router.post('/calculate', async (req, res) => {
   } catch (e) { fail(res, e, 'calculate the payroll'); }
 });
 
-// PATCH /api/payroll/reports/:id { hours, additions, deductions, notes, hourly_rate, commission_pct }
-// Drafts only. A new rate or commission is also saved as the chatter's own, for
-// their next reports.
+// PATCH /api/payroll/reports/:id { hours, overtime_hours, additions, deductions, notes,
+// hourly_rate, commission_pct, overtime_rate } — send only what changed. Drafts only.
+// A rate sent here is also saved as the chatter's own, for their next reports.
 router.patch('/reports/:id', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
@@ -67,30 +71,22 @@ router.patch('/reports/:id', async (req, res) => {
     if (!cur) return res.status(404).json({ error: 'Not found' });
     if (cur.status === 'final') return res.status(409).json({ error: 'This report is final. Move it back to draft to change it.' });
     const update = { updated_at: new Date().toISOString() };
-    const limits = { hours: { max: 400 }, additions: {}, deductions: {}, hourly_rate: { max: 1000 }, commission_pct: { max: 100 } };
-    for (const [k, lim] of Object.entries(limits)) {
+    for (const [k, lim] of Object.entries(LIMITS)) {
       if (req.body[k] === undefined) continue;
       const f = field(req.body[k], lim);
       if (f.error) return res.status(400).json({ error: `Check the ${k.replace('_', ' ')}` });
-      if (f.value === null && k !== 'hours') return res.status(400).json({ error: `Fill in the ${k.replace('_', ' ')}` });
-      update[k] = f.value;                                   // hours: empty = back to the hours from the chats
+      if (f.value === null && !NULLABLE.has(k)) return res.status(400).json({ error: `Fill in the ${k.replace('_', ' ')}` });
+      update[k] = f.value;
     }
     if (req.body.notes !== undefined) update.notes = String(req.body.notes || '').trim().slice(0, 1000) || null;
-    // a rate typed here becomes the chatter's own, so the report no longer uses the defaults
-    if (update.hourly_rate !== undefined && update.commission_pct !== undefined && cur.details?.flags?.includes('default_rate')) {
-      update.details = { ...cur.details, flags: cur.details.flags.filter(f => f !== 'default_rate') };
-    }
     const { data, error: ue } = await supabaseAdmin.from('payroll_reports').update(update).eq('id', cur.id).select().single();
     if (ue) throw new Error(ue.message);
-    const rate = {};
-    if (update.hourly_rate !== undefined) rate.hourly_rate = update.hourly_rate;
-    if (update.commission_pct !== undefined) rate.commission_pct = update.commission_pct;
+    const rate = Object.fromEntries(RATES.filter(k => update[k] !== undefined).map(k => [k, update[k]]));
     if (Object.keys(rate).length) {
       const { error: ce } = await supabaseAdmin.from('chatters').update(rate).eq('id', cur.chatter_id).eq('organisation_id', orgId);
       if (ce) throw new Error(ce.message);
     }
-    const { data: ch } = await supabaseAdmin.from('chatters').select('name').eq('id', cur.chatter_id).maybeSingle();
-    res.json({ ...data, chatter_name: ch?.name || '?', ...P.totals(data) });
+    res.json(await P.viewRow(data));
   } catch (e) { fail(res, e, 'save'); }
 });
 
@@ -102,8 +98,7 @@ router.post('/reports/:id/status', async (req, res) => {
       .update({ status: final ? 'final' : 'draft', finalized_at: final ? new Date().toISOString() : null, updated_at: new Date().toISOString() })
       .eq('id', req.params.id).eq('organisation_id', req.user.organisationId).select().single();
     if (error) throw new Error(error.message);
-    const { data: ch } = await supabaseAdmin.from('chatters').select('name').eq('id', data.chatter_id).maybeSingle();
-    res.json({ ...data, chatter_name: ch?.name || '?', ...P.totals(data) });
+    res.json(await P.viewRow(data));
   } catch (e) { fail(res, e, 'change the status'); }
 });
 
@@ -117,6 +112,40 @@ router.post('/finalize', async (req, res) => {
     if (error) throw new Error(error.message);
     res.json(await P.loadPeriod(req.user.organisationId, req.body.start));
   } catch (e) { fail(res, e, 'finalize'); }
+});
+
+// GET /api/payroll/rates — the team's rates and every active chatter's own.
+router.get('/rates', async (req, res) => {
+  try { res.json(await P.loadRates(req.user.organisationId)); }
+  catch (e) { fail(res, e, 'load the pay rates'); }
+});
+
+// PUT /api/payroll/rates { team: { hourly_rate, commission_pct, overtime_rate },
+// chatters: [{ id, hourly_rate, commission_pct, overtime_rate }] } — a chatter's empty
+// rate means the team's; the team's empty overtime rate means each one's hourly rate.
+// Draft reports take the new rates straight away; final ones keep theirs.
+router.put('/rates', async (req, res) => {
+  try {
+    const clean = (o, nullable) => {
+      const out = {};
+      for (const k of RATES) {
+        if (o?.[k] === undefined) continue;
+        const f = field(o[k], LIMITS[k]);
+        if (f.error || (f.value === null && !nullable(k))) return null;
+        out[k] = f.value;
+      }
+      return out;
+    };
+    const team = req.body.team ? clean(req.body.team, k => k === 'overtime_rate') : undefined;
+    if (team === null) return res.status(400).json({ error: 'Check the team rates' });
+    const chatters = [];
+    for (const c of Array.isArray(req.body.chatters) ? req.body.chatters : []) {
+      const r = clean(c, () => true);
+      if (!r || !c.id) return res.status(400).json({ error: 'Check the chatters\' rates' });
+      chatters.push({ id: String(c.id), ...r });
+    }
+    res.json(await P.saveRates(req.user.organisationId, { team, chatters }));
+  } catch (e) { fail(res, e, 'save the pay rates'); }
 });
 
 module.exports = router;
