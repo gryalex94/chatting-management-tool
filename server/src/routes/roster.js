@@ -9,6 +9,10 @@ const canEdit = requireMinRole('manager');
 const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && Number.isFinite(Date.parse(`${d}T00:00:00Z`));
 const todayAms = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
 const missing = (res) => res.status(409).json({ error: R.READY_ERROR });
+const PARTS_ERROR = 'Run migration 027 (part shifts / overtime) in Supabase to turn this on';
+const needs027 = (msg) => /start_time|end_time|roster_changes_organisation_id_date_chatter_id_key/.test(String(msg || ''));
+const slotOf = async (orgId, shiftId) => (await R.loadSlots(orgId)).find(x => x.id === shiftId) || null;
+const clock = (t) => (t ? String(t).slice(0, 5) : null);
 
 // Check that the chatter, shift and pages are this organisation's. Returns an error
 // message, or null.
@@ -30,11 +34,12 @@ async function checkParts(orgId, { chatter_id, shift_id, creator_ids }) {
 const cleanWeekdays = (w) => [...new Set((Array.isArray(w) ? w : []).map(Number).filter(d => d >= 1 && d <= 7))].sort();
 const cleanIds = (ids) => [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))];
 
-// A chatter can't be rostered twice on the same weekday.
-async function overlap(orgId, chatterId, weekdays, exceptId = null) {
-  const { data } = await supabaseAdmin.from('roster_assignments').select('id, weekdays')
+// A chatter can't be rostered twice for the same shift on the same weekday. Two
+// different shifts on one day is fine: that's overtime (often 4h of the next shift).
+async function overlap(orgId, chatterId, shiftId, weekdays, exceptId = null) {
+  const { data } = await supabaseAdmin.from('roster_assignments').select('id, shift_id, weekdays')
     .eq('organisation_id', orgId).eq('chatter_id', chatterId).eq('is_active', true);
-  const clash = (data || []).filter(a => a.id !== exceptId).flatMap(a => (a.weekdays || []).filter(d => weekdays.includes(d)));
+  const clash = (data || []).filter(a => a.id !== exceptId && a.shift_id === shiftId).flatMap(a => (a.weekdays || []).filter(d => weekdays.includes(d)));
   return [...new Set(clash)].sort();
 }
 const DAY = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -71,7 +76,7 @@ router.get('/chatter/:id', async (req, res) => {
   }
 });
 
-// POST /api/roster/assignments { chatter_id, shift_id, creator_ids, weekdays }
+// POST /api/roster/assignments { chatter_id, shift_id, creator_ids, weekdays, start_time?, end_time? }
 router.post('/assignments', canEdit, async (req, res) => {
   try {
     const orgId = req.user.organisationId;
@@ -81,18 +86,22 @@ router.post('/assignments', canEdit, async (req, res) => {
     if (!body.weekdays.length) return res.status(400).json({ error: 'Pick at least one day' });
     const bad = await checkParts(orgId, body);
     if (bad) return res.status(400).json({ error: bad });
-    const clash = await overlap(orgId, body.chatter_id, body.weekdays);
-    if (clash.length) return res.status(409).json({ error: `Already rostered on ${clash.map(d => DAY[d]).join(', ')}` });
-    const { data, error } = await supabaseAdmin.from('roster_assignments')
-      .insert({ ...body, organisation_id: orgId, source: 'manual', created_by: req.user.id }).select().single();
-    if (error) return /roster_assignments/.test(error.message) ? missing(res) : res.status(500).json({ error: 'Could not save' });
+    const from = clock(req.body.start_time), to = clock(req.body.end_time);
+    const badW = R.badWindow(await slotOf(orgId, body.shift_id), from, to);
+    if (badW) return res.status(400).json({ error: badW });
+    const clash = await overlap(orgId, body.chatter_id, body.shift_id, body.weekdays);
+    if (clash.length) return res.status(409).json({ error: `Already on this shift on ${clash.map(d => DAY[d]).join(', ')}` });
+    const row = { ...body, organisation_id: orgId, source: 'manual', created_by: req.user.id };
+    if (from) Object.assign(row, { start_time: from, end_time: to });
+    const { data, error } = await supabaseAdmin.from('roster_assignments').insert(row).select().single();
+    if (error) return needs027(error.message) ? res.status(409).json({ error: PARTS_ERROR }) : /roster_assignments/.test(error.message) ? missing(res) : res.status(500).json({ error: 'Could not save' });
     res.json(data);
   } catch {
     res.status(500).json({ error: 'Could not save' });
   }
 });
 
-// PATCH /api/roster/assignments/:id { shift_id?, creator_ids?, weekdays? }
+// PATCH /api/roster/assignments/:id { shift_id?, creator_ids?, weekdays?, start_time?, end_time? }
 router.patch('/assignments/:id', canEdit, async (req, res) => {
   try {
     const orgId = req.user.organisationId;
@@ -107,13 +116,24 @@ router.patch('/assignments/:id', canEdit, async (req, res) => {
     if (req.body.weekdays !== undefined) {
       update.weekdays = cleanWeekdays(req.body.weekdays);
       if (!update.weekdays.length) return res.status(400).json({ error: 'Pick at least one day' });
-      const clash = await overlap(orgId, cur.chatter_id, update.weekdays, cur.id);
-      if (clash.length) return res.status(409).json({ error: `Already rostered on ${clash.map(d => DAY[d]).join(', ')}` });
     }
+    const shiftId = update.shift_id || cur.shift_id;
+    const clash = await overlap(orgId, cur.chatter_id, shiftId, update.weekdays || cur.weekdays, cur.id);
+    if (clash.length) return res.status(409).json({ error: `Already on this shift on ${clash.map(d => DAY[d]).join(', ')}` });
     const bad = await checkParts(orgId, { shift_id: update.shift_id, creator_ids: update.creator_ids });
     if (bad) return res.status(400).json({ error: bad });
+    // the hours: as sent, else as they were (still checked when the shift changes)
+    const timesSent = req.body.start_time !== undefined || req.body.end_time !== undefined;
+    const from = timesSent ? clock(req.body.start_time) : clock(cur.start_time);
+    const to = timesSent ? clock(req.body.end_time) : clock(cur.end_time);
+    if (timesSent || update.shift_id) {
+      const badW = R.badWindow(await slotOf(orgId, shiftId), from, to);
+      if (badW) return res.status(400).json({ error: badW });
+    }
+    // a whole shift that stays whole has nothing to write (and works before migration 027)
+    if (timesSent && (from || cur.start_time)) Object.assign(update, { start_time: from, end_time: to });
     const { data, error } = await supabaseAdmin.from('roster_assignments').update(update).eq('id', cur.id).select().single();
-    if (error) return res.status(500).json({ error: 'Could not save' });
+    if (error) return res.status(needs027(error.message) ? 409 : 500).json({ error: needs027(error.message) ? PARTS_ERROR : 'Could not save' });
     res.json(data);
   } catch {
     res.status(500).json({ error: 'Could not save' });
@@ -133,30 +153,43 @@ router.delete('/assignments/:id', canEdit, async (req, res) => {
   }
 });
 
-// PUT /api/roster/changes { date, chatter_id, kind: 'off' | 'work', shift_id?, creator_ids?, note? }
-// One change per chatter per day: it replaces any earlier one for that day.
+// PUT /api/roster/changes { date, chatter_id, kind: 'off' | 'work', shift_id?, creator_ids?, start_time?, end_time?, note? }
+// One-day changes, per shift: 'off' with no shift = the whole day off; 'off' for a
+// shift = just that shift (e.g. their overtime); 'work' for a shift = what they do
+// on it that day (instead of their usual, or as an extra: overtime). A new change
+// replaces the earlier one for that shift; a whole day off replaces all of them.
 router.put('/changes', canEdit, async (req, res) => {
   try {
     const orgId = req.user.organisationId;
     const { date, chatter_id } = req.body;
     let kind = req.body.kind;
+    const shift_id = req.body.shift_id || null;
     const creator_ids = cleanIds(req.body.creator_ids);
     if (!isDate(date) || !chatter_id) return res.status(400).json({ error: 'Pick a day and a chatter' });
-    if (kind === 'work' && !creator_ids.length) kind = 'off';          // no pages left that day = off
+    if (kind === 'work' && !creator_ids.length) kind = 'off';          // no pages left on that shift = off it
     if (!['off', 'work'].includes(kind)) return res.status(400).json({ error: 'Invalid change' });
-    if (kind === 'work' && !req.body.shift_id) return res.status(400).json({ error: 'Pick a shift' });
-    const bad = await checkParts(orgId, { chatter_id, shift_id: kind === 'work' ? req.body.shift_id : null, creator_ids: kind === 'work' ? creator_ids : [] });
+    if (kind === 'work' && !shift_id) return res.status(400).json({ error: 'Pick a shift' });
+    const bad = await checkParts(orgId, { chatter_id, shift_id, creator_ids: kind === 'work' ? creator_ids : [] });
     if (bad) return res.status(400).json({ error: bad });
+    const from = kind === 'work' ? clock(req.body.start_time) : null, to = kind === 'work' ? clock(req.body.end_time) : null;
+    if (from || to) {
+      const badW = R.badWindow(await slotOf(orgId, shift_id), from, to);
+      if (badW) return res.status(400).json({ error: badW });
+    }
+    // clear what this replaces: the same shift's change, and a whole day off; a whole day off clears everything
+    let del = supabaseAdmin.from('roster_changes').delete().eq('organisation_id', orgId).eq('date', date).eq('chatter_id', chatter_id);
+    if (shift_id) del = del.or(`shift_id.eq.${shift_id},shift_id.is.null`);
+    const d = await del;
+    if (d.error) return /roster_changes/.test(d.error.message) ? missing(res) : res.status(500).json({ error: 'Could not save' });
     const row = {
-      organisation_id: orgId, date, chatter_id, kind,
-      shift_id: kind === 'work' ? req.body.shift_id : null,
+      organisation_id: orgId, date, chatter_id, kind, shift_id,
       creator_ids: kind === 'work' ? creator_ids : [],
       note: req.body.note ? String(req.body.note).trim().slice(0, 300) || null : null,
       created_by: req.user.id, created_at: new Date().toISOString(),
     };
-    const { data, error } = await supabaseAdmin.from('roster_changes')
-      .upsert(row, { onConflict: 'organisation_id,date,chatter_id' }).select().single();
-    if (error) return /roster_changes/.test(error.message) ? missing(res) : res.status(500).json({ error: 'Could not save' });
+    if (from) Object.assign(row, { start_time: from, end_time: to });
+    const { data, error } = await supabaseAdmin.from('roster_changes').insert(row).select().single();
+    if (error) return needs027(error.message) || /duplicate key/.test(error.message) ? res.status(409).json({ error: PARTS_ERROR }) : res.status(500).json({ error: 'Could not save' });
     res.json(data);
   } catch {
     res.status(500).json({ error: 'Could not save' });
@@ -183,28 +216,43 @@ router.get('/proposal', canEdit, async (req, res) => {
   }
 });
 
-// POST /api/roster/proposal/apply { assignments: [{chatter_id, shift_id, creator_ids, weekdays}] }
+// POST /api/roster/proposal/apply { assignments: [{chatter_id, shift_id, creator_ids, weekdays, start_time?, end_time?}] }
 // Replaces the standing roster (old rows kept, inactive). One-day changes stay.
 router.post('/proposal/apply', canEdit, async (req, res) => {
   try {
     const orgId = req.user.organisationId;
     const list = (Array.isArray(req.body.assignments) ? req.body.assignments : [])
-      .map(a => ({ chatter_id: a.chatter_id, shift_id: a.shift_id, creator_ids: cleanIds(a.creator_ids), weekdays: cleanWeekdays(a.weekdays) }))
+      .map(a => ({ chatter_id: a.chatter_id, shift_id: a.shift_id, creator_ids: cleanIds(a.creator_ids), weekdays: cleanWeekdays(a.weekdays), start_time: clock(a.start_time), end_time: clock(a.end_time) }))
       .filter(a => a.chatter_id && a.shift_id && a.creator_ids.length && a.weekdays.length);
     if (!list.length) return res.status(400).json({ error: 'Nothing to apply' });
-    for (const a of list) { const bad = await checkParts(orgId, a); if (bad) return res.status(400).json({ error: bad }); }
+    const slots = await R.loadSlots(orgId);
+    for (const a of list) {
+      const bad = await checkParts(orgId, a); if (bad) return res.status(400).json({ error: bad });
+      const badW = R.badWindow(slots.find(x => x.id === a.shift_id), a.start_time, a.end_time); if (badW) return res.status(400).json({ error: badW });
+    }
     const seen = {};
     for (const a of list) for (const d of a.weekdays) {
-      const k = `${a.chatter_id}|${d}`;
-      if (seen[k]) return res.status(400).json({ error: `A chatter is rostered twice on ${DAY[d]}` });
+      const k = `${a.chatter_id}|${a.shift_id}|${d}`;
+      if (seen[k]) return res.status(400).json({ error: `A chatter is on the same shift twice on ${DAY[d]}` });
       seen[k] = true;
+    }
+    const withParts = list.some(a => a.start_time);
+    // check the columns for part shifts exist before switching the old roster off
+    if (withParts) {
+      const probe = await supabaseAdmin.from('roster_assignments').select('start_time').limit(1);
+      if (probe.error) return res.status(409).json({ error: PARTS_ERROR });
     }
     const now = new Date().toISOString();
     const off = await supabaseAdmin.from('roster_assignments').update({ is_active: false, updated_at: now })
       .eq('organisation_id', orgId).eq('is_active', true);
     if (off.error) return /roster_assignments/.test(off.error.message) ? missing(res) : res.status(500).json({ error: 'Could not apply' });
-    const { error } = await supabaseAdmin.from('roster_assignments')
-      .insert(list.map(a => ({ ...a, organisation_id: orgId, source: 'from_activity', created_by: req.user.id })));
+    const rows = list.map(a => {
+      const r = { chatter_id: a.chatter_id, shift_id: a.shift_id, creator_ids: a.creator_ids, weekdays: a.weekdays, organisation_id: orgId, source: 'from_activity', created_by: req.user.id };
+      if (a.start_time) Object.assign(r, { start_time: a.start_time, end_time: a.end_time });
+      return r;
+    });
+    // rows with and without part times can't share one insert before the columns exist; after, they can
+    const { error } = await supabaseAdmin.from('roster_assignments').insert(rows.map(r => (withParts ? { start_time: null, end_time: null, ...r } : r)));
     if (error) return res.status(500).json({ error: 'Could not apply' });
     res.json({ ok: true, applied: list.length });
   } catch {

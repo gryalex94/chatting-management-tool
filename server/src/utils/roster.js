@@ -9,7 +9,9 @@ const { dayWindow } = require('../ai/evalShared');
  *    weekdays (a floater has one row per shift);
  *  - one-day changes say who is off, or who works a different shift/pages, that day.
  * A page is "normally covered" in a shift if anyone is rostered on it there on any
- * weekday; on a day when nobody is, that's a hole.
+ * weekday; on a day when nobody is, for all of the shift or part of it, that's a
+ * hole. Days off are often covered by overtime: 4-hour halves from the neighbouring
+ * shifts, so a roster row or a change can be part of a shift (start_time–end_time).
  */
 
 const DAY_MS = 86400000;
@@ -59,38 +61,95 @@ async function loadRoster(orgId, from, to) {
   return { ready: slots.length > 0, slots, pages: pages || [], chatters: chatters || [], assignments: a.data || [], changes };
 }
 
+// ── Windows inside a shift ──────────────────────────────────────────────────
+// Part of a shift (overtime) is a from–to inside it; empty = the whole shift.
+// Positions are minutes from the shift's start (a shift past midnight wraps).
+const hhmm = (t) => (t ? String(t).slice(0, 5) : null);
+const relMin = (slot, t) => (toMin(t) - toMin(slot.start) + 1440) % 1440;
+const slotLen = (slot) => Math.round(slot.hours * 60);
+function windowIn(slot, from, to) {
+  const len = slotLen(slot);
+  if (!from || !to) return [0, len];
+  const a = relMin(slot, from);
+  const z = relMin(slot, to) || len;                  // ends at the shift's end
+  return [Math.min(a, len), Math.min(z, len)];
+}
+// A valid part of a shift: inside it, at least an hour, not the whole of it. null when fine.
+function badWindow(slot, from, to) {
+  if (!from && !to) return null;
+  if (!/^\d{2}:\d{2}$/.test(String(from || '')) || !/^\d{2}:\d{2}$/.test(String(to || ''))) return 'Give both a start and an end time';
+  const len = slotLen(slot), a = relMin(slot, from), z = relMin(slot, to) || len;
+  if (a >= len || z > len || z - a < 60) return `Pick hours inside ${slot.name} (${slot.start}–${slot.end}), at least one hour`;
+  return null;
+}
+const fmtRel = (slot, m) => { const t = (toMin(slot.start) + m) % 1440; return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`; };
+// The parts of [0, len) no window covers (ignoring slivers under 15 min).
+function uncovered(windows, len) {
+  const out = []; let at = 0;
+  for (const [a, z] of [...windows].sort((x, y) => x[0] - y[0])) {
+    if (a - at >= 15) out.push([at, a]);
+    at = Math.max(at, z);
+  }
+  if (len - at >= 15) out.push([at, len]);
+  return out;
+}
+
 /**
- * Who works what on `date`: the standing roster for that weekday, with that day's
- * changes applied. Returns { entries: [{chatter_id, shift_id, creator_ids, source,
- * assignment_id|change_id}], off: [{chatter_id, change_id, note}] }.
+ * Who works what on `date`: the usual roster for that weekday, with that day's
+ * changes applied. A change with no shift is the whole day off; a change for a
+ * shift replaces (or adds, or cancels) the chatter's usual entry for that shift.
+ * Returns { entries: [{chatter_id, shift_id, creator_ids, from, to, source,
+ * assignment_id|change_id}], off: [{chatter_id, change_id, note}] } — `off` lists
+ * whole days off.
  */
 function effectiveDay(date, assignments, changes) {
   const dow = isoWeekday(date);
-  const dayChanges = Object.fromEntries(changes.filter(c => c.date === date).map(c => [c.chatter_id, c]));
-  const chatterIds = new Set([...assignments.map(a => a.chatter_id), ...Object.keys(dayChanges)]);
+  const mine = changes.filter(c => c.date === date);
+  const chatterIds = new Set([...assignments.map(a => a.chatter_id), ...mine.map(c => c.chatter_id)]);
   const entries = [], off = [];
   for (const chatterId of chatterIds) {
-    const ch = dayChanges[chatterId];
-    if (ch?.kind === 'off') { off.push({ chatter_id: chatterId, change_id: ch.id, note: ch.note || null }); continue; }
-    if (ch?.kind === 'work' && ch.shift_id && ch.creator_ids?.length) {
-      entries.push({ chatter_id: chatterId, shift_id: ch.shift_id, creator_ids: ch.creator_ids, source: 'change', change_id: ch.id, note: ch.note || null });
-      continue;
-    }
+    const own = mine.filter(c => c.chatter_id === chatterId);
+    const dayOff = own.find(c => c.kind === 'off' && !c.shift_id);
+    if (dayOff) { off.push({ chatter_id: chatterId, change_id: dayOff.id, note: dayOff.note || null }); continue; }
+    const byShift = Object.fromEntries(own.filter(c => c.shift_id).map(c => [c.shift_id, c]));
     for (const a of assignments) {
-      if (a.chatter_id !== chatterId || !(a.weekdays || []).includes(dow)) continue;
-      entries.push({ chatter_id: chatterId, shift_id: a.shift_id, creator_ids: a.creator_ids || [], source: 'roster', assignment_id: a.id });
+      if (a.chatter_id !== chatterId || !(a.weekdays || []).includes(dow) || byShift[a.shift_id]) continue;
+      entries.push({ chatter_id: chatterId, shift_id: a.shift_id, creator_ids: a.creator_ids || [], from: hhmm(a.start_time), to: hhmm(a.end_time), source: 'roster', assignment_id: a.id });
+    }
+    for (const c of Object.values(byShift)) {
+      if (c.kind !== 'work' || !c.creator_ids?.length) continue;          // 'off' for one shift: nothing there
+      entries.push({ chatter_id: chatterId, shift_id: c.shift_id, creator_ids: c.creator_ids, from: hhmm(c.start_time), to: hhmm(c.end_time), source: 'change', change_id: c.id, note: c.note || null });
     }
   }
   return { entries, off };
 }
 
-// "page|shift" pairs anyone is rostered on, on any weekday.
-const normallyCovered = (assignments) => new Set(assignments.flatMap(a => (a.creator_ids || []).map(p => `${p}|${a.shift_id}`)));
+// "page|shift" pairs someone is rostered on for a WHOLE shift, on any weekday:
+// what's expected to be covered. Overtime fills in on days off; it doesn't add
+// expectations (a page someone touches in a 4-hour overtime isn't due every day).
+const normallyCovered = (assignments) => new Set(assignments.filter(a => !a.start_time)
+  .flatMap(a => (a.creator_ids || []).map(p => `${p}|${a.shift_id}`)));
 
-function dayBoard(date, assignments, changes, normal = normallyCovered(assignments)) {
+// A day's board: entries, whole days off, and holes. A hole is a page left without
+// anyone for all of a shift where it's normally covered, or for part of it
+// (`missing` lists the open hours; `partial` when someone covers the rest).
+function dayBoard(date, assignments, changes, slots, normal = normallyCovered(assignments)) {
   const { entries, off } = effectiveDay(date, assignments, changes);
-  const covered = new Set(entries.flatMap(e => e.creator_ids.map(p => `${p}|${e.shift_id}`)));
-  const holes = [...normal].filter(k => !covered.has(k)).map(k => { const [creator_id, shift_id] = k.split('|'); return { creator_id, shift_id }; });
+  const slotById = Object.fromEntries(slots.map(s => [s.id, s]));
+  const cover = {};
+  for (const e of entries) {
+    const s = slotById[e.shift_id]; if (!s) continue;
+    const w = windowIn(s, e.from, e.to);
+    for (const p of e.creator_ids) (cover[`${p}|${e.shift_id}`] ||= []).push(w);
+  }
+  const holes = [];
+  for (const k of normal) {
+    const [creator_id, shift_id] = k.split('|');
+    const s = slotById[shift_id]; if (!s) continue;
+    const open = uncovered(cover[k] || [], slotLen(s));
+    if (!open.length) continue;
+    holes.push({ creator_id, shift_id, partial: !!cover[k]?.length, missing: open.map(([a, z]) => `${fmtRel(s, a)}–${fmtRel(s, z)}`) });
+  }
   return { date, weekday: isoWeekday(date), entries, off, holes };
 }
 
@@ -101,40 +160,48 @@ async function weekView(orgId, anyDate) {
   const r = await loadRoster(orgId, start, end);
   if (!r.ready) return { ...r, week_start: start };
   const normal = normallyCovered(r.assignments);
-  const days = Array.from({ length: 7 }, (_, i) => dayBoard(addDays(start, i), r.assignments, r.changes, normal));
-  const slotHours = Object.fromEntries(r.slots.map(s => [s.id, s.hours]));
+  const days = Array.from({ length: 7 }, (_, i) => dayBoard(addDays(start, i), r.assignments, r.changes, r.slots, normal));
+  const slotById = Object.fromEntries(r.slots.map(s => [s.id, s]));
   const hours = {};
   for (const d of days) for (const e of d.entries) {
-    const h = (hours[e.chatter_id] ||= { shifts: 0, hours: 0 });
-    h.shifts++; h.hours += slotHours[e.shift_id] || 0;
+    const s = slotById[e.shift_id]; if (!s) continue;
+    const [a, z] = windowIn(s, e.from, e.to);
+    const h = (hours[e.chatter_id] ||= { shifts: 0, overtime: 0, hours: 0 });
+    if (e.from) h.overtime += (z - a) / 60; else h.shifts++;
+    h.hours += (z - a) / 60;
   }
   return { ...r, week_start: start, days, hours };
 }
 
 /**
- * Each chatter's rostered shift on `date` (the earliest, if several): for the
- * lateness check. null when the roster isn't in use yet (then the old shift
- * assignments are used).
+ * Each chatter's rostered start on `date`, for the lateness check: their earliest
+ * whole shift (overtime that continues last night's shift isn't a start), else
+ * their earliest part shift. null when the roster isn't in use yet (then the old
+ * shift assignments are used).
  */
 async function shiftStartsFor(orgId, date) {
   const r = await loadRoster(orgId, date, date).catch(() => null);
   if (!r?.ready || !r.assignments.length) return null;
   const slot = Object.fromEntries(r.slots.map(s => [s.id, s]));
-  const out = {};
+  const best = {};
   for (const e of effectiveDay(date, r.assignments, r.changes).entries) {
     const s = slot[e.shift_id]; if (!s) continue;
-    if (!out[e.chatter_id] || toMin(s.start) < toMin(out[e.chatter_id].start)) out[e.chatter_id] = { start: s.start, end: s.end, name: s.name };
+    const cand = { start: e.from || s.start, end: e.to || s.end, name: s.name, part: !!e.from };
+    const cur = best[e.chatter_id];
+    if (!cur || (cur.part && !cand.part) || (cur.part === cand.part && toMin(cand.start) < toMin(cur.start))) best[e.chatter_id] = cand;
   }
-  return out;
+  return best;
 }
 
 /**
  * The roster as the team actually works: from the last `days` days of chat
  * exports. Each chatter's working blocks (messages with no 2h+ break, 15+
- * messages) are put in the shift they overlap most; per chatter and shift, the
- * weekdays they worked in at least 2 of the weeks, and the pages they handled
- * (5%+ of their messages there, or on at least half of those shifts). Chatters on
- * the ignore list, and shifts worked fewer than 4 times, are left out.
+ * messages) are split across the shifts they span: a 12-hour day is a whole
+ * shift plus half of the next one (overtime). Per chatter and shift: whole shifts
+ * and part shifts (by when in the shift they fall) are grouped separately; a
+ * weekday counts when worked in at least 2 of the weeks, pages when they had 5%+
+ * of the messages there or showed up on at least half of those shifts. Chatters on
+ * the ignore list, and whole shifts worked fewer than 4 times, are left out.
  */
 async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: given = null } = {}) {
   const slots = given || await loadSlots(orgId);
@@ -164,31 +231,32 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
     (byChatter[c.id] ||= []).push(m);
   }
 
-  // which shift a block belongs to: the most overlap (store times are Amsterdam wall clock)
-  const slotOf = (s, e) => {
-    let best = null, most = 0;
-    const day0 = Math.floor(s / DAY_MS) * DAY_MS;
-    for (const off of [-1, 0, 1]) for (const sl of slots) {
-      const a = day0 + off * DAY_MS + toMin(sl.start) * 60000;
-      const z = a + sl.hours * 3600000;
-      const o = Math.max(0, Math.min(e, z) - Math.max(s, a));
-      if (o > most) { most = o; best = { slot: sl, startsOn: new Date(day0 + off * DAY_MS).toISOString().slice(0, 10) }; }
-    }
-    return best;
+  const groups = {};   // chatter|shift|whole-or-part -> pieces of work
+  const addPiece = (chatterId, slot, slotStartMs, a, z, list) => {
+    const len = slotLen(slot);
+    const whole = z - a >= 0.7 * len;                  // 6h of an 8h shift is the shift, not overtime
+    const part = whole ? 'whole' : a <= 45 ? 'early' : z >= len - 45 ? 'late' : 'middle';
+    const g = (groups[`${chatterId}|${slot.id}|${part}`] ||= { chatterId, slot, part, pieces: 0, weekdays: {}, pageMsgs: {}, pageBlocks: {}, msgs: 0, windows: {} });
+    const startsOn = new Date(slotStartMs).toISOString().slice(0, 10);
+    g.pieces++; g.msgs += list.length;
+    (g.weekdays[isoWeekday(startsOn)] ||= new Set()).add(startsOn);
+    if (!whole) { const w = `${Math.round(a / 60) * 60}|${Math.round(z / 60) * 60}`; g.windows[w] = (g.windows[w] || 0) + 1; }
+    const per = {}; for (const m of list) if (m.creator_id) per[m.creator_id] = (per[m.creator_id] || 0) + 1;
+    for (const [p, k] of Object.entries(per)) { g.pageMsgs[p] = (g.pageMsgs[p] || 0) + k; if (k >= 3) g.pageBlocks[p] = (g.pageBlocks[p] || 0) + 1; }
   };
-
-  const groups = {};                                   // chatter|slot -> { blocks, weekdayWeeks, pageMsgs, pageBlocks, msgs }
   for (const [chatterId, list] of Object.entries(byChatter)) {
     let block = [list[0]];
     const close = () => {
       if (block.length < 15) return;
       const s = Date.parse(block[0].sent_datetime), e = Date.parse(block[block.length - 1].sent_datetime);
-      const at = slotOf(s, e); if (!at) return;
-      const g = (groups[`${chatterId}|${at.slot.id}`] ||= { chatterId, slot: at.slot, blocks: 0, weekdays: {}, pageMsgs: {}, pageBlocks: {}, msgs: 0 });
-      g.blocks++; g.msgs += block.length;
-      const wd = isoWeekday(at.startsOn); (g.weekdays[wd] ||= new Set()).add(at.startsOn);
-      const per = {}; for (const m of block) if (m.creator_id) per[m.creator_id] = (per[m.creator_id] || 0) + 1;
-      for (const [p, n] of Object.entries(per)) { g.pageMsgs[p] = (g.pageMsgs[p] || 0) + n; if (n >= 3) g.pageBlocks[p] = (g.pageBlocks[p] || 0) + 1; }
+      const day0 = Math.floor(s / DAY_MS) * DAY_MS;
+      for (const off of [-1, 0, 1, 2]) for (const sl of slots) {
+        const a0 = day0 + off * DAY_MS + toMin(sl.start) * 60000, z0 = a0 + sl.hours * 3600000;
+        if (Math.min(e, z0) - Math.max(s, a0) < 3600000) continue;          // under an hour of it: not a shift
+        const inside = block.filter(m => { const t = Date.parse(m.sent_datetime); return t >= a0 && t < z0; });
+        if (inside.length < 8) continue;
+        addPiece(chatterId, sl, a0, (Math.max(s, a0) - a0) / 60000, (Math.min(e, z0) - a0) / 60000, inside);
+      }
     };
     for (let i = 1; i < list.length; i++) {
       if (Date.parse(list[i].sent_datetime) - Date.parse(list[i - 1].sent_datetime) > 2 * 3600000) { close(); block = []; }
@@ -200,26 +268,40 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
   const minWeeks = Math.min(2, weeks);
   const proposals = [];
   for (const g of Object.values(groups)) {
-    if (g.blocks < 4) continue;                         // occasional: leave out
+    if (g.part === 'whole' && g.pieces < 4) continue;                    // occasional: leave out
     const weekdays = Object.entries(g.weekdays).filter(([, dates]) => dates.size >= minWeeks).map(([d]) => Number(d)).sort();
     if (!weekdays.length) continue;
     const creatorIds = Object.keys(g.pageMsgs)
-      .filter(p => g.pageMsgs[p] / g.msgs >= 0.05 || (g.pageBlocks[p] || 0) >= g.blocks / 2)
+      .filter(p => g.pageMsgs[p] / g.msgs >= 0.05 || (g.pageBlocks[p] || 0) >= g.pieces / 2)
       .sort((a, b) => g.pageMsgs[b] - g.pageMsgs[a]);
     if (!creatorIds.length) continue;
+    let start_time = null, end_time = null;
+    if (g.part !== 'whole') {
+      const [w] = Object.entries(g.windows).sort((x, y) => y[1] - x[1])[0];
+      const [a, z] = w.split('|').map(Number);
+      if (z - a < 60) continue;
+      start_time = fmtRel(g.slot, a); end_time = fmtRel(g.slot, z);
+    }
     const chatter = (chatters || []).find(c => c.id === g.chatterId);
     proposals.push({
       chatter_id: g.chatterId, chatter_name: chatter?.name || '?',
-      shift_id: g.slot.id, shift_name: g.slot.name,
+      shift_id: g.slot.id, shift_name: g.slot.name, start_time, end_time, overtime: g.part !== 'whole',
       creator_ids: creatorIds, pages: creatorIds.map(p => ({ id: p, name: pageName[p] || '?', share: Math.round(100 * g.pageMsgs[p] / g.msgs) })),
-      weekdays, shifts_worked: g.blocks,
+      weekdays, shifts_worked: g.pieces,
     });
   }
-  proposals.sort((a, b) => toMin(slots.find(s => s.id === a.shift_id).start) - toMin(slots.find(s => s.id === b.shift_id).start) || a.chatter_name.localeCompare(b.chatter_name));
+  // A whole shift on a day already covers that day: drop it from overtime rows.
+  for (const p of proposals.filter(x => x.overtime)) {
+    const whole = proposals.find(x => !x.overtime && x.chatter_id === p.chatter_id && x.shift_id === p.shift_id);
+    if (whole) p.weekdays = p.weekdays.filter(d => !whole.weekdays.includes(d));
+  }
+  for (let i = proposals.length - 1; i >= 0; i--) if (!proposals[i].weekdays.length) proposals.splice(i, 1);
+  const order = (p) => toMin(slots.find(s => s.id === p.shift_id).start) * 10 + (p.overtime ? 1 : 0);
+  proposals.sort((a, b) => order(a) - order(b) || a.chatter_name.localeCompare(b.chatter_name));
   return { from: fromDay, to: toDay, proposals };
 }
 
 module.exports = {
   isoWeekday, addDays, mondayOf, loadSlots, loadRoster, effectiveDay, dayBoard, normallyCovered,
-  weekView, shiftStartsFor, proposeFromActivity, READY_ERROR,
+  weekView, shiftStartsFor, proposeFromActivity, windowIn, badWindow, READY_ERROR,
 };
