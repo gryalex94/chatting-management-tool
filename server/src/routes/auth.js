@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
+const { verifyToken, profileMissing, UNREACHABLE } = require('../middleware/auth');
 
 const { ASSIGNABLE } = require('../utils/roles');
 
@@ -101,8 +102,14 @@ router.post('/login', async (req, res) => {
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'No token provided' });
     }
-    const { data: { user: authUser }, error: authErr } = await supabaseAdmin.auth.getUser(authHeader.split(' ')[1]);
-    if (authErr || !authUser) {
+    // 401 only when the session really is over; a blip (network, Supabase busy) is a
+    // 503, so the app keeps the person logged in and tries again.
+    const { user: authUser, unreachable, error: authErr } = await verifyToken(authHeader.split(' ')[1]);
+    if (unreachable) {
+      console.warn('[auth] could not verify a token:', authErr?.status || '', authErr?.message || authErr);
+      return res.status(503).json({ error: UNREACHABLE });
+    }
+    if (!authUser) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
@@ -112,6 +119,10 @@ router.post('/login', async (req, res) => {
       .eq('auth_id', authUser.id)
       .single();
 
+    if (!user && !profileMissing(error)) {
+      console.warn('[auth] profile lookup failed:', error.message);
+      return res.status(503).json({ error: UNREACHABLE });
+    }
     if (error || !user) {
       return res.status(404).json({ error: 'User profile not found' });
     }

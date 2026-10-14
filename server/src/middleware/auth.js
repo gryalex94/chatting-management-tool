@@ -1,5 +1,38 @@
 const { supabaseAdmin } = require('../utils/supabase');
 
+// "Couldn't check right now" — the app keeps the person logged in and tries again,
+// instead of treating a hiccup as a finished login (which sent people to log in again).
+const UNREACHABLE = 'Could not check your login just now. Try again in a moment.';
+
+// A session token checked with Supabase is trusted for a minute: every request
+// used to ask Supabase again, so any blip there looked like an expired login.
+const TOKEN_TTL_MS = 60 * 1000;
+const checked = new Map();                // token -> { user, at }
+
+/**
+ * Check a session token. Returns { user } when it's valid, { invalid: true } when
+ * Supabase says it isn't (expired, signed out), and { unreachable: true } when
+ * Supabase couldn't be asked or didn't answer properly (network, 5xx, rate limit).
+ */
+async function verifyToken(token) {
+  const hit = checked.get(token);
+  if (hit && Date.now() - hit.at < TOKEN_TTL_MS) return { user: hit.user };
+  let data, error;
+  try { ({ data, error } = await supabaseAdmin.auth.getUser(token)); }
+  catch (e) { return { unreachable: true, error: e }; }
+  if (data?.user) {
+    if (checked.size > 1000) checked.clear();
+    checked.set(token, { user: data.user, at: Date.now() });
+    return { user: data.user };
+  }
+  const status = Number(error?.status) || 0;
+  if (!status || status >= 500 || status === 429) return { unreachable: true, error };
+  return { invalid: true, error };
+}
+
+// A profile lookup that failed for a reason other than "no such row" is a blip too.
+const profileMissing = (error) => !error || error.code === 'PGRST116';
+
 // Verify the JWT token from the request header
 async function authMiddleware(req, res, next) {
   try {
@@ -11,9 +44,12 @@ async function authMiddleware(req, res, next) {
     const token = authHeader.split(' ')[1];
 
     // Verify the token with Supabase
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-
-    if (error || !user) {
+    const { user, unreachable, error } = await verifyToken(token);
+    if (unreachable) {
+      console.warn('[auth] could not verify a token:', error?.status || '', error?.message || error);
+      return res.status(503).json({ error: UNREACHABLE });
+    }
+    if (!user) {
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
@@ -24,6 +60,10 @@ async function authMiddleware(req, res, next) {
       .eq('auth_id', user.id)
       .single();
 
+    if (!profile && !profileMissing(profileError)) {
+      console.warn('[auth] profile lookup failed:', profileError.message);
+      return res.status(503).json({ error: UNREACHABLE });
+    }
     if (profileError || !profile) {
       return res.status(403).json({ error: 'User profile not found. Complete registration first.' });
     }
@@ -80,4 +120,4 @@ function requireMinRole(minRole) {
   };
 }
 
-module.exports = { authMiddleware, requireRole, requireMinRole };
+module.exports = { authMiddleware, requireRole, requireMinRole, verifyToken, profileMissing, UNREACHABLE };
