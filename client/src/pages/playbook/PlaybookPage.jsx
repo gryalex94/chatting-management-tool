@@ -7,7 +7,6 @@ import { Input } from '@/components/ui/input';
 import { BASIS, BRANCHES, RULES, SITUATIONS, STEPS } from './playbookData';
 
 const GROUPS = ['All', 'Start', 'Fan types', 'While selling', 'He pushes back', 'After the sale'];
-const TONES = ['all', 'playful', 'sweet', 'bold'];
 const MOVE_LABEL = { warm_up: 'warm-up', tension: 'tension', readiness: 'ready?', tease: 'tease', ppv: 'PPV', live_detail: 'live detail', ladder: 'ladder', aftercare: 'aftercare' };
 const byId = Object.fromEntries([...STEPS, ...BRANCHES, ...SITUATIONS].map(x => [x.id, x]));
 // roadmap steps by id — a branch can share its id with the situation it leads to
@@ -23,7 +22,6 @@ export default function PlaybookPage() {
   const [tab, setTab] = useState('roadmap');
   const [stepId, setStepId] = useState('warmup');
   const [sitId, setSitId] = useState('price');
-  const [tone, setTone] = useState('all');
   const [extra, setExtra] = useState(null);           // fresh ideas and scripts
   useEffect(() => { import('./playbookLines.json').then(m => setExtra(m.default)).catch(() => setExtra({ failed: true })); }, []);
   const open = (id) => {
@@ -31,7 +29,7 @@ export default function PlaybookPage() {
     else if (byId[id]) { setTab('roadmap'); setStepId(id); }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const ctx = { tone, extra, open };
+  const ctx = { extra, open };
 
   return (
     <div className='flex flex-col gap-6'>
@@ -49,19 +47,8 @@ export default function PlaybookPage() {
         </div>
       </div>
 
-      {/* tone filters the fresh ideas */}
       {tab !== 'scripts' && (
-        <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2'>
-          <span className='text-sm text-muted-foreground'>Tone</span>
-          <div className='flex gap-1'>
-            {TONES.map(t => (
-              <button key={t} type='button' onClick={() => setTone(t)} aria-pressed={tone === t}
-                className={cn('rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                  tone === t ? 'border-primary bg-primary/10 font-medium' : 'text-muted-foreground hover:bg-muted/60')}>{t === 'all' ? 'Any tone' : t}</button>
-            ))}
-          </div>
-          <span className='text-xs text-muted-foreground sm:ms-auto'>Works on every page: fill in the [brackets] for the page you’re on.</span>
-        </div>
+        <p className='-mt-3 text-xs text-muted-foreground'>Works on every page: fill in the [brackets] for the page you’re on.</p>
       )}
 
       {tab === 'roadmap' && <Roadmap stepId={stepId} setStepId={setStepId} ctx={ctx} />}
@@ -176,10 +163,9 @@ function Situations({ sitId, setSitId, ctx }) {
 // One step or situation: the numbers, what to do, how it usually goes, what to
 // avoid, lines that sold and fresh ideas.
 function Detail({ item, ctx }) {
-  const { tone, extra, open } = ctx;
+  const { extra, open } = ctx;
   if (!item) return null;
   const ideas = extra?.fresh?.[item.id] || [];
-  const byTone = (l) => tone === 'all' || !l.tone || l.tone === tone;
   return (
     <article className='flex flex-col gap-4 rounded-lg border bg-card p-4 sm:p-5'>
       <header>
@@ -223,9 +209,9 @@ function Detail({ item, ctx }) {
           </ol>
         </section>
       )}
-      <Lines title='Lines that sold' note='Real lines from our chats (names removed). Learn the idea and say it your way: copy-paste chats sell the least.' lines={(item.lines || []).filter(byTone)} />
+      <Lines title='Lines that sold' note='Real lines from our chats (names removed). Learn the idea and say it your way: copy-paste chats sell the least.' lines={item.lines || []} />
       {extra
-        ? <Lines title='Fresh ideas' note='Written by AI from what sells — not tested yet. Fill in the [brackets], try them and see what works.' lines={ideas.filter(byTone)} fresh />
+        ? <Lines title='Fresh ideas' note='Written by AI from what sells — not tested yet. Fill in the [brackets], try them and see what works.' lines={ideas} fresh />
         : <p className='flex items-center gap-2 text-xs text-muted-foreground'><Loader2 className='size-3.5 animate-spin' />Loading fresh ideas…</p>}
       {item.links?.length > 0 && (
         <section className='flex flex-wrap items-center gap-1.5'>
