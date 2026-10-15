@@ -141,8 +141,13 @@ async function recomputeSubscribersFromLedger(orgId, usernames) {
  * the ledger (deduped by fan+date+price+message), then recomputes affected
  * subscribers. This keeps spend current automatically while never overwriting
  * the bulk history imported via importSubscriberSpend().
+ *
+ * With importId, only that upload's sales are read (and only its fans
+ * recomputed). Without it, every sale ever is re-read — minutes of work by
+ * Oct 2026, which held the upload at "processing" long after its messages
+ * were in.
  */
-async function addDashboardSalesToLedger(orgId) {
+async function addDashboardSalesToLedger(orgId, importId = null) {
   const crypto = require('crypto');
   const hash = s => crypto.createHash('sha1').update(String(s || '')).digest('hex').slice(0, 12);
 
@@ -150,12 +155,14 @@ async function addDashboardSalesToLedger(orgId) {
   const sales = [];
   let offset = 0;
   while (true) {
-    const { data, error } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('messages')
       .select('sent_to_username, sent_to_nickname, price, sent_date, creator_message_text, creator_id')
       .eq('organisation_id', orgId)
       .eq('purchased', true)
-      .gt('price', 1)
+      .gt('price', 1);
+    if (importId) q = q.eq('import_id', importId);
+    const { data, error } = await q
       .order('id', { ascending: true })            // stable paging
       .range(offset, offset + 999);
     if (error || !data?.length) break;

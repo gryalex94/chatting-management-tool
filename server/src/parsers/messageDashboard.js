@@ -151,7 +151,7 @@ async function parseMessageDashboardLocked(fileBuffer, fileName, importId, orgId
   // history imported via the dedicated sales-history importer.
   try {
     const { addDashboardSalesToLedger } = require('./subscriberSpend');
-    await addDashboardSalesToLedger(orgId);
+    await addDashboardSalesToLedger(orgId, importId);
   } catch (e) {
     console.error('[MessageDashboard] ledger update skipped:', e.message);
   }

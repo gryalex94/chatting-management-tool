@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileSpreadsheet, Check, CircleCheck, X, Loader2, MessageSquare, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -30,7 +30,12 @@ function ReportCard({ report, selected, uploaded, onSelect }) {
       <div className='min-w-0 flex-1'>
         <div className='text-sm font-medium'>{report.label}</div>
         <div className='mt-0.5 text-xs text-muted-foreground'>{report.desc}</div>
-        {isUploaded ? (
+        {uploaded?.status==='processing' ? (
+          <div className='mt-2.5 flex items-center gap-1.5 text-xs text-warn'>
+            <Loader2 className='size-3 animate-spin' />
+            Processing…
+          </div>
+        ) : isUploaded ? (
           <div className='mt-2.5 flex items-center gap-1.5 text-xs text-good'>
             <span className='size-1.5 rounded-full bg-good' />
             Uploaded · <span className='tabular-nums'>{uploaded.row_count}</span> rows
@@ -53,8 +58,20 @@ export default function ReportsPage() {
   const [uploading, setUploading] = useState(false);
   const [imports, setImports] = useState([]);
   const [progress, setProgress] = useState(null);   // daily-tasks pipeline progress
+  const following = useRef(false);
 
   useEffect(()=>{loadHistory();},[]);
+
+  // While an import is still processing, re-check the list every few seconds —
+  // including ones started before this page was opened. One stuck for over 30
+  // minutes (server restarted mid-import) is left alone.
+  const processing = imports.some(i=>i.status==='processing' && Date.now()-Date.parse(i.created_at) < 30*60e3);
+  useEffect(()=>{
+    if(!processing) return;
+    const t=setTimeout(loadHistory,4000);
+    return ()=>clearTimeout(t);
+  },[imports, processing]);
+
 
   async function loadHistory() {
     try { const{data}=await api.get('/api/uploads/history'); setImports(data); }
@@ -84,7 +101,7 @@ export default function ReportsPage() {
   async function pollStatus(id) {
     let n=0;
     const iv=setInterval(async()=>{
-      n++; if(n>60){clearInterval(iv);return;}
+      n++; if(n>600){clearInterval(iv);return;}   // 30 minutes
       try {
         const{data}=await api.get(`/api/uploads/status/${id}`);
         if(data.status==='completed'){clearInterval(iv);toast.success(`Done! ${data.row_count} rows imported.`);loadHistory();}
@@ -100,12 +117,33 @@ export default function ReportsPage() {
   // Page stats come from the Infloww API, so the chat export is the only upload.
   const bothReady = getUploaded('message-dashboard')?.status==='completed';
 
+  // The upload starts the day's review by itself a few seconds after it's done
+  // processing; if that (or a click elsewhere) is running for this date, show
+  // its progress instead of the button.
+  useEffect(()=>{
+    if(!bothReady) return;
+    const check=()=>api.get('/api/daily-check/review/status').then(({data})=>{
+      const st=data?.status;
+      if(st && !st.finished_at && st.report_date===date) followReview();
+    }).catch(()=>{});
+    const ts=[0,10e3,30e3].map(ms=>setTimeout(check,ms));
+    return ()=>ts.forEach(clearTimeout);
+  },[date, bothReady]);
+
   // One-click daily pipeline, run as a job on the server (metrics → daily check →
   // AI review of every chatter → task queue): this page starts it and follows it.
   async function createDailyTasks() {
     setProgress({ stage:'calc' });
+    try { await api.post('/api/daily-check/review', { report_date:date, model:'sonnet' }); }
+    catch(e){ toast.error(e?.response?.data?.error || e?.message || 'Failed to create daily tasks'); setProgress(null); return; }
+    followReview();
+  }
+
+  async function followReview() {
+    if (following.current) return;
+    following.current = true;
+    setProgress(p=>p||{ stage:'calc' });
     try {
-      await api.post('/api/daily-check/review', { report_date:date, model:'sonnet' });
       for (;;) {
         await new Promise(r=>setTimeout(r,2500));
         const { data } = await api.get('/api/daily-check/review/status');
@@ -120,7 +158,7 @@ export default function ReportsPage() {
           : st.stage==='calc' ? { stage:'calc' } : { stage:'evaluate', done:st.done, total:st.total, current:st.current });
       }
     } catch(e){ toast.error(e?.response?.data?.error || e?.message || 'Failed to create daily tasks'); }
-    finally { setProgress(null); }
+    finally { setProgress(null); following.current = false; }
   }
 
   // Pipeline bar position: same stages/percentages as before.
