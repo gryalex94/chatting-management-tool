@@ -3,7 +3,7 @@
 // in Oct 2026, 2,000 more read for turning points) — numbers are what went together
 // with more sales. Lines are real chatter lines from conversations that sold, with
 // fan names removed; shown as examples to put in your own words, never to copy.
-// Page lines, fresh ideas and scripts are in playbookLines.json (loaded on demand).
+// Everything fits any page. Fresh ideas and scripts are in playbookLines.json (loaded on demand).
 
 export const BASIS = "From 34,817 conversations (20 May – 13 Oct 2026); 10,234 of them read in full by AI. The numbers show what went together with more sales — they are a guide, not a guarantee. Situations marked “new” come from 2,000 conversations read for the moments a sale was won or lost.";
 
@@ -225,7 +225,7 @@ export const STEPS = [
         "why": "Mundane real-world action makes the moment feel physically present."
       },
       {
-        "line": "Sooo, should I ditch Zelda and focus on playing with you instead? Look",
+        "line": "Sooo, should I ditch [game] and focus on playing with you instead? Look",
         "why": "Interrupting a real activity sells she was busy before him."
       },
       {
@@ -412,11 +412,11 @@ export const SITUATIONS = [
         "why": "Open question that learns his mood without pushing a sale."
       },
       {
-        "line": "Mmm, and is there a cosplay of mine you might wanna see more naughty pics of?😈",
+        "line": "Mmm, and is there a [character] of mine you might wanna see more naughty pics of?😈",
         "why": "Narrows his interest to a specific angle you can sell"
       },
       {
-        "line": "I should give you a lil warning though, my cosplays get superr naughty.. think you'd be able to handle it?😈",
+        "line": "I should give you a lil warning though, my [content] gets superr naughty.. think you'd be able to handle it?😈",
         "why": "Builds challenge and curiosity at the same time"
       }
     ],
@@ -676,12 +676,12 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan names something specific he wants to see",
-        "say": "Do wanna watch me ride my toy and get filled up with fake cum or you wanna watch me squirt?💦💦",
+        "say": "Do wanna watch me ride my [toy] and get filled up with fake cum or you wanna watch me squirt?💦💦",
         "then": "Give two options tied to what he said — forces a choice, not a maybe"
       },
       {
         "if": "Fan picks one or signals clear interest",
-        "say": "Well that's going to cost you 😈 Which cosplay though?",
+        "say": "Well that's going to cost you 😈 Which [outfit] though?",
         "then": "Confirm his pick playfully and keep him moving toward the send"
       },
       {
@@ -692,7 +692,7 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "Hehe, good to have you in my spicy world btw and yes i do. You already wanna see how much spicier i could get in my pre recorded kitty play videos or you wanna get all playful with me right now as i am feeling all wild right now?😈🤭",
+        "line": "Hehe, good to have you in my spicy world btw and yes i do. You already wanna see how much spicier i could get in my pre recorded [content] videos or you wanna get all playful with me right now as i am feeling all wild right now?😈🤭",
         "why": "Warm welcome plus two clear options keeps him choosing, not leaving"
       },
       {
@@ -880,7 +880,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan re-engages and asks what kind of content",
-        "say": "My hot cosplay videos\nMaybe i can show you right now, its been a while anyways😈",
+        "say": "My hot [content] videos\nMaybe i can show you right now, its been a while anyways😈",
         "then": "Offer to show him something now to keep the pull going"
       },
       {
@@ -895,7 +895,7 @@ export const SITUATIONS = [
         "why": "Teases content and signals activity without asking for anything"
       },
       {
-        "line": "My hot cosplay videos\nMaybe i can show you right now, its been a while anyways😈",
+        "line": "My hot [content] videos\nMaybe i can show you right now, its been a while anyways😈",
         "why": "Creates urgency and makes the offer feel personal and spontaneous"
       },
       {
@@ -903,7 +903,7 @@ export const SITUATIONS = [
         "why": "Owns the silence quickly then puts focus back on him"
       },
       {
-        "line": "Nahhh! I will be home with Ava....we might go for a walk",
+        "line": "Nahhh! I will be home with [pet]....we might go for a walk",
         "why": "Keeps tone light and personal to rebuild casual connection"
       }
     ],
@@ -944,12 +944,12 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan gets playful and says okay",
-        "say": "I know you wouldn't resist bulka in the bathroom, let me start taking off everything that we don't need today 🤭👅",
+        "say": "Well honestly I also really like your vibe too, I don't vibe so well with anyone that has a lame vibe, which should tell you that you are really fun and amazing to talk to🤭 and I am happy you've been a fan for years",
         "then": "Now send the PPV — desire is already built"
       },
       {
         "if": "Fan praises her vibe and says it's why he finally bought",
-        "say": "Well honestly I also really like your vibe too, I don't vibe so well with anyone that has a lame vibe, which should tell you that you are really fun and amazing to talk to🤭 and I am happy you've been a fan for years",
+        "say": "I know you wouldn't resist me in the bathroom, let me start taking off everything that we don't need today 🤭👅",
         "then": "Reinforce the bond — this turns a buyer into a loyal regular"
       }
     ],
@@ -963,7 +963,7 @@ export const SITUATIONS = [
         "why": "Soft, curious invite that pulls him in without pressure"
       },
       {
-        "line": "Uhh, sure you wanna see me all naked right now Ramos? I can be really wild you know😈",
+        "line": "Uhh, sure you wanna see me all naked right now? I can be really wild you know😈",
         "why": "Teases his request back at him, builds anticipation before the send"
       },
       {
@@ -1210,7 +1210,7 @@ export const SITUATIONS = [
         "why": "Backs off without losing him — plants a return trigger"
       },
       {
-        "line": "Mmm, I didn't make any more of that one👉🏻👈🏻 but I do have other really naughty Uma cosplays that will blow your mind",
+        "line": "Mmm, I didn't make any more of that one👉🏻👈🏻 but I do have other really naughty [character] cosplays that will blow your mind",
         "why": "Redirects stalled interest to a fresh hook without pressure"
       }
     ],
@@ -1408,7 +1408,7 @@ export const SITUATIONS = [
       },
       {
         "if": "He's relaxed and engaged after the emotional moment",
-        "say": "I made a few cosplay videos, and I don't know if it turned out great.. I want you to be the first to see it and tell me what you think about it, think you'll be able to do that?",
+        "say": "I made a few [character] cosplay videos, and I don't know if it turned out great.. I want you to be the first to see it and tell me what you think about it, think you'll be able to do that?",
         "then": "Frame the PPV as a favour to you — his opinion matters, not just his wallet"
       },
       {
@@ -1707,7 +1707,7 @@ export const SITUATIONS = [
         "why": "Flips his dominance into a reason for him to spend"
       },
       {
-        "line": "It's little Jess....do you think you can make me cum with that?🥵",
+        "line": "It's little [her name]....do you think you can make me cum with that?🥵",
         "why": "Playful tease keeps him seeking validation and staying engaged"
       }
     ],
@@ -1835,7 +1835,7 @@ export const SITUATIONS = [
         "why": "Playful challenge makes him prove himself before buying"
       },
       {
-        "line": "Tbh babee my cosplays are from 200 and above depending on length but since i never shown you any, i'd do this one set for 129",
+        "line": "Tbh babee my [content] are from 200 and above depending on length but since i never shown you any, i'd do this one [set] for 129",
         "why": "Anchors high then discounts — makes the deal feel earned"
       },
       {
@@ -1843,7 +1843,7 @@ export const SITUATIONS = [
         "why": "Teases without revealing — gets a yes before any price talk"
       },
       {
-        "line": "I want you cumming with me as your nasty naughty Lucy of Cyberpunk cums so hard for you",
+        "line": "I want you cumming with me as your nasty naughty [character] cums so hard for you",
         "why": "Character roleplay in the pitch makes the fantasy feel real"
       }
     ],
@@ -2089,7 +2089,7 @@ export const SITUATIONS = [
     "flow": [
       {
         "if": "Fan goes quiet right after the PPV lands",
-        "say": "Are you there Nick?",
+        "say": "Are you there [fan]?",
         "then": "Use his name — it feels personal and snaps him back without pressure"
       },
       {
@@ -2461,7 +2461,7 @@ export const SITUATIONS = [
         "why": "Frames the next PPV as the real thing, builds anticipation fast"
       },
       {
-        "line": "This are pics first🥵if you can handle this then I'll be sure you can handle the super naughty video were I fuck myself with a toy in both my holes💦",
+        "line": "This are pics first🥵if you can handle this then I'll be sure you can handle the super naughty video were I fuck myself with a [toy] in both my holes💦",
         "why": "Stages the upsell in steps so the price jump feels earned"
       },
       {
@@ -2661,7 +2661,7 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "Oh love can you make it a 100 for a really long set meant for 200? I can do that for you this time🤤",
+        "line": "Oh love can you make it a 100 for a really long [set] meant for 200? I can do that for you this time🤤",
         "why": "Frames the stretch as a deal he'd be foolish to miss"
       },
       {
@@ -2781,7 +2781,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan is hot but hasn't asked for the next step yet",
-        "say": "Fuckk, now I want you to cum to the video I sent to you the other time honey.. the one were I came so fucking hard while being your naughty teacher.. do you want me to send it over?",
+        "say": "Fuckk, now I want you to cum to the video I sent to you the other time honey.. the one were I came so fucking hard while being your naughty [character].. do you want me to send it over?",
         "then": "Tease a specific past video to spark curiosity before the ask"
       },
       {
@@ -2805,7 +2805,7 @@ export const SITUATIONS = [
         "why": "Signals climax is close, makes next PPV feel unmissable"
       },
       {
-        "line": "Look what you made me do here babyyyyy🙈Do you hear the sound of my wet pussy as I slide my dildo inside it?💦",
+        "line": "Look what you made me do here babyyyyy🙈Do you hear the sound of my wet pussy as I slide my [toy] inside it?💦",
         "why": "Sensory detail spikes arousal right before the send"
       },
       {
@@ -2881,7 +2881,7 @@ export const SITUATIONS = [
         "why": "Kills hesitation instantly and reframes his reaction as her win"
       },
       {
-        "line": "Awwn i'm I? Do i have your attention now Dan?😈",
+        "line": "Awwn i'm I? Do i have your attention now [fan]?😈",
         "why": "Dominance callback pulls a drifting fan back into the frame"
       }
     ],
@@ -3076,11 +3076,11 @@ export const SITUATIONS = [
         "why": "Gets a verbal yes before the PPV is sent, not after"
       },
       {
-        "line": "Hey dear🥰 I've been meaning to show you my new Angel white video, I want to give you a treat of an innocent naughty Angel😇",
+        "line": "Hey dear🥰 I've been meaning to show you my new [set] video, I want to give you a treat of an innocent naughty Angel😇",
         "why": "Soft re-entry line for a returning fan before any price is mentioned"
       },
       {
-        "line": "Well I don't have more of my chainsaw man cosplay😈but I do have some even better ones, wanna see them?",
+        "line": "Well I don't have more of my [character] cosplay😈but I do have some even better ones, wanna see them?",
         "why": "Tests interest in a new theme before committing to a price"
       }
     ],
@@ -3136,7 +3136,7 @@ export const SITUATIONS = [
         "why": "Clear price, warm tone, no negotiation needed."
       },
       {
-        "line": "I am not sending the HEELS VIDEO\nBut I'm sending a DILDO MASTURBATION VID and 2 HEEL NUDE PICS\nLol, did this clear it out?🤭",
+        "line": "I am not sending the [content]\nBut I'm sending a DILDO MASTURBATION VID and 2 [outfit] NUDE PICS\nLol, did this clear it out?🤭",
         "why": "Firm clarity on what's included stops confusion fast."
       },
       {
@@ -3179,7 +3179,7 @@ export const SITUATIONS = [
     "flow": [
       {
         "if": "Fan hints he wants to hear her voice or have his name said",
-        "say": "Alrighty, so I should pick out any one of my cosplays?🙈I have the perfect one, and I'll throw in an audio so you can hear my voice, I am a bit shy about it though🥺are you ready for it?",
+        "say": "Alrighty, so I should pick out any one of my [outfits]?🙈I have the perfect one, and I'll throw in an audio so you can hear my voice, I am a bit shy about it though🥺are you ready for it?",
         "then": "Bundle the audio into an existing PPV so the name ask becomes the upsell hook"
       },
       {
@@ -3345,7 +3345,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan says he still can't do it at that price",
-        "say": "Mmm, well what if I did it for 200 honey? I really wanna complete your Kobeni experience🙈 I won't be happy if I don't👉🏻👈🏻",
+        "say": "Mmm, well what if I did it for 200 honey? I really wanna complete your [character] experience🙈 I won't be happy if I don't👉🏻👈🏻",
         "then": "One more drop is fine — tie it to your desire, not his budget"
       },
       {
@@ -3393,7 +3393,7 @@ export const SITUATIONS = [
         "why": "Validates him emotionally and plants guilt that drives the next buy"
       },
       {
-        "line": "I wanna complete your Gold ship experience honey, with the last videos I have.. I'll do it for a discount for you tooo🙈🥵",
+        "line": "I wanna complete your [character] experience honey, with the last videos I have.. I'll do it for a discount for you tooo🙈🥵",
         "why": "Frames discount as a gift tied to completing something, not desperation"
       }
     ],
@@ -3596,15 +3596,15 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "Yessss but it's going to be for $200 where I use this toy on me and I can include the rest of the Frieren cosplay picture set where you'd see me completely naked 🥵💖",
+        "line": "Yessss but it's going to be for $200 where I use this [toy] on me and I can include the rest of the [character] cosplay picture set where you'd see me completely naked 🥵💖",
         "why": "Answers the question and bundles value into one clear offer"
       },
       {
-        "line": "I'm using my feet on the toy, stroking it while moaning😈with nylons on then I take off the nylons and use my bare feet",
+        "line": "I'm using my feet on the [toy], stroking it while moaning😈with nylons on then I take off the nylons and use my bare feet",
         "why": "Specific scene description removes doubt and builds the picture"
       },
       {
-        "line": "It's demon slayer cosplay...one of my hottest videos",
+        "line": "It's [character] cosplay...one of my hottest videos",
         "why": "Names the theme and adds a confidence hook in six words"
       },
       {
@@ -3711,17 +3711,17 @@ export const SITUATIONS = [
     "flow": [
       {
         "if": "Fan ignores the PPV and names a different format or act",
-        "say": "Noooo! I only do solo videos...wanna watch me fuck a dildo?😈",
+        "say": "Noooo! I only do solo videos...wanna watch me fuck a [toy]?😈",
         "then": "Acknowledge his limit in one word, then immediately offer the closest thing you have"
       },
       {
         "if": "Fan picks the new direction or asks what you have",
-        "say": "I don't have naruto but I have velma, lucy of cyberpunk, nekuzo, red riding hood, enid, kekaguri🥵🥵",
+        "say": "I don't have [character] but I have [character], [character], [character], [character], [character], [character]🥵🥵",
         "then": "List real options fast — let him choose, don't pick for him yet"
       },
       {
         "if": "Fan picks one or says choose for him",
-        "say": "I want you cumming with me as your nasty naughty Lucy of Cyberpunk cums so hard for you, riding on your cock all wet and flooded,💦🥵.. I bet you love how juicy my pussy was in this and you just wanna get your lips down there and eat Lucy all out huh?🍑👅🥵",
+        "say": "I want you cumming with me as your nasty naughty [character] cums so hard for you, riding on your cock all wet and flooded,💦🥵.. I bet you love how juicy my pussy was in this and you just wanna get your lips down there and eat [character] all out huh?🍑👅🥵",
         "then": "Paint the scene in his chosen content — make it feel personal before you send the price"
       },
       {
@@ -3732,11 +3732,11 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "How about i show you how good i ride my big toy for 15mins stretching my tight pussy moaning soo loud putting the camera up close so you have the most perfect view of my pussy squirting all over the place?😈💦",
+        "line": "How about i show you how good i ride my big [toy] for 15mins stretching my tight pussy moaning soo loud putting the camera up close so you have the most perfect view of my pussy squirting all over the place?😈💦",
         "why": "Specific detail sells the redirect better than a vague offer"
       },
       {
-        "line": "Okay love.. How about I send you one with me gripping my dildo tight with my feet and my toes painted in white while I sucked on the dildo so hard and slurped so much it was slimey and nearly dripping?🥵🍆💦",
+        "line": "Okay love.. How about I send you one with me gripping my [toy] tight with my feet and my toes painted in white while I sucked on the [toy] so hard and slurped so much it was slimey and nearly dripping?🥵🍆💦",
         "why": "Matches his exact fetish with a vivid scene he can picture"
       },
       {
@@ -3748,7 +3748,7 @@ export const SITUATIONS = [
         "why": "Agrees to his request but keeps the upsell alive without pressure"
       },
       {
-        "line": "Ready to see how hot this outfit can get?😈",
+        "line": "Ready to see how hot this [outfit] can get?😈",
         "why": "Reframes his redirect as the new hook without losing momentum"
       }
     ],
@@ -3800,11 +3800,11 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "Shawn babyyyyy... enjoy the nastiest of me I have ever been in the shower as I play with both holes with my toy, fingers, and shower hose 🥵",
+        "line": "[fan] babyyyyy... enjoy the nastiest of me I have ever been in the shower as I play with both holes with my [toy], fingers, and shower hose 🥵",
         "why": "Personal name plus vivid detail makes the unlock feel urgent."
       },
       {
-        "line": "Here you go honey😈be sure to savor every naughty slide of your teacher not holding back👅",
+        "line": "Here you go honey😈be sure to savor every naughty slide of your [character] not holding back👅",
         "why": "Role framing right at delivery keeps fantasy alive through purchase."
       },
       {
@@ -3944,7 +3944,7 @@ export const SITUATIONS = [
         "why": "Holds him to a commitment without sounding pushy"
       },
       {
-        "line": "Go to sleep for now and masturbate later when you can get the titty bundle so it would even be better",
+        "line": "Go to sleep for now and masturbate later when you can get the [content] bundle so it would even be better",
         "why": "Turns the delay into anticipation and gives him a reason to return"
       },
       {
@@ -4140,7 +4140,7 @@ export const SITUATIONS = [
     ],
     "lines": [
       {
-        "line": "I don't have a dildo with me at the moment but I've got a filthy dildo bj video I bet you'll like 😈 should I send it now?",
+        "line": "I don't have a [toy] with me at the moment but I've got a filthy dildo bj video I bet you'll like 😈 should I send it now?",
         "why": "Turns the gap into a tease and asks for the yes"
       },
       {
@@ -4148,7 +4148,7 @@ export const SITUATIONS = [
         "why": "Redirects desire to a real video without dwelling on the no"
       },
       {
-        "line": "If you wanna see me do a blowjob with cum shot and other naughty stuff too you might wanna watch this lengthy video bby... I know i'm not in pigtailsss but i'm pretty sure watching this would satisfy you in the best way possible 😈💦💦",
+        "line": "If you wanna see me do a blowjob with cum shot and other naughty stuff too you might wanna watch this lengthy video bby... I know i'm not in [outfit] but i'm pretty sure watching this would satisfy you in the best way possible 😈💦💦",
         "why": "Acknowledges the gap then sells the feeling, not the feature"
       },
       {
@@ -4192,7 +4192,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan stays in the conversation after the delay",
-        "say": "Alrighty, then I'll be sending my Frieren set over for 99, is that okay?",
+        "say": "Alrighty, then I'll be sending my [character] set over for 99, is that okay?",
         "then": "Pitch something concrete anyway — let him react to a real number."
       },
       {
@@ -4270,7 +4270,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan claims he already got the cosplay and hesitates",
-        "say": "Hehe, I've sent you a lot of them I can't even remember🙈but I'm sooo certain I haven't sent you my Momo one",
+        "say": "Hehe, I've sent you a lot of them I can't even remember🙈but I'm sooo certain I haven't sent you my [character] one",
         "then": "Playful but firm denial works — confidence sells better than caving"
       }
     ],
@@ -4527,7 +4527,7 @@ export const SITUATIONS = [
     "flow": [
       {
         "if": "Fan asks if he's talking to a real person or AI",
-        "say": "Haha! you don't have to assume things Lukas, firstly I have lot of followers but not sooo many are active and the few that are active are really important to me...they trust me that much and I enjoy having conversations here a lot",
+        "say": "Haha! you don't have to assume things [fan], firstly I have lot of followers but not sooo many are active and the few that are active are really important to me...they trust me that much and I enjoy having conversations here a lot",
         "then": "Acknowledge the doubt with a laugh, then make him feel special — not just defended against"
       },
       {
@@ -4542,7 +4542,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan admits he gave short answers because he assumed AI",
-        "say": "That's not cool Jay",
+        "say": "That's not cool [fan]",
         "then": "A light callout creates mild guilt and pulls him back in — don't over-explain"
       }
     ],
@@ -4600,7 +4600,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan says the price is too high or backs off",
-        "say": "Okay I understand but that could get you my sexy long cosplays instead",
+        "say": "Okay I understand but that could get you my sexy long [content] instead",
         "then": "Pivot immediately to a lower-cost alternative so he stays engaged"
       },
       {
@@ -4719,7 +4719,7 @@ export const SITUATIONS = [
         "why": "Simple, genuine reaction makes him feel his tip truly mattered."
       },
       {
-        "line": "You sure do know how to take care of me love🥰 This petite body is all yours🙈",
+        "line": "You sure do know how to take care of me love🥰 This body is all yours🙈",
         "why": "Flatters him, then rewards the tip with a sense of ownership."
       },
       {
@@ -4952,7 +4952,7 @@ export const SITUATIONS = [
         "why": "Removes guilt and keeps him feeling valued and wanted"
       },
       {
-        "line": "It's all good, I understand Nick❤️",
+        "line": "It's all good, I understand [fan]❤️",
         "why": "Short, warm acceptance stops any awkwardness dead"
       },
       {
@@ -5092,7 +5092,7 @@ export const SITUATIONS = [
         "why": "Matches his energy fully before dropping the next PPV"
       },
       {
-        "line": "You probably aren't expecting something so hot, so, I figure I'd give you this lil warning: Shizuku left me feeling super spicy, every photo in this set gives you a closer look… my pussy lips parted, my ass arched just right…😈",
+        "line": "You probably aren't expecting something so hot, so, I figure I'd give you this lil warning: [character] left me feeling super spicy, every photo in this [set] gives you a closer look… my pussy lips parted, my ass arched just right…😈",
         "why": "Builds anticipation and makes the next PPV feel unmissable"
       },
       {
@@ -5137,7 +5137,7 @@ export const SITUATIONS = [
       },
       {
         "if": "Fan picks an alternative he wants",
-        "say": "Maid roleplay video from 2023 and the video plays for 15 minutes 🙈 I'm going to give this cheap since I wanna make it up to you 💋🥵❤️",
+        "say": "[set] video and the video plays for 15 minutes 🙈 I'm going to give this cheap since I wanna make it up to you 💋🥵❤️",
         "then": "Name the product, sell the value, close warm"
       },
       {
@@ -5156,7 +5156,7 @@ export const SITUATIONS = [
         "why": "Reframes the content positively without addressing the gap"
       },
       {
-        "line": "How about I replace that with a dildo video? I only do solo content",
+        "line": "How about I replace that with a [toy] video? I only do solo content",
         "why": "Offers a concrete swap quickly and sets a clear boundary"
       },
       {
@@ -5235,5 +5235,3 @@ export const SITUATIONS = [
     "found": true
   }
 ];
-
-export const PAGES = ["Leya","Cora OF","Foggy","Adele","Tania","Loona OF","Leah Free","Julia","Nana"];

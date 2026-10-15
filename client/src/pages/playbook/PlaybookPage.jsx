@@ -4,37 +4,34 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { BASIS, BRANCHES, PAGES, RULES, SITUATIONS, STEPS } from './playbookData';
+import { BASIS, BRANCHES, RULES, SITUATIONS, STEPS } from './playbookData';
 
 const GROUPS = ['All', 'Start', 'Fan types', 'While selling', 'He pushes back', 'After the sale'];
 const TONES = ['all', 'playful', 'sweet', 'bold'];
 const MOVE_LABEL = { warm_up: 'warm-up', tension: 'tension', readiness: 'ready?', tease: 'tease', ppv: 'PPV', live_detail: 'live detail', ladder: 'ladder', aftercare: 'aftercare' };
 const byId = Object.fromEntries([...STEPS, ...BRANCHES, ...SITUATIONS].map(x => [x.id, x]));
-const ALL_PAGES = 'all';
-const remembered = () => { try { return localStorage.getItem('playbookPage') || ALL_PAGES; } catch { return ALL_PAGES; } };
+// roadmap steps by id — a branch can share its id with the situation it leads to
+const stepById = Object.fromEntries([...STEPS, ...BRANCHES].map(x => [x.id, x]));
 
 /**
  * The chatter Playbook: how to sell, step by step (the roadmap), what to do in each
- * situation, and ready-made scripts per page — built from what worked in our own
- * chats (playbookData.js). Pick a page for its own lines that sold and fresh ideas in
- * its voice (playbookLines.json, loaded when the page opens).
+ * situation, and ready-made scripts — built from what worked in our own chats
+ * (playbookData.js). Everything fits any page: [brackets] are filled in for the page
+ * you're on. Fresh ideas and scripts are in playbookLines.json, loaded when it opens.
  */
 export default function PlaybookPage() {
   const [tab, setTab] = useState('roadmap');
   const [stepId, setStepId] = useState('warmup');
   const [sitId, setSitId] = useState('price');
-  const [page, setPageState] = useState(() => (PAGES.includes(remembered()) ? remembered() : ALL_PAGES));
   const [tone, setTone] = useState('all');
-  const [extra, setExtra] = useState(null);           // page lines, fresh ideas, scripts
+  const [extra, setExtra] = useState(null);           // fresh ideas and scripts
   useEffect(() => { import('./playbookLines.json').then(m => setExtra(m.default)).catch(() => setExtra({ failed: true })); }, []);
-  const setPage = (p) => { setPageState(p); try { localStorage.setItem('playbookPage', p); } catch { /* storage blocked */ } };
   const open = (id) => {
     if (SITUATIONS.some(s => s.id === id)) { setTab('situations'); setSitId(id); }
     else if (byId[id]) { setTab('roadmap'); setStepId(id); }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
-  const ctx = { page, tone, extra, open };
+  const ctx = { tone, extra, open };
 
   return (
     <div className='flex flex-col gap-6'>
@@ -52,34 +49,24 @@ export default function PlaybookPage() {
         </div>
       </div>
 
-      {/* the page decides which lines, ideas and scripts show; tone filters the lines */}
-      <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2'>
-        <span className='text-sm text-muted-foreground'>Page</span>
-        <Select value={page} onValueChange={setPage}>
-          <SelectTrigger className='h-8 w-44' aria-label='Page'><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL_PAGES}>All pages</SelectItem>
-            {PAGES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {tab !== 'scripts' && (
-          <>
-            <span className='ms-2 text-sm text-muted-foreground'>Tone</span>
-            <div className='flex gap-1'>
-              {TONES.map(t => (
-                <button key={t} type='button' onClick={() => setTone(t)} aria-pressed={tone === t}
-                  className={cn('rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    tone === t ? 'border-primary bg-primary/10 font-medium' : 'text-muted-foreground hover:bg-muted/60')}>{t === 'all' ? 'Any tone' : t}</button>
-              ))}
-            </div>
-          </>
-        )}
-        {page === ALL_PAGES && <span className='text-xs text-muted-foreground sm:ms-auto'>Pick a page for its own lines, fresh ideas and scripts.</span>}
-      </div>
+      {/* tone filters the fresh ideas */}
+      {tab !== 'scripts' && (
+        <div className='flex flex-wrap items-center gap-2 rounded-lg border bg-card px-3 py-2'>
+          <span className='text-sm text-muted-foreground'>Tone</span>
+          <div className='flex gap-1'>
+            {TONES.map(t => (
+              <button key={t} type='button' onClick={() => setTone(t)} aria-pressed={tone === t}
+                className={cn('rounded-full border px-2.5 py-0.5 text-xs capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  tone === t ? 'border-primary bg-primary/10 font-medium' : 'text-muted-foreground hover:bg-muted/60')}>{t === 'all' ? 'Any tone' : t}</button>
+            ))}
+          </div>
+          <span className='text-xs text-muted-foreground sm:ms-auto'>Works on every page: fill in the [brackets] for the page you’re on.</span>
+        </div>
+      )}
 
       {tab === 'roadmap' && <Roadmap stepId={stepId} setStepId={setStepId} ctx={ctx} />}
       {tab === 'situations' && <Situations sitId={sitId} setSitId={setSitId} ctx={ctx} />}
-      {tab === 'scripts' && <Scripts page={page} extra={extra} setPage={setPage} />}
+      {tab === 'scripts' && <Scripts extra={extra} />}
 
       <p className='text-xs text-muted-foreground'>{BASIS}</p>
     </div>
@@ -89,7 +76,7 @@ export default function PlaybookPage() {
 // The rules, then the steps top to bottom (with what to do if it doesn't work),
 // and the chosen step's details beside them.
 function Roadmap({ stepId, setStepId, ctx }) {
-  const detail = byId[stepId];
+  const detail = stepById[stepId];
   return (
     <div className='grid gap-6'>
       <section className='rounded-lg border bg-card p-4'>
@@ -187,12 +174,11 @@ function Situations({ sitId, setSitId, ctx }) {
 }
 
 // One step or situation: the numbers, what to do, how it usually goes, what to
-// avoid, and lines — the team's, the chosen page's, and fresh ideas in its voice.
+// avoid, lines that sold and fresh ideas.
 function Detail({ item, ctx }) {
-  const { page, tone, extra, open } = ctx;
+  const { tone, extra, open } = ctx;
   if (!item) return null;
-  const pageLines = page !== ALL_PAGES && extra?.proven?.[page]?.[item.move] || [];
-  const ideas = page !== ALL_PAGES && extra?.fresh?.[page]?.[item.id] || [];
+  const ideas = extra?.fresh?.[item.id] || [];
   const byTone = (l) => tone === 'all' || !l.tone || l.tone === tone;
   return (
     <article className='flex flex-col gap-4 rounded-lg border bg-card p-4 sm:p-5'>
@@ -238,12 +224,9 @@ function Detail({ item, ctx }) {
         </section>
       )}
       <Lines title='Lines that sold' note='Real lines from our chats (names removed). Learn the idea and say it your way: copy-paste chats sell the least.' lines={(item.lines || []).filter(byTone)} />
-      {page !== ALL_PAGES && (extra
-        ? <>
-            <Lines title={`Lines that sold on ${page}`} lines={pageLines.filter(byTone)} />
-            <Lines title={`Fresh ideas for ${page}`} note='Written by AI in her voice from what sells — not tested yet. Try them and see what works.' lines={ideas.filter(byTone)} fresh />
-          </>
-        : <p className='flex items-center gap-2 text-xs text-muted-foreground'><Loader2 className='size-3.5 animate-spin' />Loading {page}’s lines…</p>)}
+      {extra
+        ? <Lines title='Fresh ideas' note='Written by AI from what sells — not tested yet. Fill in the [brackets], try them and see what works.' lines={ideas.filter(byTone)} fresh />
+        : <p className='flex items-center gap-2 text-xs text-muted-foreground'><Loader2 className='size-3.5 animate-spin' />Loading fresh ideas…</p>}
       {item.links?.length > 0 && (
         <section className='flex flex-wrap items-center gap-1.5'>
           <span className='text-xs text-muted-foreground'>See also:</span>
@@ -282,46 +265,40 @@ function Lines({ title, note, lines, fresh = false }) {
   );
 }
 
-// How many times a script's price goes up.
-const rises = (s) => { const p = s.steps.map(x => x.price).filter(x => x > 0); return p.filter((x, i) => i && x > p[i - 1]).length; };
+// A script step sent with a PPV has a price guide; "—" means no PPV.
+const priced = (st) => !!st.price && st.price !== '—';
 
-// Ready-made scripts per page, from its best-selling real ones.
-function Scripts({ page, extra, setPage }) {
+// Ready-made scripts for any page, from the best-selling real ones on all our pages.
+function Scripts({ extra }) {
   if (!extra) return <p className='flex items-center gap-2 text-sm text-muted-foreground'><Loader2 className='size-4 animate-spin' />Loading scripts…</p>;
-  const pages = page === ALL_PAGES ? PAGES : [page];
   return (
-    <div className='flex flex-col gap-6'>
-      {page === ALL_PAGES && (
-        <div className='flex flex-wrap gap-1.5'>
-          {PAGES.map(p => <Button key={p} size='sm' variant='outline' className='h-7 px-2 text-xs' onClick={() => setPage(p)}>{p}</Button>)}
-        </div>
-      )}
-      {pages.map(p => (
-        <section key={p} className='flex flex-col gap-3'>
-          <h3 className='text-base font-semibold'>{p}</h3>
-          <div className='grid gap-3 lg:grid-cols-2'>
-            {/* scripts that climb first — the roadmap's ladder; same-price ones are for big spenders */}
-            {[...(extra.scripts?.[p] || [])].sort((a, b) => rises(b) - rises(a)).map((s, i) => (
-              <article key={i} className='flex flex-col gap-2 rounded-lg border bg-card p-4'>
-                <header>
-                  <h4 className='font-semibold'>{s.title}</h4>
-                  <p className='text-xs text-muted-foreground'>{s.when}</p>
-                </header>
-                <ol className='flex flex-col gap-1.5'>
-                  {s.steps.map((st, k) => (
-                    <li key={k} className='flex gap-2 text-sm'>
-                      <span className='w-14 shrink-0 text-right tabular-nums text-muted-foreground'>{st.price > 0 ? `$${st.price}` : ''}</span>
-                      <span className='min-w-0 flex-1'>{st.line}<span className='ms-1.5 text-[11px] text-muted-foreground'>· {MOVE_LABEL[st.move] || st.move}</span></span>
-                    </li>
-                  ))}
-                </ol>
-                <p className='rounded-md bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground'>{s.why}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-      ))}
-      <p className='text-xs text-muted-foreground'>Built from each page’s best-selling real scripts (fan names removed). Prices are what sold — adjust to the fan.</p>
+    <div className='flex flex-col gap-4'>
+      <div className='grid gap-3 lg:grid-cols-2'>
+        {(extra.scripts || []).map((s, i) => (
+          <article key={i} className='flex flex-col gap-2 rounded-lg border bg-card p-4'>
+            <header>
+              <h4 className='font-semibold'>{s.title}</h4>
+              <p className='text-xs text-muted-foreground'>{s.when}</p>
+            </header>
+            <ol className='flex flex-col gap-2'>
+              {s.steps.map((st, k) => (
+                <li key={k} className='flex gap-2 text-sm'>
+                  <span className='w-5 shrink-0 text-right tabular-nums text-muted-foreground'>{k + 1}.</span>
+                  <span className='min-w-0 flex-1'>
+                    {st.line}
+                    <span className='mt-0.5 block text-[11px] text-muted-foreground'>
+                      {st.move !== 'ppv' || !priced(st) ? MOVE_LABEL[st.move] || st.move : null}
+                      {priced(st) && <>{st.move !== 'ppv' && ' · '}<span className='font-medium text-foreground'>PPV at {st.price}</span></>}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ol>
+            <p className='rounded-md bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground'>{s.why}</p>
+          </article>
+        ))}
+      </div>
+      <p className='text-xs text-muted-foreground'>Built from the best-selling real scripts across all our pages (names removed). Fill in the [brackets] for your page; prices are a guide — set them to the page and the fan.</p>
     </div>
   );
 }
