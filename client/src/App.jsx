@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -15,11 +15,13 @@ import TasksPage from './pages/tasks/TasksPage';
 import RulesPage from './pages/rules/RulesPage';
 import ShiftsPage from './pages/shifts/ShiftsPage';
 import PayrollPage from './pages/payroll/PayrollPage';
+import PlaybookPage from './pages/playbook/PlaybookPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import ChatterProfile from './pages/chatters/ChatterProfile';
 
 function ProtectedRoute({ children }) {
   const { user, loading, unreachable, retryProfile } = useAuth();
+  const { pathname } = useLocation();
   if (loading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-0)' }}>
       <div style={{ width: 32, height: 32, border: '2px solid var(--indigo)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin .6s linear infinite' }} />
@@ -36,6 +38,8 @@ function ProtectedRoute({ children }) {
     </div>
   );
   if (!user) return <Navigate to="/login" replace />;
+  // Chatters work from the Playbook; the management pages aren't for them
+  if (user.role === 'chatter' && !pathname.startsWith('/playbook')) return <Navigate to="/playbook" replace />;
   return children;
 }
 
@@ -61,6 +65,7 @@ function AppRoutes() {
         <Route path="rules" element={<RulesPage />} />
         <Route path="shifts" element={<ShiftsPage />} />
         <Route path="payroll" element={<PayrollPage />} />
+        <Route path="playbook" element={<PlaybookPage />} />
         <Route path="creators" element={<CreatorsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />

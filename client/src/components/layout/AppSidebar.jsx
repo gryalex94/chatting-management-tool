@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet,
+  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet, BookOpen,
   ChevronsUpDown, LogOut, Sun, Moon,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -32,6 +32,7 @@ export const NAV_GROUPS = [
     items: [
       { url: '/shifts', title: 'Shifts', icon: CalendarClock },
       { url: '/payroll', title: 'Payroll', icon: Wallet, managerOnly: true },
+      { url: '/playbook', title: 'Playbook', icon: BookOpen, forChatters: true },
       { url: '/reports', title: 'Reports', icon: FileUp },
     ],
   },
@@ -49,6 +50,9 @@ const initials = (name) =>
 
 export function AppSidebar() {
   const { user, isManager } = useAuth()
+  // Chatters only see what's made for them (the Playbook); staff see the rest
+  const isChatter = user?.role === 'chatter'
+  const visible = (item) => (isChatter ? item.forChatters : !item.managerOnly || isManager)
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
   const orgName = user?.organisation?.name || 'Organisation'
@@ -74,11 +78,11 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {NAV_GROUPS.map(group => (
+        {NAV_GROUPS.filter(group => group.items.some(visible)).map(group => (
           <SidebarGroup key={group.title}>
             <SidebarGroupLabel>{group.title}</SidebarGroupLabel>
             <SidebarMenu>
-              {group.items.filter(item => !item.managerOnly || isManager).map(item => (
+              {group.items.filter(visible).map(item => (
                 <SidebarMenuItem key={item.url}>
                   <SidebarMenuButton asChild isActive={isActivePath(pathname, item.url)} tooltip={item.title}>
                     <Link to={item.url} onClick={() => setOpenMobile(false)}>
