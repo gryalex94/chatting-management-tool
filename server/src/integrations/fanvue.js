@@ -181,8 +181,17 @@ async function pace(id) {
   if (wait > 0) await sleep(wait);
 }
 
+// The tool only READS Fanvue. Anything that would change something there — send
+// a message or a PPV, show "typing…", post, upload — is refused here, before it
+// leaves the server, unless FANVUE_ALLOW_SENDING=yes is set on the server (it
+// isn't; the connection also asks for reading permissions only).
+const sendingAllowed = () => process.env.FANVUE_ALLOW_SENDING === 'yes';
+
 /** One call with a given access token. Retries rate limits and server hiccups. */
 async function call(token, path, { method = 'GET', params, body, paceId = token.slice(-12) } = {}) {
+  if (method !== 'GET' && !sendingAllowed()) {
+    throw new FanvueError(`Blocked: this tool only reads Fanvue (${method} ${path.split('?')[0]} not sent)`, { status: 403 });
+  }
   const url = `${API}${path}${query(params)}`;
   for (let attempt = 1; ; attempt++) {
     await pace(paceId);
