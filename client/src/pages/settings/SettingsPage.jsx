@@ -12,6 +12,7 @@ import { fmtSentAt } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import CreatorDetailModal from './CreatorDetailModal';
 import InflowwPanel from './InflowwPanel';
+import FanvuePanel from './FanvuePanel';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -120,7 +121,8 @@ export default function SettingsPage() {
   const [templateForm, setTemplateForm] = useState(EMPTY_TEMPLATE);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [tab, setTab] = useState('creators');
+  // ?tab=fanvue opens that tab (where Fanvue's approval comes back to).
+  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'creators');
   const [creatorDetail, setCreatorDetail] = useState(null);
   const [tzOffset, setTzOffset] = useState(getInflowwOffset());
   const [savingTz, setSavingTz] = useState(false);
@@ -265,7 +267,7 @@ export default function SettingsPage() {
   const inviteLink = inviteToken ? `${window.location.origin}/invite/${inviteToken}` : '';
   const copyToken = () => { try { navigator.clipboard?.writeText(inviteLink); toast.success('Invite link copied'); } catch { /* ignore */ } };
 
-  const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles'], ...(isAdmin ? [['infloww','Infloww']] : [])];
+  const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles'], ...(isAdmin ? [['infloww','Infloww'],['fanvue','Fanvue']] : [])];
 
   if(loading) return (
     <div className='flex flex-col gap-4 sm:gap-6'>
@@ -668,6 +670,13 @@ export default function SettingsPage() {
           <TabsContent value='infloww'>
             <Section title='Infloww API' sub='Sales, refunds and employees pulled from Infloww, read-only'>
               <InflowwPanel />
+            </Section>
+          </TabsContent>
+        )}
+        {isAdmin && (
+          <TabsContent value='fanvue'>
+            <Section title='Fanvue' sub='A creator’s Fanvue account, connected with her approval: chats, messages and earnings copied in'>
+              <FanvuePanel />
             </Section>
           </TabsContent>
         )}

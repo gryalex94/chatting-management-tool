@@ -137,6 +137,10 @@ app.use('/api/roster', staffOnly, rosterRoutes);
 const payrollRoutes = require('./src/routes/payroll');
 app.use('/api/payroll', staffOnly, payrollRoutes);
 
+// Fanvue connection: the router itself is admins only.
+const fanvueRoutes = require('./src/routes/fanvue');
+app.use('/api/fanvue', staffOnly, fanvueRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------
@@ -169,6 +173,17 @@ if (inflowwConfigured()) {
   const { runInflowwSync } = require('./src/utils/inflowwSync');
   cron.schedule('20 * * * *', () => { runInflowwSync({ days: 3 }).catch(e => console.error('[InflowwSync]', e.message)); });
   console.log('[InflowwSync] hourly sync scheduled');
+}
+
+// Fanvue: every hour, copy new chats and earnings of the connected accounts. Only
+// on the live server (Railway): Fanvue's refresh tokens are single use, so a copy
+// of the server on a laptop shouldn't refresh them in parallel.
+const { configured: fanvueConfigured } = require('./src/integrations/fanvue');
+if (fanvueConfigured() && (process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT)) {
+  const cron = require('node-cron');
+  const { syncAllFanvue } = require('./src/utils/fanvueSync');
+  cron.schedule('40 * * * *', () => { syncAllFanvue().catch(e => console.error('[FanvueSync]', e.message)); });
+  console.log('[FanvueSync] hourly sync scheduled');
 }
 
 // AI rules: every Monday morning, the week's dismissal notes are drafted into

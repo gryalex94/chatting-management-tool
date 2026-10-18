@@ -17,6 +17,7 @@ import ShiftsPage from './pages/shifts/ShiftsPage';
 import PayrollPage from './pages/payroll/PayrollPage';
 import PlaybookPage from './pages/playbook/PlaybookPage';
 import SettingsPage from './pages/settings/SettingsPage';
+import FanvueCallback from './pages/fanvue/FanvueCallback';
 import ChatterProfile from './pages/chatters/ChatterProfile';
 
 function ProtectedRoute({ children }) {
@@ -69,6 +70,7 @@ function AppRoutes() {
         <Route path="creators" element={<CreatorsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
+        <Route path="fanvue/callback" element={<FanvueCallback />} />
         <Route path="chatters/:id" element={<ChatterProfile />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
