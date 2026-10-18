@@ -3,7 +3,8 @@
  *   1. the creator's profile (handle, AI creator or not, subscriber counts),
  *   2. the chat list, newest activity first — every fan she talks with,
  *   3. the messages of each chat that changed: the whole history the first time,
- *      then only what's new,
+ *      then only what's new (kept per chat: a mass message has one id for every
+ *      fan who got it),
  *   4. earnings (subscriptions, PPVs, tips, refunds…).
  * Safe to stop at any point: each chat records how far it was copied, so the
  * next run carries on (a deploy restarting the server costs nothing but time).
@@ -66,11 +67,12 @@ async function copyChat(accountId, fanUuid, { whole, progress }) {
     if (!msgs.length) return true;
     let seenBefore = false;
     if (!whole) {
+      // In this chat: a mass message has the same id in every fan's chat.
       const { data: have } = await supabaseAdmin.from('fanvue_messages').select('uuid')
-        .eq('account_id', accountId).in('uuid', msgs.map(m => m.uuid));
+        .eq('account_id', accountId).eq('fan_uuid', fanUuid).in('uuid', msgs.map(m => m.uuid));
       seenBefore = (have || []).length > 0;
     }
-    await upsertChunks('fanvue_messages', msgs.map(m => messageRow(accountId, fanUuid, m)), 'account_id,uuid');
+    await upsertChunks('fanvue_messages', msgs.map(m => messageRow(accountId, fanUuid, m)), 'account_id,fan_uuid,uuid');
     progress.messages += msgs.length;
     filter = body?.dateFilter || null;
     const key = JSON.stringify(filter);
@@ -140,7 +142,8 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
         const k = known.get(c.user.uuid);
         const last = c.lastMessageAt ? Date.parse(c.lastMessageAt) : 0;
         const through = k?.messages_through ? Date.parse(k.messages_through) : 0;
-        if (!k?.history_done || last > through) todo.set(c.user.uuid, { whole: !k?.history_done, lastAt: c.lastMessageAt || null });
+        // full: read every chat again from the start (a repair after a fix).
+        if (full || !k?.history_done || last > through) todo.set(c.user.uuid, { whole: full || !k?.history_done, lastAt: c.lastMessageAt || null });
       }
       progress.chats_listed += chats.length;
       cursor = body?.nextCursor || null;
