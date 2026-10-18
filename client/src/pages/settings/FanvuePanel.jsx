@@ -57,7 +57,7 @@ export default function FanvuePanel() {
           : <Badge variant='outline' className='gap-1 border-warn/40 text-warn'><CircleAlert className='size-3.5' />Not set up on the server</Badge>}
         {!info.tables_ready && <Badge variant='outline' className='border-warn/40 text-warn'>Database change 030 not run yet</Badge>}
         <Button size='sm' className='ms-auto' disabled={!ready || busy} onClick={connect}>
-          {busy ? <Loader2 className='animate-spin' /> : <Link2 />}{info.accounts.length ? 'Connect another account' : 'Connect Fanvue'}
+          {busy ? <Loader2 className='animate-spin' /> : <Link2 />}{info.accounts.length ? 'Connect an account' : 'Connect Fanvue'}
         </Button>
       </div>
 
@@ -119,9 +119,9 @@ function AccountCard({ account: a, reload, onReconnect }) {
           ? <Badge variant='outline' className='gap-1 border-good/40 text-good'><CircleCheck className='size-3.5' />Connected</Badge>
           : <Badge variant='outline' className='gap-1 border-warn/40 text-warn'><CircleAlert className='size-3.5' />{a.status === 'reconnect' ? 'Needs connecting again' : 'Disconnected'}</Badge>}
         <div className='ms-auto flex gap-2'>
-          {a.status === 'connected'
-            ? <Button size='sm' variant='outline' disabled={!!running || busy} onClick={sync}><RefreshCw className={cn(running && 'animate-spin')} />Sync now</Button>
-            : <Button size='sm' variant='outline' onClick={onReconnect}><Link2 />Connect again</Button>}
+          {a.status === 'connected' && <Button size='sm' variant='outline' disabled={!!running || busy} onClick={sync}><RefreshCw className={cn(running && 'animate-spin')} />Sync now</Button>}
+          {/* Approving again on Fanvue renews the same connection (e.g. with different permissions). */}
+          <Button size='sm' variant={a.status === 'connected' ? 'ghost' : 'outline'} onClick={onReconnect}><Link2 />Connect again</Button>
           {a.status !== 'disconnected' && <Button size='sm' variant='ghost' onClick={disconnect}><Unlink />Disconnect</Button>}
         </div>
       </div>
