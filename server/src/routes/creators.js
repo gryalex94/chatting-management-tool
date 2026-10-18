@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const { ownedBy } = require('../utils/ownership');
+const { isPlatform, createPage, noPlatformColumn } = require('../utils/pages');
 
 // GET /api/creators - List all creators in org
 router.get('/', async (req, res) => {
@@ -24,32 +25,18 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/creators - Create a new creator
+// POST /api/creators { name, platform? } - Create a new page (OnlyFans unless
+// another platform is given), with its three default shifts
 router.post('/', requireMinRole('admin'), async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
-
-    const { data, error } = await supabaseAdmin
-      .from('creators')
-      .insert({ name, organisation_id: req.user.organisationId })
-      .select()
-      .single();
-
-    if (error) return res.status(500).json({ error: error.message });
-
-    // Auto-create default shifts for the new creator
-    const defaults = [
-      { name: 'US Prime Shift', start_time: '02:00:00', end_time: '10:00:00' },
-      { name: 'Middle Shift', start_time: '10:00:00', end_time: '18:00:00' },
-      { name: 'EU Prime Shift', start_time: '18:00:00', end_time: '02:00:00' },
-    ];
-    await supabaseAdmin.from('shifts').insert(
-      defaults.map(s => ({ ...s, creator_id: data.id, organisation_id: req.user.organisationId, is_default: true, shift_type: 'regular' }))
-    );
-
+    const platform = req.body.platform || 'onlyfans';
+    if (!isPlatform(platform)) return res.status(400).json({ error: 'Unknown platform' });
+    const data = await createPage({ name, organisationId: req.user.organisationId, platform });
     res.status(201).json(data);
   } catch (err) {
+    if (noPlatformColumn(err)) return res.status(409).json({ error: 'Run database change 032 (platforms) in Supabase first' });
     res.status(500).json({ error: 'Failed to create creator' });
   }
 });
@@ -78,6 +65,10 @@ router.put('/:id', requireMinRole('admin'), async (req, res) => {
     if (is_active !== undefined) update.is_active = is_active;
     if (ai_instructions !== undefined) update.ai_instructions = ai_instructions;
     if (ai_context !== undefined) update.ai_context = ai_context;
+    if (req.body.platform !== undefined) {
+      if (!isPlatform(req.body.platform)) return res.status(400).json({ error: 'Unknown platform' });
+      update.platform = req.body.platform;
+    }
     if (req.body.infloww_creator_id !== undefined) {
       const id = parseInflowwId(req.body.infloww_creator_id);
       if (id === undefined) return res.status(400).json({ error: 'Paste a chat link copied from this page in Infloww, or the page ID (numbers only)' });

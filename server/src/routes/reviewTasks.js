@@ -8,6 +8,7 @@ const { dayWindow, stripTags } = require('../ai/evalShared');
 const { DISMISS_CODES } = require('../utils/dismissReasons');
 const { fanNameInfo } = require('../utils/fanNames');
 const { parseChatLink, idFromUsername } = require('../utils/inflowwLinks');
+const { isPlatform } = require('../utils/pages');
 
 const STATUSES = ['open', 'taken', 'completed', 'dismissed', 'archived'];
 const OUTCOMES = ['coached', 'fixed', 'noted'];
@@ -53,14 +54,34 @@ router.post('/custom', requireMinRole('head_manager'), async (req, res) => {
   }
 });
 
-// GET /api/review-tasks/counts — how many tasks sit in each tab, without loading them
+// ?platform= keeps the tasks of that platform's pages (the menu's platform
+// switch). Tasks without a page (custom ones, or an AI issue whose page name
+// didn't match) count as OnlyFans: every review so far is an OnlyFans one.
+// Returns null (no filter), or { ids, withoutPage, none }.
+async function platformScope(orgId, platform) {
+  if (!isPlatform(platform)) return null;
+  const { data, error } = await supabaseAdmin.from('creators').select('id').eq('organisation_id', orgId).eq('platform', platform);
+  if (error) return platform === 'onlyfans' ? null : { none: true };   // before database change 032: all OnlyFans
+  const ids = (data || []).map(c => c.id);
+  const withoutPage = platform === 'onlyfans';
+  return { ids, withoutPage, none: !ids.length && !withoutPage };
+}
+function scoped(q, scope) {
+  if (!scope) return q;
+  if (!scope.withoutPage) return q.in('creator_id', scope.ids);
+  return scope.ids.length ? q.or(`creator_id.is.null,creator_id.in.(${scope.ids.join(',')})`) : q.is('creator_id', null);
+}
+
+// GET /api/review-tasks/counts?platform= — how many tasks sit in each tab, without loading them
 router.get('/counts', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
+    const scope = await platformScope(orgId, req.query.platform);
     const counts = {};
     await Promise.all(STATUSES.map(async st => {
-      const { count } = await supabaseAdmin.from('review_tasks').select('id', { count: 'exact', head: true })
-        .eq('organisation_id', orgId).eq('status', st);
+      if (scope?.none) { counts[st] = 0; return; }
+      const { count } = await scoped(supabaseAdmin.from('review_tasks').select('id', { count: 'exact', head: true })
+        .eq('organisation_id', orgId).eq('status', st), scope);
       counts[st] = count || 0;
     }));
     res.json(counts);
@@ -72,15 +93,18 @@ router.get('/counts', async (req, res) => {
 // GET /api/review-tasks?status=open,taken  — the queue / backlog
 //   &limit=N&offset=M pages a history tab (newest actioned first); without a
 //   limit everything matching is returned (the live queue is small).
+//   &platform= only that platform's pages (see platformScope).
 router.get('/', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
+    const scope = await platformScope(orgId, req.query.platform);
+    if (scope?.none) return res.json(req.query.limit ? { tasks: [], has_more: false } : { tasks: [] });
     const statuses = req.query.status ? String(req.query.status).split(',') : null;
     const history = statuses && statuses.every(st => HISTORY.has(st));
     const limit = Math.min(parseInt(req.query.limit, 10) || 0, 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const build = () => {
-      let q = supabaseAdmin.from('review_tasks').select('*').eq('organisation_id', orgId);
+      let q = scoped(supabaseAdmin.from('review_tasks').select('*').eq('organisation_id', orgId), scope);
       if (statuses) q = q.in('status', statuses);
       if (req.query.chatter_id) q = q.eq('chatter_id', req.query.chatter_id);
       if (req.query.fan) q = q.eq('fan_username', String(req.query.fan));

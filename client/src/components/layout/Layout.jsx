@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { PlatformProvider } from '@/context/PlatformContext'
 import { AppSidebar } from './AppSidebar'
 import { AppHeader } from './AppHeader'
 
@@ -12,6 +13,7 @@ const sidebarOpen = () => {
 export default function Layout() {
   return (
     <TooltipProvider delayDuration={200}>
+      <PlatformProvider>
       <SidebarProvider defaultOpen={sidebarOpen()}>
         <AppSidebar />
         <SidebarInset className='@container/content'>
@@ -21,6 +23,7 @@ export default function Layout() {
           </main>
         </SidebarInset>
       </SidebarProvider>
+      </PlatformProvider>
     </TooltipProvider>
   )
 }

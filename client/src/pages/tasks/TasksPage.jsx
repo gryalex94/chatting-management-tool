@@ -29,6 +29,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { usePlatform } from '@/context/PlatformContext';
+import { pagePlatform, platformInfo } from '@/utils/platforms';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDay = (d) => { if (!d || d === 'unknown') return 'Undated'; const [y, m, day] = d.split('-'); return `${+day} ${MONTHS[+m - 1]} ${y}`; };
@@ -683,7 +685,7 @@ function NoteDialog({ task, onClose, onSave }) {
   );
 }
 
-export default function TasksPage() {
+function TasksBoard({ platform }) {
   const { user } = useAuth();
   const canCreate = ['head_manager', 'admin', 'owner'].includes(user?.role);
   const [tasks, setTasks] = useState([]);
@@ -694,7 +696,9 @@ export default function TasksPage() {
   const [pages, setPages] = useState([]);              // for the pages' Infloww IDs
   const [fanIds, setFanIds] = useState({});            // username → OnlyFans ID from pasted chat links
   // Filter/tab settings persist across tab switches and navigation (localStorage).
-  const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('tasksFilters') || '{}'); } catch { return {}; } });
+  // Each platform keeps its own filters (OnlyFans keeps the old key).
+  const filtersKey = platform === 'onlyfans' ? 'tasksFilters' : `tasksFilters:${platform}`;
+  const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem(filtersKey) || '{}'); } catch { return {}; } });
   const [tab, setTab] = useState(saved.tab || 'open');
   const [search, setSearch] = useState(isDemoMode() ? '' : (saved.search || ''));
   const [groupBy, setGroupBy] = useState(saved.groupBy || 'none');
@@ -714,13 +718,13 @@ export default function TasksPage() {
     return [...m.values()];
   });
   const loadCounts = useCallback(() => {
-    api.get('/api/review-tasks/counts').then(r => setCounts(r.data || {})).catch(() => { /* counts optional */ });
-  }, []);
+    api.get('/api/review-tasks/counts', { params: { platform } }).then(r => setCounts(r.data || {})).catch(() => { /* counts optional */ });
+  }, [platform]);
   // The live queue only: history tabs are fetched when opened, a page at a time.
   const loadLive = useCallback(async () => {
     try {
       const [tk, mem, cr] = await Promise.all([
-        api.get('/api/review-tasks?status=open,taken'),
+        api.get('/api/review-tasks', { params: { status: 'open,taken', platform } }),
         api.get('/api/organisations/members').catch(() => ({ data: [] })),
         api.get('/api/creators').catch(() => ({ data: [] })),
       ]);
@@ -732,17 +736,17 @@ export default function TasksPage() {
       setMembers(mem.data || []);
     } catch { /* ignore */ } finally { setLoading(false); }
     loadCounts();
-  }, [loadCounts]);
+  }, [loadCounts, platform]);
   const loadHistory = useCallback(async (key, offset = 0) => {
     setHistory(h => ({ ...h, [key]: { ...h[key], loading: true } }));
     try {
-      const { data } = await api.get(`/api/review-tasks?status=${key}&limit=${HISTORY_PAGE}&offset=${offset}`);
+      const { data } = await api.get('/api/review-tasks', { params: { status: key, limit: HISTORY_PAGE, offset, platform } });
       mergeTasks(data.tasks || []);
       setHistory(h => ({ ...h, [key]: { loaded: true, loading: false, hasMore: !!data.has_more, next: offset + (data.tasks || []).length } }));
     } catch {
       setHistory(h => ({ ...h, [key]: { ...h[key], loading: false } }));
     }
-  }, []);
+  }, [platform]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadLive(); }, [loadLive]);
   useEffect(() => {
@@ -751,14 +755,14 @@ export default function TasksPage() {
   }, [tab, history, loadHistory]);
   // Persist filter/tab settings so they survive tab switches and navigation.
   useEffect(() => {
-    try { localStorage.setItem('tasksFilters', JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters })); } catch { /* ignore */ }
-  }, [tab, search, groupBy, selPages, selChatters]);
+    try { localStorage.setItem(filtersKey, JSON.stringify({ tab, search: isDemoMode() ? '' : search, groupBy, selPages, selChatters })); } catch { /* ignore */ }
+  }, [filtersKey, tab, search, groupBy, selPages, selChatters]);
   // The custom-task form's pickers load only when it opens.
   useEffect(() => {
     if (!showCustom || meta) return;
     api.get('/api/chatters').catch(() => ({ data: [] }))
-      .then(ch => setMeta({ creators: pages, chatters: ch.data || [], members }));
-  }, [showCustom, meta, members, pages]);
+      .then(ch => setMeta({ creators: pages.filter(p => pagePlatform(p) === platform), chatters: ch.data || [], members }));
+  }, [showCustom, meta, members, pages, platform]);
 
   const refresh = () => {
     setHistory({});
@@ -1071,7 +1075,9 @@ export default function TasksPage() {
           {activeFilters > 0 || search ? (
             <>No tasks match the current filters.<Button variant='link' size='sm' onClick={clearFilters}>Clear filters</Button></>
           ) : (
-            <>Nothing here. Build the queue from the Dashboard{canCreate ? ', or add a custom task' : ''}.</>
+            platform === 'onlyfans'
+              ? <>Nothing here. Build the queue from the Dashboard{canCreate ? ', or add a custom task' : ''}.</>
+              : <>No tasks for {platformInfo(platform).name} pages yet. The daily reviews that build the queue cover OnlyFans for now{canCreate ? '; add a custom task for a page here' : ''}.</>
           )}
         </div>
       ) : (
@@ -1101,4 +1107,10 @@ export default function TasksPage() {
       {chat && <DialogueSheet task={chat.task} fan={chat.fan} onClose={() => setChat(null)} onLinked={onLinked} />}
     </div>
   );
+}
+
+// Tasks of the platform picked in the menu; switching platform starts afresh.
+export default function TasksPage() {
+  const { platform } = usePlatform();
+  return <TasksBoard key={platform} platform={platform} />;
 }

@@ -14,6 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { yesterday } from '@/utils/dates';
+import { usePlatform } from '@/context/PlatformContext';
+import { FanslyNotice } from '@/components/shared/PlatformNotice';
+import FanvueDashboard from './FanvueDashboard';
 
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
@@ -182,7 +185,7 @@ function SectionTitle({ title, hint }) {
   );
 }
 
-export default function DashboardPage() {
+function OnlyFansDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [date, setDate] = useState(yesterday());
@@ -395,4 +398,12 @@ export default function DashboardPage() {
       )}
     </div>
   );
+}
+
+// The dashboard of the platform picked in the menu.
+export default function DashboardPage() {
+  const { platform } = usePlatform();
+  if (platform === 'fanvue') return <FanvueDashboard />;
+  if (platform === 'fansly') return <FanslyNotice />;
+  return <OnlyFansDashboard />;
 }

@@ -1,10 +1,13 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet, BookOpen,
-  ChevronsUpDown, LogOut, Sun, Moon,
+  ChevronsUpDown, LogOut, Sun, Moon, Check,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
+import { usePlatform } from '@/context/PlatformContext'
+import { PLATFORMS, platformInfo, pagesText } from '@/utils/platforms'
+import PlatformBadge from '@/components/shared/PlatformBadge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
@@ -75,6 +78,7 @@ export function AppSidebar() {
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        {!isChatter && <PlatformSwitch />}
       </SidebarHeader>
 
       <SidebarContent>
@@ -102,6 +106,42 @@ export function AppSidebar() {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+// Which platform the tool shows (OnlyFans, Fanvue, Fansly): the pages, their
+// team, tasks and numbers below follow it (context/PlatformContext.jsx).
+function PlatformSwitch() {
+  const { platform, setPlatform, counts } = usePlatform()
+  const { isMobile } = useSidebar()
+  const current = platformInfo(platform)
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <SidebarMenuButton tooltip={`Platform: ${current.name}`} aria-label={`Platform: ${current.name}. Change platform`}
+              className='border bg-background data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground'>
+              <PlatformBadge platform={current.id} />
+              <span className='truncate font-medium'>{current.name}</span>
+              <span className='ms-auto truncate text-xs text-muted-foreground'>{pagesText(counts[current.id])}</span>
+              <ChevronsUpDown className='size-4 shrink-0 text-muted-foreground' />
+            </SidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className='min-w-60 rounded-lg' side={isMobile ? 'bottom' : 'right'} align='start' sideOffset={4}>
+            <DropdownMenuLabel className='text-xs font-normal text-muted-foreground'>Show the tool for</DropdownMenuLabel>
+            {PLATFORMS.map(p => (
+              <DropdownMenuItem key={p.id} onClick={() => setPlatform(p.id)} className='gap-2'>
+                <PlatformBadge platform={p.id} />
+                <span className='flex-1'>{p.name}</span>
+                <span className='text-xs text-muted-foreground'>{pagesText(counts[p.id])}</span>
+                <Check className={p.id === platform ? 'size-4' : 'size-4 invisible'} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SidebarMenuItem>
+    </SidebarMenu>
   )
 }
 

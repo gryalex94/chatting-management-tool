@@ -20,6 +20,8 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
+import { usePlatform } from '@/context/PlatformContext';
+import PlatformNotice, { FanslyNotice } from '@/components/shared/PlatformNotice';
 
 const DAY = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -52,7 +54,7 @@ const hoursLabel = (from, to) => (from && to ? `${from}–${to}` : '');
  * anyone in a shift where it's normally covered shows red; covered for only part
  * of the shift, it shows the open hours. Either way, "Bring someone".
  */
-export default function ShiftsPage() {
+function RosterPage() {
   const { user } = useAuth();
   const canEdit = EDIT_ROLES.includes(user?.role);
   const [week, setWeek] = useState(null);              // any date in the week shown; null = this week
@@ -698,4 +700,18 @@ function ProposalDialog({ onClose, onApplied }) {
       </DialogContent>
     </Dialog>
   );
+}
+
+// The roster is OnlyFans' for now; Fanvue gets its own shift times and roster next.
+export default function ShiftsPage() {
+  const { platform } = usePlatform();
+  if (platform === 'fanvue') {
+    return (
+      <PlatformNotice platform='fanvue' title='Fanvue shifts come next'>
+        Fanvue gets its own shift times and roster, separate from OnlyFans.
+      </PlatformNotice>
+    );
+  }
+  if (platform === 'fansly') return <FanslyNotice />;
+  return <RosterPage />;
 }

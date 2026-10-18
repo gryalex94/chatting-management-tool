@@ -8,7 +8,11 @@ import { Button } from '@/components/ui/button';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
 const num = (n) => (n == null ? '·' : Math.round(n).toLocaleString());
-const usd = (cents) => `$${(Math.round(cents) / 100).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+// Whole dollars, or dollars and cents below $10 (an AI day can cost cents).
+const usd = (cents) => {
+  const d = Math.round(cents) / 100;
+  return `$${d.toLocaleString(undefined, d < 10 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 0 })}`;
+};
 // Cost per reply of the planned AI engine (Mistral writes, Claude checks the risky
 // ones): about 0.3–0.6 cents.
 const AI_CENTS = [0.3, 0.6];
@@ -159,7 +163,8 @@ function Progress({ p }) {
 // A YYYY-MM-DD day, n days earlier.
 const daysBefore = (day, n) => { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
 
-function Volume({ stats }) {
+// Also on the Fanvue dashboard (pages/dashboard/FanvueDashboard.jsx).
+export function Volume({ stats }) {
   const today = stats.today;                                 // Amsterdam day, from the server
   const { rows, avg } = useMemo(() => {
     const byDay = new Map(stats.messages.map(d => [d.day, d]));

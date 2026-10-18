@@ -3,11 +3,14 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const fv = require('../integrations/fanvue');
 const { runFanvueSync, fanvueProgress, fanvueLastResult } = require('../utils/fanvueSync');
+const { createPage, noPlatformColumn } = require('../utils/pages');
 
 // Settings → Fanvue: connect a creator's Fanvue account (she approves on Fanvue),
 // copy its chats and earnings in (utils/fanvueSync.js), and see the daily volume.
-// Connecting gives access to the creator's account: admins only.
-router.use(requireMinRole('admin'));
+// Managers see the accounts and their numbers (the Fanvue dashboard); connecting,
+// syncing and disconnecting give access to the creator's account: admins only.
+router.use(requireMinRole('manager'));
+const adminOnly = requireMinRole('admin');
 
 const NOT_READY = 'Run database change 030 (Fanvue) in Supabase first';
 const STATE_TTL_MS = 15 * 60_000;
@@ -20,6 +23,41 @@ const fail = (res, e, what) => {
 };
 const ACCOUNT_COLS = 'id, organisation_id, handle, display_name, is_ai_creator, subscribers_count, followers_count, scopes, status, connected_at, synced_at, sync_error';
 const view = ({ organisation_id, ...a }) => ({ ...a, running: fanvueProgress(a.id), last_result: fanvueLastResult(a.id) });
+
+// The accounts, with the page each belongs to (that column comes with database change 032).
+async function selectAccounts(build) {
+  let r = await build(`${ACCOUNT_COLS}, creator_id`);
+  if (r.error && /creator_id/.test(r.error.message)) r = await build(ACCOUNT_COLS);
+  return r;
+}
+
+// A connected account belongs to a Fanvue page of its own (named after the
+// creator), made the first time it's needed. Skipped before database change 032.
+// One at a time per account; if another server linked a page first, ours goes.
+const linking = new Map();
+function ensurePage(acc) {
+  if (acc.creator_id || !('creator_id' in acc)) return Promise.resolve(acc);
+  if (!linking.has(acc.id)) {
+    linking.set(acc.id, (async () => {
+      try {
+        const page = await createPage({ name: acc.display_name || acc.handle || 'Fanvue page', organisationId: acc.organisation_id, platform: 'fanvue' });
+        const { data: done } = await supabaseAdmin.from('fanvue_accounts').update({ creator_id: page.id })
+          .eq('id', acc.id).is('creator_id', null).select('id');
+        if (done?.length) return { ...acc, creator_id: page.id };
+        await supabaseAdmin.from('shifts').delete().eq('creator_id', page.id);
+        await supabaseAdmin.from('creators').delete().eq('id', page.id);
+        const { data: now } = await supabaseAdmin.from('fanvue_accounts').select('creator_id').eq('id', acc.id).single();
+        return { ...acc, creator_id: now?.creator_id || null };
+      } catch (e) {
+        if (!noPlatformColumn(e)) console.error('[fanvue] making its page:', e.message);
+        return acc;
+      } finally {
+        linking.delete(acc.id);
+      }
+    })());
+  }
+  return linking.get(acc.id);
+}
 
 // Fanvue sends the creator back to this tool's own /fanvue/callback page only
 // (the address must also be listed on the app's Authentication tab on Fanvue).
@@ -35,7 +73,7 @@ function allowedRedirect(uri) {
 
 // The account, if it belongs to the caller's organisation.
 async function ownAccount(req, res) {
-  const { data, error } = await supabaseAdmin.from('fanvue_accounts').select(ACCOUNT_COLS).eq('id', req.params.id).maybeSingle();
+  const { data, error } = await selectAccounts((cols) => supabaseAdmin.from('fanvue_accounts').select(cols).eq('id', req.params.id).maybeSingle());
   if (error) { fail(res, error, 'load the Fanvue account'); return null; }
   if (!data || data.organisation_id !== req.user.organisationId) { res.status(404).json({ error: 'Fanvue account not found' }); return null; }
   return data;
@@ -43,14 +81,15 @@ async function ownAccount(req, res) {
 
 // GET /api/fanvue — is it set up on the server, and the connected accounts.
 router.get('/', async (req, res) => {
-  const { data, error } = await supabaseAdmin.from('fanvue_accounts').select(ACCOUNT_COLS)
-    .eq('organisation_id', req.user.organisationId).order('connected_at');
+  const { data, error } = await selectAccounts((cols) => supabaseAdmin.from('fanvue_accounts').select(cols)
+    .eq('organisation_id', req.user.organisationId).order('connected_at'));
   if (error && !missingTable(error)) return fail(res, error, 'load the Fanvue accounts');
-  res.json({ configured: fv.configured(), tables_ready: !error, accounts: (data || []).map(view) });
+  const accounts = await Promise.all((data || []).map(ensurePage));
+  res.json({ configured: fv.configured(), tables_ready: !error, accounts: accounts.map(view) });
 });
 
 // POST /api/fanvue/connect { redirectUri } — the Fanvue address where the creator approves access.
-router.post('/connect', async (req, res) => {
+router.post('/connect', adminOnly, async (req, res) => {
   if (!fv.configured()) return res.status(400).json({ error: 'Add FANVUE_CLIENT_ID and FANVUE_CLIENT_SECRET to the server settings first' });
   const redirectUri = String(req.body?.redirectUri || '');
   if (!allowedRedirect(redirectUri)) return res.status(400).json({ error: 'Fanvue can’t send the approval back to this address' });
@@ -68,7 +107,7 @@ router.post('/connect', async (req, res) => {
 
 // POST /api/fanvue/callback { code, state } — the creator approved: swap the code
 // for access, save the account, and start copying its chats in.
-router.post('/callback', async (req, res) => {
+router.post('/callback', adminOnly, async (req, res) => {
   const code = String(req.body?.code || '');
   const state = String(req.body?.state || '');
   if (!code || !state) return res.status(400).json({ error: 'The approval came back incomplete. Click Connect Fanvue again.' });
@@ -91,13 +130,15 @@ router.post('/callback', async (req, res) => {
       connected_at: new Date().toISOString(), sync_error: null,
     }, { onConflict: 'organisation_id,fanvue_uuid' }).select(ACCOUNT_COLS).single();
     if (error) throw error;
+    const { data: linked } = await selectAccounts((cols) => supabaseAdmin.from('fanvue_accounts').select(cols).eq('id', acc.id).single());
+    await ensurePage(linked || acc);
     runFanvueSync(acc.id).catch(e => console.error('[FanvueSync]', e.message));   // first copy, in the background
     res.json({ account: view(acc) });
   } catch (e) { fail(res, e, 'finish the Fanvue connection'); }
 });
 
 // POST /api/fanvue/accounts/:id/sync — copy what's new now (runs in the background).
-router.post('/accounts/:id/sync', async (req, res) => {
+router.post('/accounts/:id/sync', adminOnly, async (req, res) => {
   const acc = await ownAccount(req, res);
   if (!acc) return;
   if (acc.status !== 'connected') return res.status(409).json({ error: 'Connect the account again first' });
@@ -128,7 +169,7 @@ router.get('/accounts/:id/stats', async (req, res) => {
 });
 
 // POST /api/fanvue/accounts/:id/disconnect — forget the access (the copied chats stay).
-router.post('/accounts/:id/disconnect', async (req, res) => {
+router.post('/accounts/:id/disconnect', adminOnly, async (req, res) => {
   const acc = await ownAccount(req, res);
   if (!acc) return;
   const { error } = await supabaseAdmin.from('fanvue_accounts').update({ tokens: null, token_expires_at: null, status: 'disconnected' }).eq('id', acc.id);

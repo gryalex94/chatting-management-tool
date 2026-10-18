@@ -20,6 +20,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { yesterday } from '@/utils/dates';
 import FanLabel from '@/components/shared/FanLabel';
+import { usePlatform } from '@/context/PlatformContext';
+import PlatformNotice, { FanslyNotice } from '@/components/shared/PlatformNotice';
 
 
 const WORKLOAD_TONE = { overloaded: 'warn', slow: 'warn', underperforming: 'bad', healthy: 'good', light: 'info' };
@@ -177,7 +179,7 @@ function ListSkeleton() {
 
 /* ─── Page ──────────────────────────────────────────────────────────────── */
 
-export default function DailyCheckPage() {
+function OnlyFansDailyCheck() {
   const [date, setDate] = useState(yesterday());
   const [tab, setTab] = useState('chatters');
   const [pageFilter, setPageFilter] = useState('all');
@@ -895,4 +897,19 @@ function IssueRow({ issue }) {
       )}
     </div>
   );
+}
+
+// The AI review of the team's chats works on the OnlyFans chat uploads for now.
+export default function DailyCheckPage() {
+  const { platform } = usePlatform();
+  if (platform === 'fanvue') {
+    return (
+      <PlatformNotice platform='fanvue' title='Daily reviews for Fanvue come later'>
+        Fanvue chats already come in by themselves, so there&apos;s nothing to upload. The AI review of the
+        team&apos;s chats works on the OnlyFans uploads for now.
+      </PlatformNotice>
+    );
+  }
+  if (platform === 'fansly') return <FanslyNotice />;
+  return <OnlyFansDailyCheck />;
 }

@@ -15,6 +15,8 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PLATFORMS, pagePlatform } from '@/utils/platforms';
 
 /**
  * Everything about one creator page in one place: identity, the AI context used
@@ -28,6 +30,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
   const [ctx, setCtx] = useState(() => ({ ...(creator.ai_context || {}) }));
   const [text, setText] = useState(creator.ai_instructions || '');
   const [inflowwId, setInflowwId] = useState(creator.infloww_creator_id || '');
+  const [platform, setPlatform] = useState(pagePlatform(creator));
   const [usage, setUsage] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -37,7 +40,8 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
   }, [creator.id]);
 
   const inflowwChanged = inflowwId.trim() !== (creator.infloww_creator_id || '');
-  const dirty = name !== creator.name || inflowwChanged
+  const platformChanged = platform !== pagePlatform(creator);
+  const dirty = name !== creator.name || inflowwChanged || platformChanged
     || text !== (creator.ai_instructions || '')
     || JSON.stringify(cleanContext(ctx)) !== JSON.stringify(creator.ai_context || null);
 
@@ -49,6 +53,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
         ai_instructions: text.trim(),
         ai_context: cleanContext(ctx),
         ...(inflowwChanged ? { infloww_creator_id: inflowwId.trim() } : {}),
+        ...(platformChanged ? { platform } : {}),
       });
       toast.success('Saved');
       onChanged();
@@ -100,6 +105,15 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
           </div>
 
           <div className='grid gap-2'>
+            <Label htmlFor='creator-platform'>Platform</Label>
+            <Select value={platform} onValueChange={setPlatform} disabled={!isAdmin}>
+              <SelectTrigger id='creator-platform' className='w-48'><SelectValue /></SelectTrigger>
+              <SelectContent>{PLATFORMS.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
+            </Select>
+            <p className='text-xs text-muted-foreground'>Where this page shows when you switch platform in the menu.</p>
+          </div>
+
+          {platform !== 'fanvue' && <div className='grid gap-2'>
             <Label htmlFor='creator-infloww'>Infloww page ID</Label>
             <Input id='creator-infloww' value={inflowwId} onChange={e => setInflowwId(e.target.value)} disabled={!isAdmin}
               placeholder='Paste any chat link from this page, or the ID' />
@@ -107,7 +121,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
               In Infloww, open any chat on this page and use "Copy chat link", then paste it here. It lets tasks
               open a fan's chat straight in the Infloww app.
             </p>
-          </div>
+          </div>}
 
           <section className='grid gap-3'>
             <div>

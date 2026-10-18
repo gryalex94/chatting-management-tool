@@ -9,6 +9,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { yesterday } from '@/utils/dates';
+import { usePlatform } from '@/context/PlatformContext';
+import { FanslyNotice } from '@/components/shared/PlatformNotice';
+import FanvueReports from './FanvueReports';
 
 const REPORTS = [
   { key:'message-dashboard', label:'Message dashboard', desc:'PPV unlocks, response times, dialogue volume', icon:MessageSquare },
@@ -51,7 +54,7 @@ function ReportCard({ report, selected, uploaded, onSelect }) {
   );
 }
 
-export default function ReportsPage() {
+function OnlyFansReports() {
   const [selected, setSelected] = useState(null);
   const [file, setFile] = useState(null);
   const [date, setDate] = useState(yesterday());
@@ -275,4 +278,12 @@ export default function ReportsPage() {
       )}
     </div>
   );
+}
+
+// OnlyFans chats are uploaded here; Fanvue chats come in by themselves.
+export default function ReportsPage() {
+  const { platform } = usePlatform();
+  if (platform === 'fanvue') return <FanvueReports />;
+  if (platform === 'fansly') return <FanslyNotice />;
+  return <OnlyFansReports />;
 }

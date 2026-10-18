@@ -4,6 +4,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
+import { usePlatform } from '@/context/PlatformContext';
+import { platformInfo, pagePlatform } from '@/utils/platforms';
+import PlatformBadge from '@/components/shared/PlatformBadge';
 import api from '@/services/api';
 import { Avatar, Chip, StatusDot } from '@/components/shared';
 import { STATUS_META } from '@/utils/helpers';
@@ -103,6 +106,7 @@ function RoleSelect({ value, onChange, roles, id }) {
 
 export default function SettingsPage() {
   const { user, isAdmin } = useAuth();
+  const { platform, reloadPages } = usePlatform();
   const [members, setMembers] = useState([]);
   const [creators, setCreators] = useState([]);
   const [chatters, setChatters] = useState([]);
@@ -111,6 +115,7 @@ export default function SettingsPage() {
 
   // Forms
   const [creatorName, setCreatorName] = useState('');
+  const platformCreators = creators.filter(c => pagePlatform(c) === platform);   // the platform picked in the menu
   const [chatterForm, setChatterForm] = useState({ name:'', email:'' });
   const [inviteForm, setInviteForm] = useState({ email:'', role:'chatter' });
   const [memberForm, setMemberForm] = useState({ name:'', email:'', password:'', role:'chatter' });
@@ -170,8 +175,8 @@ export default function SettingsPage() {
 
   async function addCreator(e) {
     e.preventDefault(); if(!creatorName.trim()) return;
-    try { await api.post('/api/creators',{name:creatorName}); toast.success('Creator added'); setCreatorName(''); load(); }
-    catch { toast.error('Failed'); }
+    try { await api.post('/api/creators',{name:creatorName, platform}); toast.success(`${platformInfo(platform).name} page added`); setCreatorName(''); load(); reloadPages(); }
+    catch (err) { toast.error(err?.response?.data?.error || 'Failed'); }
   }
 
   async function addChatter(e) {
@@ -328,11 +333,12 @@ export default function SettingsPage() {
 
         {/* Creators */}
         <TabsContent value='creators'>
-          <Section title='Creators' sub={`${creators.length} pages — click one to edit its name, AI context and removal`}
+          <Section title={<span className='flex items-center gap-2'><PlatformBadge platform={platform}/>{platformInfo(platform).name} pages</span>}
+            sub={`${platformCreators.length} page${platformCreators.length===1?'':'s'} — click one to edit its name, platform, AI context and removal. Switch platform in the menu to see the others.`}
             right={isAdmin&&<span className='text-xs text-muted-foreground'>Admin only</span>}>
-            {creators.length === 0 ? <Empty>No creators yet.</Empty> : (
+            {platformCreators.length === 0 ? <Empty>No {platformInfo(platform).name} pages yet.</Empty> : (
               <div className='grid gap-1.5'>
-                {creators.map(c=>{
+                {platformCreators.map(c=>{
                   const hasCtx = !!(c.ai_context || c.ai_instructions);
                   return (
                     <button key={c.id} type='button' onClick={()=>setCreatorDetail(c)}
@@ -349,8 +355,8 @@ export default function SettingsPage() {
               </div>
             )}
             {isAdmin&&<form onSubmit={addCreator} className='flex gap-2'>
-              <Input value={creatorName} onChange={e=>setCreatorName(e.target.value)} placeholder='Creator name' aria-label='Creator name' className='flex-1'/>
-              <Button type='submit'><Plus/>Add</Button>
+              <Input value={creatorName} onChange={e=>setCreatorName(e.target.value)} placeholder='Page name' aria-label='Page name' className='flex-1'/>
+              <Button type='submit'><Plus/>Add {platformInfo(platform).name} page</Button>
             </form>}
           </Section>
         </TabsContent>
@@ -684,7 +690,7 @@ export default function SettingsPage() {
 
       {creatorDetail && (
         <CreatorDetailModal creator={creatorDetail} isAdmin={isAdmin}
-          onClose={() => setCreatorDetail(null)} onChanged={load}/>
+          onClose={() => setCreatorDetail(null)} onChanged={() => { load(); reloadPages(); }}/>
       )}
 
       <AlertDialog open={!!confirm} onOpenChange={(open)=>{ if(!open) setConfirm(null); }}>
