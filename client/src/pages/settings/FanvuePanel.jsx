@@ -2,17 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bot, CircleAlert, CircleCheck, Link2, Loader2, RefreshCw, Unlink } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
+import { num, usd } from '@/utils/numbers';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
-const num = (n) => (n == null ? '·' : Math.round(n).toLocaleString());
-// Whole dollars, or dollars and cents below $10 (an AI day can cost cents).
-const usd = (cents) => {
-  const d = Math.round(cents) / 100;
-  return `$${d.toLocaleString(undefined, d < 10 ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : { maximumFractionDigits: 0 })}`;
-};
 // Cost per reply of the planned AI engine (Mistral writes, Claude checks the risky
 // ones): about 0.3–0.6 cents.
 const AI_CENTS = [0.3, 0.6];
@@ -175,45 +170,50 @@ export function Volume({ stats }) {
       const day = daysBefore(today, i);
       if (!first || day < first) continue;
       const m = byDay.get(day) || {};
-      out.push({ day, fan: Number(m.fan_messages || 0), team: Number(m.team_messages || 0), auto: Number(m.auto_messages || 0), chats: Number(m.chats || 0), net: Number(earnByDay.get(day)?.net_cents || 0) });
+      out.push({ day, fan: Number(m.fan_messages || 0), team: Number(m.team_messages || 0), ai: Number(m.ai_messages || 0), auto: Number(m.auto_messages || 0), chats: Number(m.chats || 0), net: Number(earnByDay.get(day)?.net_cents || 0) });
     }
     const full = out.filter(r => r.day !== today);           // today isn't over yet
     const mean = (k) => (full.length ? full.reduce((s, r) => s + r[k], 0) / full.length : null);
-    return { rows: out, avg: { fan: mean('fan'), team: mean('team'), auto: mean('auto'), chats: mean('chats'), net: mean('net'), days: full.length } };
+    return { rows: out, avg: { fan: mean('fan'), team: mean('team'), ai: mean('ai'), auto: mean('auto'), chats: mean('chats'), net: mean('net'), days: full.length } };
   }, [stats, today]);
 
   if (!rows.length) return <p className='text-sm text-muted-foreground'>No messages copied yet.</p>;
   const max = Math.max(1, ...rows.map(r => r.fan + r.team + r.auto));
+  // Which of the team's messages were written with Fanvue's own AI writer (database change 033).
+  const hasAi = stats.messages.some(d => d.ai_messages != null);
 
   return (
     <div className='grid gap-3'>
       <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-5'>
         <Stat label='Fans write a day' value={num(avg.fan)} />
-        <Stat label='Team sends by hand a day' value={num(avg.team)} />
+        <Stat label='Team sends by hand a day' value={num(avg.team)} sub={hasAi ? `${num(avg.ai)} of them with Fanvue’s AI writer` : undefined} />
         <Stat label='Sent automatically a day' value={num(avg.auto)} sub='automated + mass messages' />
         <Stat label='Chats active a day' value={num(avg.chats)} />
         <Stat label='Earned a day' value={avg.net == null ? '·' : usd(avg.net)} sub='after Fanvue’s cut' />
       </div>
       {avg.team != null && (
         <p className='text-sm text-muted-foreground'>
-          If AI wrote the team&apos;s replies, at this volume it would cost about{' '}
-          <b className='text-foreground'>{usd(avg.team * AI_CENTS[0])}–{usd(avg.team * AI_CENTS[1])} a day</b>.
-          Averages over the last {avg.days} full day{avg.days === 1 ? '' : 's'} ({num(stats.totals.messages)} messages and {num(stats.totals.fans)} chats copied in total).
+          Estimate: if the planned AI wrote the team&apos;s replies, at this volume it would cost about{' '}
+          <b className='text-foreground'>{usd(avg.team * AI_CENTS[0])}–{usd(avg.team * AI_CENTS[1])} a day</b>. The tool itself never writes
+          or sends anything. Averages over the last {avg.days} full day{avg.days === 1 ? '' : 's'} ({num(stats.totals.messages)} messages and {num(stats.totals.fans)} chats copied in total).
         </p>
       )}
       <div className='grid gap-1'>
         <div className='flex h-28 items-end gap-0.5' role='img' aria-label='Messages per day over the last 30 days'>
           {rows.map(r => (
-            <div key={r.day} className='flex h-full min-w-0 flex-1 flex-col-reverse' title={`${r.day}: fans ${r.fan}, team ${r.team}, automatic ${r.auto}`}>
+            <div key={r.day} className='flex h-full min-w-0 flex-1 flex-col-reverse'
+              title={`${r.day}: fans ${r.fan}, team ${r.team}${hasAi ? ` (${r.ai} with Fanvue’s AI)` : ''}, automatic ${r.auto}`}>
               <div className='bg-link/70' style={{ height: `${(r.fan / max) * 100}%` }} />
-              <div className='bg-primary/80' style={{ height: `${(r.team / max) * 100}%` }} />
+              <div className='bg-primary/80' style={{ height: `${((r.team - r.ai) / max) * 100}%` }} />
+              <div className='bg-violet-500/70' style={{ height: `${(r.ai / max) * 100}%` }} />
               <div className='bg-muted-foreground/40' style={{ height: `${(r.auto / max) * 100}%` }} />
             </div>
           ))}
         </div>
         <div className='flex flex-wrap gap-3 text-xs text-muted-foreground'>
           <span className='flex items-center gap-1'><span className='size-2 rounded-sm bg-link/70' />Fans</span>
-          <span className='flex items-center gap-1'><span className='size-2 rounded-sm bg-primary/80' />Team by hand</span>
+          <span className='flex items-center gap-1'><span className='size-2 rounded-sm bg-primary/80' />{hasAi ? 'Team, own words' : 'Team by hand'}</span>
+          {hasAi && <span className='flex items-center gap-1'><span className='size-2 rounded-sm bg-violet-500/70' />Team, Fanvue’s AI writer</span>}
           <span className='flex items-center gap-1'><span className='size-2 rounded-sm bg-muted-foreground/40' />Automatic</span>
           <span className='ms-auto'>{rows[0].day} – {rows.at(-1).day}</span>
         </div>
@@ -222,7 +222,7 @@ export function Volume({ stats }) {
   );
 }
 
-function Stat({ label, value, sub }) {
+export function Stat({ label, value, sub }) {
   return (
     <div className='rounded-md border p-3'>
       <p className='text-xs text-muted-foreground'>{label}</p>

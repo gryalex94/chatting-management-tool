@@ -147,7 +147,8 @@ router.post('/accounts/:id/sync', adminOnly, async (req, res) => {
   res.status(202).json({ started: true });
 });
 
-// GET /api/fanvue/accounts/:id/stats?days=30 — messages and earnings per day.
+// GET /api/fanvue/accounts/:id/stats?days=30 — messages and earnings per day, reply
+// times, the chats waiting for a reply and the top fans.
 router.get('/accounts/:id/stats', async (req, res) => {
   const acc = await ownAccount(req, res);
   if (!acc) return;
@@ -164,9 +165,58 @@ router.get('/accounts/:id/stats', async (req, res) => {
     res.json({
       days, today: new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Amsterdam' }),
       messages: msgs.data || [], earnings: earn.data || [], totals: { fans: fans.count || 0, messages: messages.count || 0 },
+      ...(await dashboardExtras(acc.id, since)),
     });
   } catch (e) { fail(res, e, 'load the Fanvue numbers'); }
 });
+
+// Reply times, the chats waiting for a reply and the top fans (database change
+// 033); { extras_ready: false } before it's run. Fan names go out under the field
+// names demo mode masks (server/src/utils/privacy.js).
+async function dashboardExtras(accountId, since) {
+  const p = { p_account: accountId, p_since: since };
+  const [stats, waiting, top] = await Promise.all([
+    supabaseAdmin.rpc('fanvue_reply_stats', p),
+    supabaseAdmin.rpc('fanvue_waiting_chats', p),
+    supabaseAdmin.rpc('fanvue_top_fans', { ...p, p_limit: 10 }),
+  ]);
+  const err = stats.error || waiting.error || top.error;
+  if (err) {
+    if (!/function|schema cache/.test(err.message)) console.error('[fanvue] dashboard numbers:', err.message);
+    return { extras_ready: false };
+  }
+  const waits = (waiting.data || []).slice(0, 10);
+  const tops = (top.data || []).filter(t => Number(t.net_cents) > 0);
+  const uuids = [...new Set([...waits, ...tops].map(r => r.fan_uuid))];
+  const people = new Map();
+  const spent = new Map();
+  if (uuids.length) {
+    const [f, e] = await Promise.all([
+      supabaseAdmin.from('fanvue_fans').select('fan_uuid, handle, display_name, nickname, is_top_spender').eq('account_id', accountId).in('fan_uuid', uuids),
+      supabaseAdmin.from('fanvue_earnings').select('fan_uuid, net_cents').eq('account_id', accountId).in('fan_uuid', waits.map(w => w.fan_uuid)),
+    ]);
+    for (const x of f.data || []) people.set(x.fan_uuid, x);
+    for (const x of e.data || []) spent.set(x.fan_uuid, (spent.get(x.fan_uuid) || 0) + (x.net_cents || 0));
+  }
+  const who = (uuid) => {
+    const x = people.get(uuid) || {};
+    return { fan_username: x.handle || null, display_name: x.display_name || null, fan_nickname: x.nickname || null, is_top_spender: !!x.is_top_spender };
+  };
+  const s = stats.data?.[0] || {};
+  const num = (v) => (v == null ? null : Number(v));
+  return {
+    extras_ready: true,
+    replies: { replies: Number(s.replies || 0), median_seconds: num(s.median_seconds), within_5_min: num(s.within_5_min), waiting: Number(s.waiting || 0) },
+    waiting: waits.map(w => ({
+      ...who(w.fan_uuid), waiting_since: w.asked_at, waiting_seconds: Math.max(0, Math.round((Date.now() - Date.parse(w.asked_at)) / 1000)),
+      fan_messages: Number(w.fan_messages || 0), spent_cents: spent.get(w.fan_uuid) || 0,
+    })),
+    top_fans: tops.map(t => ({
+      ...who(t.fan_uuid), spent_cents: Number(t.net_cents), recent_cents: Number(t.recent_net_cents),
+      purchases: Number(t.purchases), last_paid_at: t.last_paid_at, last_wrote_at: t.last_wrote_at,
+    })),
+  };
+}
 
 // POST /api/fanvue/accounts/:id/disconnect — forget the access (the copied chats stay).
 router.post('/accounts/:id/disconnect', adminOnly, async (req, res) => {
