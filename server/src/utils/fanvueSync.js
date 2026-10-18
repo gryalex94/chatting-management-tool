@@ -16,6 +16,10 @@ const running = new Map();     // account id → progress of the sync in progres
 const lastResult = new Map();  // account id → the last sync's summary, errors included
 const PAGE = 50;
 const MAX_PAGES_PER_CHAT = 4000;   // 200k messages: a guard against a cursor that never ends
+// The internet dropping for a moment (Wi-Fi, a laptop waking up): try again a
+// minute later — the copy carries on where it stopped.
+const NETWORK = /fetch failed|unreachable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network/i;
+const MAX_ATTEMPTS = 5;
 
 async function upsertChunks(table, rows, onConflict) {
   for (let i = 0; i < rows.length; i += 500) {
@@ -100,7 +104,7 @@ async function copyEarnings(accountId, fromIso, progress) {
   }
 }
 
-async function runFanvueSync(accountId, { full = false } = {}) {
+async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
   if (running.has(accountId)) return { skipped: 'already running' };
   const progress = { started_at: new Date().toISOString(), phase: 'profile', chats_listed: 0, chats_to_read: 0, chats_read: 0, messages: 0, earnings: 0 };
   running.set(accountId, progress);
@@ -180,10 +184,13 @@ async function runFanvueSync(accountId, { full = false } = {}) {
     console.log('[FanvueSync]', JSON.stringify(summary));
     return summary;
   } catch (e) {
-    console.error('[FanvueSync] failed:', e.message);
-    const summary = { finished_at: new Date().toISOString(), error: e.message, messages: progress.messages, chats_read: progress.chats_read };
-    await supabaseAdmin.from('fanvue_accounts').update({ sync_error: e.message, ...(e.reconnect ? { status: 'reconnect' } : {}) }).eq('id', accountId);
+    const retry = NETWORK.test(String(e.message)) && attempt < MAX_ATTEMPTS;
+    console.error(`[FanvueSync] failed${retry ? ' (connection lost; trying again in a minute)' : ''}:`, e.message);
+    const error = retry ? 'Lost the connection for a moment; carrying on in a minute' : e.message;
+    const summary = { finished_at: new Date().toISOString(), error, messages: progress.messages, chats_read: progress.chats_read };
+    await supabaseAdmin.from('fanvue_accounts').update({ sync_error: error, ...(e.reconnect ? { status: 'reconnect' } : {}) }).eq('id', accountId);
     lastResult.set(accountId, summary);
+    if (retry) setTimeout(() => { runFanvueSync(accountId, { full, attempt: attempt + 1 }).catch(() => {}); }, 60_000);
     return summary;
   } finally {
     running.delete(accountId);
