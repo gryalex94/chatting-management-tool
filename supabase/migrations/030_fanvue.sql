@@ -127,3 +127,6 @@ revoke all on function public.fanvue_daily_messages(uuid, timestamptz) from publ
 revoke all on function public.fanvue_daily_earnings(uuid, timestamptz) from public, anon, authenticated;
 grant execute on function public.fanvue_daily_messages(uuid, timestamptz) to service_role;
 grant execute on function public.fanvue_daily_earnings(uuid, timestamptz) to service_role;
+
+-- Let the API see the new tables and functions straight away.
+notify pgrst, 'reload schema';
