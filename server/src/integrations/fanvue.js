@@ -8,8 +8,9 @@
  * FANVUE_CLIENT_ID and FANVUE_CLIENT_SECRET — never from the database or the
  * browser. Tokens are stored encrypted in fanvue_accounts.
  *
- * Limits: 200 requests a minute per creator and at most 6 at a time, so calls
- * for one account go one by one, spaced out.
+ * Limits: 100 requests a minute (the API policy's figure) and at most 6 at a
+ * time, so calls for one account go one by one, spaced out, and any "slow down"
+ * from Fanvue (429 + Retry-After) is waited out.
  */
 const crypto = require('crypto');
 const { supabaseAdmin } = require('../utils/supabase');
@@ -18,10 +19,13 @@ const AUTH_URL = 'https://auth.fanvue.com/oauth2/auth';
 const TOKEN_URL = 'https://auth.fanvue.com/oauth2/token';
 const API = 'https://api.fanvue.com';
 const VERSION = '2025-06-26';
-// What we ask the creator for. write:chat is for sending suggested replies later;
-// nothing is sent until that is switched on. openid/offline* bring the refresh token.
-const SCOPES = ['openid', 'offline_access', 'offline', 'read:self', 'read:chat', 'write:chat', 'read:media', 'read:fan', 'read:creator', 'read:insights'];
-const GAP_MS = 320;                       // ≤ ~190 requests a minute per account
+// What we ask the creator for: reading only, so this connection can't send a
+// message even by mistake. Sending replies later needs write:chat added here and
+// the creator approving again. openid/offline* bring the refresh token.
+const SCOPES = ['openid', 'offline_access', 'offline', 'read:self', 'read:chat', 'read:media', 'read:fan', 'read:creator', 'read:insights'];
+// Fanvue's API policy says 100 requests a minute per key (its API reference says
+// 200): stay under the lower one.
+const GAP_MS = 650;                       // ≈ 90 requests a minute per account
 
 class FanvueError extends Error {
   constructor(message, { status, code, reconnect = false } = {}) {
