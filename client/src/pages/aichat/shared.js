@@ -4,11 +4,13 @@ export const errMsg = (e, d) => e?.response?.data?.error || d;
 // The name a manager knows the fan by (demo mode replaces these with pseudonyms).
 export const fanName = (f) => f?.display_name || f?.fan_nickname || (f?.fan_username ? `@${f.fan_username}` : 'A fan');
 
-// What an AI call cost: 0.08¢ · 1.25¢ · $1.40
+// What AI work cost, written so it can't be misread: "$0.10", "$1.40" from a
+// cent up, and "0.05 cents" for a single reply.
 export const cost = (dollars) => {
   const c = (Number(dollars) || 0) * 100;
-  if (c >= 100) return `$${(c / 100).toFixed(2)}`;
-  return `${c > 0 && c < 0.1 ? c.toFixed(3) : c.toFixed(2)}¢`;
+  if (c >= 1) return `$${(c / 100).toFixed(2)}`;
+  if (c <= 0) return '$0.00';
+  return `${Number(c.toFixed(c < 0.1 ? 3 : 2))} cents`;
 };
 export const dollars = (n) => `$${(Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
