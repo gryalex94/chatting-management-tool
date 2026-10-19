@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('./supabase');
+const { noPlatformColumn } = require('./pages');
 const { dayWindow } = require('../ai/evalShared');
 
 /**
@@ -21,6 +22,10 @@ const mondayOf = (date) => addDays(date, 1 - isoWeekday(date));
 const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
 const shiftHours = (s) => { let d = toMin(s.end_time) - toMin(s.start_time); if (d <= 0) d += 1440; return d / 60; };
 const READY_ERROR = 'Run migration 025 (shifts roster) in Supabase to turn this on';
+const PLATFORM_ERROR = 'Run database change 034 (shifts per platform) in Supabase to give this platform its own shifts';
+// A new platform's shift times to start with (Amsterdam time; EU Prime runs past
+// midnight and counts as the day it starts) — the same three as OnlyFans.
+const DEFAULT_SLOTS = [['US Prime', '02:00', '10:00'], ['Middle', '10:00', '18:00'], ['EU Prime', '18:00', '02:00']];
 
 async function all(q) {
   const out = [];
@@ -33,32 +38,77 @@ async function all(q) {
   return out;
 }
 
-// The shift times for everyone, earliest first.
-async function loadSlots(orgId) {
-  const { data } = await supabaseAdmin.from('shifts').select('id, name, start_time, end_time')
+// The shift times for everyone on a platform (null: every platform), earliest
+// first. Payroll and the lateness check use OnlyFans' (they read OnlyFans chats).
+async function loadSlots(orgId, platform = 'onlyfans') {
+  const base = () => supabaseAdmin.from('shifts').select('id, name, start_time, end_time, platform')
     .eq('organisation_id', orgId).is('creator_id', null).order('start_time');
-  return (data || []).map(s => ({ ...s, start: String(s.start_time).slice(0, 5), end: String(s.end_time).slice(0, 5), hours: shiftHours(s) }));
+  let { data, error } = await (platform ? base().eq('platform', platform) : base());
+  if (error && noPlatformColumn(error)) {                 // before database change 034: all OnlyFans
+    if (platform && platform !== 'onlyfans') return [];
+    ({ data } = await supabaseAdmin.from('shifts').select('id, name, start_time, end_time')
+      .eq('organisation_id', orgId).is('creator_id', null).order('start_time'));
+  }
+  return (data || []).map(s => ({ ...s, platform: s.platform || 'onlyfans', start: String(s.start_time).slice(0, 5), end: String(s.end_time).slice(0, 5), hours: shiftHours(s) }));
+}
+
+// A platform's pages (null: every platform).
+async function loadPages(orgId, platform) {
+  const base = () => supabaseAdmin.from('creators').select('id, name, is_active, platform').eq('organisation_id', orgId).order('name');
+  let { data, error } = await (platform ? base().eq('platform', platform) : base());
+  if (error && noPlatformColumn(error)) {                 // before database change 032: all OnlyFans
+    if (platform && platform !== 'onlyfans') return [];
+    ({ data } = await supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId).order('name'));
+  }
+  return (data || []).map(p => ({ ...p, platform: p.platform || 'onlyfans' }));
 }
 
 /**
- * Everything the Shifts page needs for [from, to]. `ready` is false until
+ * A platform with pages but no shift times yet gets the usual three. Returns
+ * the slots, or null when the shifts table has no platform yet (change 034).
+ */
+async function ensureSlots(orgId, platform) {
+  const slots = await loadSlots(orgId, platform);
+  if (slots.length || platform === 'onlyfans') return slots;
+  const probe = await supabaseAdmin.from('shifts').select('platform').limit(1);
+  if (probe.error) return null;
+  if (!(await loadPages(orgId, platform)).length) return slots;
+  const { error } = await supabaseAdmin.from('shifts').insert(DEFAULT_SLOTS.map(([name, st, et]) => ({
+    organisation_id: orgId, name, start_time: st, end_time: et, timezone: 'Europe/Amsterdam',
+    shift_type: 'regular', is_default: true, is_active: true, platform,
+  })));
+  if (error) throw new Error(error.message);
+  return loadSlots(orgId, platform);
+}
+
+/**
+ * Everything the Shifts page needs for [from, to], for one platform's roster
+ * (null: every platform, e.g. a chatter's profile). `ready` is false until
  * migration 025 has run (the tables don't exist yet).
  */
-async function loadRoster(orgId, from, to) {
-  const [slots, { data: pages }, { data: chatters }] = await Promise.all([
-    loadSlots(orgId),
-    supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId).order('name'),
+async function loadRoster(orgId, from, to, platform = 'onlyfans') {
+  const [slots, pages, { data: chatters }] = await Promise.all([
+    loadSlots(orgId, platform),
+    loadPages(orgId, platform),
     supabaseAdmin.from('chatters').select('id, name, is_active').eq('organisation_id', orgId).order('name'),
   ]);
   const a = await supabaseAdmin.from('roster_assignments').select('*').eq('organisation_id', orgId).eq('is_active', true);
-  if (a.error) return { ready: false, slots, pages: pages || [], chatters: chatters || [], assignments: [], changes: [] };
+  if (a.error) return { ready: false, platform, slots, pages, chatters: chatters || [], assignments: [], changes: [] };
+  // One platform: the roster rows on its shifts. A whole day off (no shift) is the
+  // person's, so it shows for everyone who works on this platform.
+  const slotIds = new Set(slots.map(s => s.id));
+  const assignments = platform ? (a.data || []).filter(x => slotIds.has(x.shift_id)) : (a.data || []);
   let changes = [];
   if (from && to) {
     const c = await supabaseAdmin.from('roster_changes').select('*').eq('organisation_id', orgId).gte('date', from).lte('date', to);
-    if (c.error) return { ready: false, slots, pages: pages || [], chatters: chatters || [], assignments: [], changes: [] };
+    if (c.error) return { ready: false, platform, slots, pages, chatters: chatters || [], assignments: [], changes: [] };
     changes = c.data || [];
+    if (platform) {
+      const working = new Set([...assignments.map(x => x.chatter_id), ...changes.filter(x => slotIds.has(x.shift_id)).map(x => x.chatter_id)]);
+      changes = changes.filter(x => (x.shift_id ? slotIds.has(x.shift_id) : working.has(x.chatter_id)));
+    }
   }
-  return { ready: slots.length > 0, slots, pages: pages || [], chatters: chatters || [], assignments: a.data || [], changes };
+  return { ready: slots.length > 0, platform, slots, pages, chatters: chatters || [], assignments, changes };
 }
 
 // ── Windows inside a shift ──────────────────────────────────────────────────
@@ -153,11 +203,11 @@ function dayBoard(date, assignments, changes, slots, normal = normallyCovered(as
   return { date, weekday: isoWeekday(date), entries, off, holes };
 }
 
-/** The week starting on the Monday of `anyDate`: 7 day boards plus hours per chatter. */
-async function weekView(orgId, anyDate) {
+/** One platform's week starting on the Monday of `anyDate`: 7 day boards plus hours per chatter. */
+async function weekView(orgId, anyDate, platform = 'onlyfans') {
   const start = mondayOf(anyDate);
   const end = addDays(start, 6);
-  const r = await loadRoster(orgId, start, end);
+  const r = await loadRoster(orgId, start, end, platform);
   if (!r.ready) return { ...r, week_start: start };
   const normal = normallyCovered(r.assignments);
   const days = Array.from({ length: 7 }, (_, i) => dayBoard(addDays(start, i), r.assignments, r.changes, r.slots, normal));
@@ -322,6 +372,6 @@ async function proposeFromActivity(orgId, { days = 28, endDate = null, slots: gi
 }
 
 module.exports = {
-  isoWeekday, addDays, mondayOf, loadSlots, loadRoster, effectiveDay, dayBoard, normallyCovered,
-  weekView, shiftStartsFor, proposeFromActivity, shiftPieces, windowIn, badWindow, READY_ERROR,
+  isoWeekday, addDays, mondayOf, loadSlots, loadPages, ensureSlots, loadRoster, effectiveDay, dayBoard, normallyCovered,
+  weekView, shiftStartsFor, proposeFromActivity, shiftPieces, windowIn, badWindow, READY_ERROR, PLATFORM_ERROR,
 };

@@ -3,6 +3,7 @@ const router = express.Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const R = require('../utils/roster');
+const { isPlatform } = require('../utils/pages');
 
 // The Shifts page (utils/roster.js). Staff can look; managers and up change it.
 const canEdit = requireMinRole('manager');
@@ -11,23 +12,25 @@ const todayAms = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europ
 const missing = (res) => res.status(409).json({ error: R.READY_ERROR });
 const PARTS_ERROR = 'Run migration 027 (part shifts / overtime) in Supabase to turn this on';
 const needs027 = (msg) => /start_time|end_time|roster_changes_organisation_id_date_chatter_id_key/.test(String(msg || ''));
-const slotOf = async (orgId, shiftId) => (await R.loadSlots(orgId)).find(x => x.id === shiftId) || null;
+const slotOf = async (orgId, shiftId) => (await R.loadSlots(orgId, null)).find(x => x.id === shiftId) || null;
 const clock = (t) => (t ? String(t).slice(0, 5) : null);
 
-// Check that the chatter, shift and pages are this organisation's. Returns an error
-// message, or null.
+// Check that the chatter, shift and pages are this organisation's, and that the
+// pages are on the shift's platform. Returns an error message, or null.
 async function checkParts(orgId, { chatter_id, shift_id, creator_ids }) {
   if (chatter_id) {
     const { data } = await supabaseAdmin.from('chatters').select('id').eq('id', chatter_id).eq('organisation_id', orgId).maybeSingle();
     if (!data) return 'Unknown chatter';
   }
+  let slot = null;
   if (shift_id) {
-    const { data } = await supabaseAdmin.from('shifts').select('id').eq('id', shift_id).eq('organisation_id', orgId).is('creator_id', null).maybeSingle();
-    if (!data) return 'Unknown shift';
+    slot = await slotOf(orgId, shift_id);
+    if (!slot) return 'Unknown shift';
   }
   if (creator_ids?.length) {
-    const { data } = await supabaseAdmin.from('creators').select('id').eq('organisation_id', orgId).in('id', creator_ids);
-    if ((data || []).length !== new Set(creator_ids).size) return 'Unknown page';
+    const pages = (await R.loadPages(orgId, null)).filter(p => creator_ids.includes(p.id));
+    if (pages.length !== new Set(creator_ids).size) return 'Unknown page';
+    if (slot && pages.some(p => p.platform !== slot.platform)) return 'Those pages are on another platform than this shift';
   }
   return null;
 }
@@ -44,14 +47,18 @@ async function overlap(orgId, chatterId, shiftId, weekdays, exceptId = null) {
 }
 const DAY = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-// GET /api/roster?week=YYYY-MM-DD — the week (Mon–Sun) holding that date: shift
-// times, pages, chatters, the standing roster, changes, each day's board and gaps,
-// and hours per chatter.
+// GET /api/roster?week=YYYY-MM-DD&platform= — one platform's week (Mon–Sun) holding
+// that date: shift times, pages, chatters, the standing roster, changes, each
+// day's board and gaps, and hours per chatter. A platform's own shift times are
+// made the first time its roster opens.
 router.get('/', async (req, res) => {
   try {
+    const orgId = req.user.organisationId;
     const date = isDate(req.query.week) ? req.query.week : todayAms();
-    const view = await R.weekView(req.user.organisationId, date);
-    res.json({ ...view, today: todayAms(), message: view.ready ? null : R.READY_ERROR });
+    const platform = isPlatform(req.query.platform) ? req.query.platform : 'onlyfans';
+    const own = platform === 'onlyfans' ? [] : await R.ensureSlots(orgId, platform);
+    const view = await R.weekView(orgId, date, platform);
+    res.json({ ...view, today: todayAms(), message: view.ready ? null : own === null ? R.PLATFORM_ERROR : R.READY_ERROR });
   } catch (e) {
     console.error('[roster] week:', e.message);
     res.status(500).json({ error: 'Could not load the shifts' });
@@ -64,7 +71,7 @@ router.get('/chatter/:id', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
     const from = todayAms(), to = R.addDays(from, 13);
-    const r = await R.loadRoster(orgId, from, to);
+    const r = await R.loadRoster(orgId, from, to, null);         // every platform
     if (!r.ready) return res.json({ ready: false, assignments: [], changes: [] });
     res.json({
       ready: true, slots: r.slots, pages: r.pages,
@@ -120,7 +127,8 @@ router.patch('/assignments/:id', canEdit, async (req, res) => {
     const shiftId = update.shift_id || cur.shift_id;
     const clash = await overlap(orgId, cur.chatter_id, shiftId, update.weekdays || cur.weekdays, cur.id);
     if (clash.length) return res.status(409).json({ error: `Already on this shift on ${clash.map(d => DAY[d]).join(', ')}` });
-    const bad = await checkParts(orgId, { shift_id: update.shift_id, creator_ids: update.creator_ids });
+    // the shift and pages it ends up with (both checked: they must be on one platform)
+    const bad = await checkParts(orgId, { shift_id: shiftId, creator_ids: update.creator_ids || cur.creator_ids });
     if (bad) return res.status(400).json({ error: bad });
     // the hours: as sent, else as they were (still checked when the shift changes)
     const timesSent = req.body.start_time !== undefined || req.body.end_time !== undefined;
@@ -204,6 +212,84 @@ router.delete('/changes/:id', canEdit, async (req, res) => {
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Could not undo' });
+  }
+});
+
+// ── A platform's shift times (Shifts page → Shift times) ────────────────────
+const isClock = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(String(t || ''));
+async function ownSlot(orgId, id) {
+  const { data } = await supabaseAdmin.from('shifts').select('id').eq('id', id).eq('organisation_id', orgId).is('creator_id', null).maybeSingle();
+  return data;
+}
+// The fields sent, checked. partial: only what's there (an edit).
+function slotFields(body, partial) {
+  const out = {};
+  if (body.name !== undefined || !partial) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > 40) return { error: 'Give the shift a name (up to 40 characters)' };
+    out.name = name;
+  }
+  for (const k of ['start_time', 'end_time']) {
+    if (body[k] === undefined && partial) continue;
+    if (!isClock(body[k])) return { error: 'Times look like 09:00' };
+    out[k] = body[k];
+  }
+  return { out };
+}
+
+// POST /api/roster/slots { platform, name, start_time, end_time } — a new shift time
+router.post('/slots', canEdit, async (req, res) => {
+  try {
+    const platform = req.body.platform;
+    if (!isPlatform(platform)) return res.status(400).json({ error: 'Unknown platform' });
+    const { out, error } = slotFields(req.body, false);
+    if (error) return res.status(400).json({ error });
+    if (out.start_time === out.end_time) return res.status(400).json({ error: 'A shift needs different start and end times' });
+    const { data, error: e } = await supabaseAdmin.from('shifts').insert({
+      ...out, organisation_id: req.user.organisationId, platform, timezone: 'Europe/Amsterdam', shift_type: 'regular', is_default: false, is_active: true,
+    }).select('id').single();
+    if (e) return res.status(/platform/.test(e.message) ? 409 : 500).json({ error: /platform/.test(e.message) ? R.PLATFORM_ERROR : 'Could not add the shift' });
+    res.status(201).json(data);
+  } catch {
+    res.status(500).json({ error: 'Could not add the shift' });
+  }
+});
+
+// PATCH /api/roster/slots/:id { name?, start_time?, end_time? } — rename or move a
+// shift time; everyone rostered on it moves with it
+router.patch('/slots/:id', canEdit, async (req, res) => {
+  try {
+    const orgId = req.user.organisationId;
+    if (!(await ownSlot(orgId, req.params.id))) return res.status(404).json({ error: 'Not found' });
+    const { out, error } = slotFields(req.body, true);
+    if (error) return res.status(400).json({ error });
+    if (!Object.keys(out).length) return res.status(400).json({ error: 'Nothing to change' });
+    const cur = await slotOf(orgId, req.params.id);
+    if ((out.start_time || cur.start) === (out.end_time || cur.end)) return res.status(400).json({ error: 'A shift needs different start and end times' });
+    const { error: e } = await supabaseAdmin.from('shifts').update(out).eq('id', req.params.id).eq('organisation_id', orgId);
+    if (e) return res.status(500).json({ error: 'Could not save the shift' });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Could not save the shift' });
+  }
+});
+
+// DELETE /api/roster/slots/:id — only a shift nobody is or was rostered on (the
+// roster rows and their history would go with it)
+router.delete('/slots/:id', canEdit, async (req, res) => {
+  try {
+    const orgId = req.user.organisationId;
+    if (!(await ownSlot(orgId, req.params.id))) return res.status(404).json({ error: 'Not found' });
+    const [a, c] = await Promise.all([
+      supabaseAdmin.from('roster_assignments').select('id', { count: 'exact', head: true }).eq('organisation_id', orgId).eq('shift_id', req.params.id),
+      supabaseAdmin.from('roster_changes').select('id', { count: 'exact', head: true }).eq('organisation_id', orgId).eq('shift_id', req.params.id),
+    ]);
+    if ((a.count || 0) + (c.count || 0) > 0) return res.status(409).json({ error: 'People are or were rostered on this shift: move them to another shift first' });
+    const { error } = await supabaseAdmin.from('shifts').delete().eq('id', req.params.id).eq('organisation_id', orgId).is('creator_id', null);
+    if (error) return res.status(500).json({ error: 'Could not remove the shift' });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Could not remove the shift' });
   }
 });
 

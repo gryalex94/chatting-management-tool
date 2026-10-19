@@ -21,10 +21,12 @@ export function PlatformProvider({ children }) {
   const staff = !!user && user.role !== 'chatter';
   const [platform, setPlatformState] = useState(stored);
   const [pages, setPages] = useState([]);                  // every active page, with its platform
+  const [pagesLoaded, setPagesLoaded] = useState(false);
 
   const reloadPages = useCallback(() => api.get('/api/creators')
     .then(r => setPages(Array.isArray(r.data) ? r.data : []))
-    .catch(() => { /* the switch still works without the counts */ }), []);
+    .catch(() => { /* the switch still works without the counts */ })
+    .finally(() => setPagesLoaded(true)), []);
   useEffect(() => { if (staff) reloadPages(); }, [staff, reloadPages]);
 
   const setPlatform = useCallback((p) => {
@@ -36,8 +38,8 @@ export function PlatformProvider({ children }) {
     const counts = Object.fromEntries(PLATFORMS.map(p => [p.id, 0]));
     for (const pg of pages) if (!pg.merged_into) counts[pagePlatform(pg)] += 1;   // a team counts once
     const platformPages = pages.filter(pg => pagePlatform(pg) === platform);
-    return { platform, setPlatform, pages, platformPages, counts, reloadPages };
-  }, [platform, setPlatform, pages, reloadPages]);
+    return { platform, setPlatform, pages, pagesLoaded, platformPages, counts, reloadPages };
+  }, [platform, setPlatform, pages, pagesLoaded, reloadPages]);
 
   return <PlatformContext.Provider value={value}>{children}</PlatformContext.Provider>;
 }

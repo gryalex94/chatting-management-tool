@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Check, ChevronLeft, ChevronRight, CircleAlert, Loader2, MoreHorizontal, Pencil, Plus, Sparkles, Trash2, UserPlus,
+  Check, ChevronLeft, ChevronRight, CircleAlert, Clock, Loader2, MoreHorizontal, Pencil, Plus, Sparkles, Trash2, UserPlus,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { usePlatform } from '@/context/PlatformContext';
 import PlatformNotice, { FanslyNotice } from '@/components/shared/PlatformNotice';
+import { platformInfo } from '@/utils/platforms';
 
 const DAY = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -54,7 +55,7 @@ const hoursLabel = (from, to) => (from && to ? `${from}–${to}` : '');
  * anyone in a shift where it's normally covered shows red; covered for only part
  * of the shift, it shows the open hours. Either way, "Bring someone".
  */
-function RosterPage() {
+function RosterPage({ platform }) {
   const { user } = useAuth();
   const canEdit = EDIT_ROLES.includes(user?.role);
   const [week, setWeek] = useState(null);              // any date in the week shown; null = this week
@@ -64,10 +65,12 @@ function RosterPage() {
   const [editor, setEditor] = useState(null);          // { assignment } | { chatterId? } (new)
   const [bring, setBring] = useState(null);            // { creatorId, shiftId, hole }
   const [proposal, setProposal] = useState(false);
+  const [times, setTimes] = useState(false);           // the Shift times dialog
   const [busy, setBusy] = useState(false);
+  const onlyFans = platform === 'onlyfans';            // "Build from how we work now" reads OnlyFans chats
 
-  const load = useCallback(() => api.get(`/api/roster${week ? `?week=${week}` : ''}`)
-    .then(r => setData(r.data)).catch(() => setData({ error: true })), [week]);
+  const load = useCallback(() => api.get('/api/roster', { params: { week: week || undefined, platform } })
+    .then(r => setData(r.data)).catch(() => setData({ error: true })), [week, platform]);
   useEffect(() => { load(); }, [load]);
 
   const slots = useMemo(() => data?.slots || [], [data]);
@@ -94,7 +97,7 @@ function RosterPage() {
       <div className='min-w-0'>
         <h2 className='text-2xl font-bold tracking-tight'>Shifts</h2>
         <p className='max-w-3xl text-muted-foreground'>
-          Who works which pages, shift by shift. Changes for one day don&apos;t touch the usual roster.
+          Who works which {platformInfo(platform).name} pages, shift by shift. Changes for one day don&apos;t touch the usual roster.
         </p>
       </div>
       {data?.week_start && (
@@ -105,7 +108,8 @@ function RosterPage() {
             <Button variant='outline' size='icon' aria-label='Next week' onClick={() => setWeek(addDays(data.week_start, 7))}><ChevronRight /></Button>
           </div>
           {week && <Button variant='ghost' size='sm' onClick={() => { setWeek(null); setDay(null); }}>This week</Button>}
-          {canEdit && data.ready && <Button variant='outline' onClick={() => setProposal(true)}><Sparkles />Build from how we work now</Button>}
+          {canEdit && data.ready && <Button variant='outline' onClick={() => setTimes(true)}><Clock />Shift times</Button>}
+          {canEdit && data.ready && onlyFans && <Button variant='outline' onClick={() => setProposal(true)}><Sparkles />Build from how we work now</Button>}
         </div>
       )}
     </div>
@@ -119,9 +123,9 @@ function RosterPage() {
         {header}
         <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm'>
           <CircleAlert className='mt-0.5 size-4 shrink-0 text-warn' />
-          <span>{data.message || 'Shifts are not set up yet.'} Then &ldquo;Build from how we work now&rdquo; fills the roster from the last 4 weeks.</span>
+          <span>{data.message || 'Shifts are not set up yet.'}{onlyFans && <> Then &ldquo;Build from how we work now&rdquo; fills the roster from the last 4 weeks.</>}</span>
         </div>
-        <OldViewLink />
+        {onlyFans && <OldViewLink />}
       </div>
     );
   }
@@ -145,8 +149,20 @@ function RosterPage() {
 
       {!assignments.length ? (
         <div className='flex flex-col items-start gap-3 rounded-lg border border-dashed p-6'>
-          <p className='text-sm text-muted-foreground'>No roster yet. Build it from how the team actually worked the last 4 weeks, then adjust.</p>
-          {canEdit && <Button onClick={() => setProposal(true)}><Sparkles />Build from how we work now</Button>}
+          {onlyFans ? (
+            <>
+              <p className='text-sm text-muted-foreground'>No roster yet. Build it from how the team actually worked the last 4 weeks, then adjust.</p>
+              {canEdit && <Button onClick={() => setProposal(true)}><Sparkles />Build from how we work now</Button>}
+            </>
+          ) : (
+            <>
+              <p className='text-sm text-muted-foreground'>
+                No {platformInfo(platform).name} roster yet. Add who works which shift on these pages
+                ({(data.pages || []).filter(p => p.is_active !== false).map(p => p.name).join(', ')}).
+              </p>
+              {canEdit && <Button onClick={() => setEditor({})}><UserPlus />Add someone</Button>}
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -268,7 +284,7 @@ function RosterPage() {
         </>
       )}
 
-      <OldViewLink />
+      {onlyFans && <OldViewLink />}
 
       {editor && (
         <AssignmentEditor data={data} initial={editor} onClose={() => setEditor(null)}
@@ -280,6 +296,10 @@ function RosterPage() {
           onRun={async (fn, done) => { const ok = await run(fn, done); if (ok) setBring(null); }} />
       )}
       {proposal && <ProposalDialog onClose={() => setProposal(false)} onApplied={() => { setProposal(false); load(); }} />}
+      {times && (
+        <ShiftTimesDialog key={slots.map(x => `${x.id}${x.name}${x.start}${x.end}`).join('|')} platform={platform} slots={slots}
+          onClose={() => setTimes(false)} onChanged={load} />
+      )}
     </div>
   );
 }
@@ -703,15 +723,67 @@ function ProposalDialog({ onClose, onApplied }) {
 }
 
 // The roster is OnlyFans' for now; Fanvue gets its own shift times and roster next.
+// A platform's shift times: rename or move one (everyone rostered on it moves
+// too), add one, or remove one nobody has been rostered on.
+function ShiftTimesDialog({ platform, slots, onClose, onChanged }) {
+  const [rows, setRows] = useState(() => slots.map(x => ({ id: x.id, name: x.name, start: x.start, end: x.end })));
+  const [draft, setDraft] = useState({ name: '', start: '', end: '' });
+  const [busy, setBusy] = useState(false);
+  const edit = (id, k, v) => setRows(list => list.map(r => (r.id === id ? { ...r, [k]: v } : r)));
+  const changed = (r) => { const x = slots.find(y => y.id === r.id); return !!x && (x.name !== r.name.trim() || x.start !== r.start || x.end !== r.end); };
+  const act = async (fn, done) => {
+    setBusy(true);
+    try { await fn(); toast.success(done); onChanged(); }
+    catch (e) { toast.error(errMsg(e, 'Could not save')); }
+    finally { setBusy(false); }
+  };
+  const save = (r) => act(() => api.patch(`/api/roster/slots/${r.id}`, { name: r.name, start_time: r.start, end_time: r.end }), `${r.name} saved`);
+  const remove = (r) => window.confirm(`Remove ${r.name}?`) && act(() => api.delete(`/api/roster/slots/${r.id}`), `${r.name} removed`);
+  const add = () => act(() => api.post('/api/roster/slots', { platform, name: draft.name, start_time: draft.start, end_time: draft.end }), `${draft.name || 'Shift'} added`);
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className='sm:max-w-xl'>
+        <DialogHeader>
+          <DialogTitle>{platformInfo(platform).name} shift times</DialogTitle>
+          <DialogDescription>
+            Amsterdam time. A shift that ends after midnight counts as the day it starts. Moving a shift moves everyone rostered on it.
+          </DialogDescription>
+        </DialogHeader>
+        <div className='grid gap-2'>
+          {rows.map(r => (
+            <div key={r.id} className='flex flex-wrap items-center gap-2'>
+              <Input value={r.name} onChange={e => edit(r.id, 'name', e.target.value)} aria-label='Shift name' className='min-w-28 flex-1' />
+              <Input type='time' value={r.start} onChange={e => edit(r.id, 'start', e.target.value)} aria-label={`${r.name} starts`} className='w-28' />
+              <span className='text-muted-foreground'>–</span>
+              <Input type='time' value={r.end} onChange={e => edit(r.id, 'end', e.target.value)} aria-label={`${r.name} ends`} className='w-28' />
+              <Button size='sm' variant='outline' disabled={busy || !changed(r)} onClick={() => save(r)}>Save</Button>
+              <Button size='icon' variant='ghost' aria-label={`Remove ${r.name}`} disabled={busy} onClick={() => remove(r)}><Trash2 /></Button>
+            </div>
+          ))}
+          <div className='mt-2 flex flex-wrap items-center gap-2 border-t pt-3'>
+            <Input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder='New shift' aria-label='New shift name' className='min-w-28 flex-1' />
+            <Input type='time' value={draft.start} onChange={e => setDraft(d => ({ ...d, start: e.target.value }))} aria-label='New shift starts' className='w-28' />
+            <span className='text-muted-foreground'>–</span>
+            <Input type='time' value={draft.end} onChange={e => setDraft(d => ({ ...d, end: e.target.value }))} aria-label='New shift ends' className='w-28' />
+            <Button size='sm' disabled={busy || !draft.name.trim() || !draft.start || !draft.end} onClick={add}><Plus />Add</Button>
+          </div>
+        </div>
+        <DialogFooter><Button variant='outline' onClick={onClose}>Done</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Each platform has its own roster and shift times; the switch in the menu picks one.
 export default function ShiftsPage() {
-  const { platform } = usePlatform();
-  if (platform === 'fanvue') {
+  const { platform, counts, pagesLoaded } = usePlatform();
+  if (platform !== 'onlyfans' && pagesLoaded && !counts[platform]) {
+    if (platform === 'fansly') return <FanslyNotice />;
     return (
-      <PlatformNotice platform='fanvue' title='Fanvue shifts come next'>
-        Fanvue gets its own shift times and roster, separate from OnlyFans.
+      <PlatformNotice platform={platform} title={`No ${platformInfo(platform).name} pages yet`}>
+        Once a {platformInfo(platform).name} page is connected, its shifts and roster show here.
       </PlatformNotice>
     );
   }
-  if (platform === 'fansly') return <FanslyNotice />;
-  return <RosterPage />;
+  return <RosterPage key={platform} platform={platform} />;
 }

@@ -27,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { platformInfo } from '@/utils/platforms';
 
 /* ─── Constants ──────────────────────────────────── */
 // Data colours: one per mistake category (drawn as a small bar / dot).
@@ -572,6 +573,8 @@ function PenaltyModal({ chatterId, onClose, onSaved }) {
 /* ─── Shifts (the roster on the Shifts page) ───────── */
 function RosterPanel({ roster, onOpen }) {
   const slot = (sid) => (roster.slots || []).find(x => x.id === sid);
+  // A shift's name, with its platform when it isn't OnlyFans ("Fanvue · Middle").
+  const slotName = (sid) => { const s = slot(sid); return s ? `${s.platform && s.platform !== 'onlyfans' ? `${platformInfo(s.platform).name} · ` : ''}${s.name}` : null; };
   const page = (pid) => (roster.pages || []).find(x => x.id === pid)?.name || '—';
   const rows = [...(roster.assignments || [])].sort((a, b) => (a.start_time ? 1 : 0) - (b.start_time ? 1 : 0));   // overtime last
   const workDays = new Set(rows.flatMap(a => a.weekdays || []));
@@ -584,7 +587,7 @@ function RosterPanel({ roster, onOpen }) {
       ) : rows.map(a => (
         <div key={a.id} className='space-y-1.5 rounded-md border bg-muted/30 px-3 py-2'>
           <div className='flex items-center justify-between gap-2 text-sm'>
-            <span className='font-medium'>{slot(a.shift_id)?.name || 'Shift'}</span>
+            <span className='font-medium'>{slotName(a.shift_id) || 'Shift'}</span>
             <span className='text-xs text-muted-foreground tabular-nums'>{a.start_time ? `${hours(a.start_time, a.end_time)} · overtime` : `${slot(a.shift_id)?.start}–${slot(a.shift_id)?.end}`}</span>
           </div>
           <div className='grid grid-cols-7 gap-1'>
@@ -600,7 +603,7 @@ function RosterPanel({ roster, onOpen }) {
           <div className='text-sm font-medium'>Next two weeks</div>
           {roster.changes.map(c => (
             <div key={c.id} className='text-sm text-muted-foreground'>
-              <span className='font-medium text-foreground'>{fmt(c.date)}</span>: {c.kind === 'off' ? (c.shift_id ? `off ${slot(c.shift_id)?.name || 'one shift'}` : 'off') : `${slot(c.shift_id)?.name || 'a shift'}${c.start_time ? ` ${hours(c.start_time, c.end_time)}` : ''} on ${(c.creator_ids || []).map(page).join(', ')}`}{c.note ? ` (${c.note})` : ''}
+              <span className='font-medium text-foreground'>{fmt(c.date)}</span>: {c.kind === 'off' ? (c.shift_id ? `off ${slotName(c.shift_id) || 'one shift'}` : 'off') : `${slotName(c.shift_id) || 'a shift'}${c.start_time ? ` ${hours(c.start_time, c.end_time)}` : ''} on ${(c.creator_ids || []).map(page).join(', ')}`}{c.note ? ` (${c.note})` : ''}
             </div>
           ))}
         </div>
@@ -951,7 +954,7 @@ export default function ChatterProfile() {
   const mainRows = rosterRows.filter(a => !a.start_time);
   const mainShifts = [...new Set((mainRows.length ? mainRows : rosterRows).map(a => a.shift_id))].map(rosterSlot).filter(Boolean);
   const shiftName = rosterRows.length
-    ? `${mainShifts.map(s => s.name).join(' · ')}${mainRows.length && mainRows.length < rosterRows.length ? ' + overtime' : ''}`
+    ? `${mainShifts.map(s => (s.platform && s.platform !== 'onlyfans' ? `${platformInfo(s.platform).name} ${s.name}` : s.name)).join(' · ')}${mainRows.length && mainRows.length < rosterRows.length ? ' + overtime' : ''}`
     : regularAssignments[0]?.shifts?.name || '—';
   const shiftHours = rosterRows.length
     ? (mainRows.length && mainShifts.length === 1 ? `${mainShifts[0].start} – ${mainShifts[0].end}` : '')

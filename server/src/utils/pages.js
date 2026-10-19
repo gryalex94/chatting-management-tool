@@ -23,9 +23,10 @@ async function createPage({ name, organisationId, platform = 'onlyfans' }) {
     ({ data, error } = await supabaseAdmin.from('creators').insert({ name, organisation_id: organisationId }).select().single());
   }
   if (error) throw error;
-  await supabaseAdmin.from('shifts').insert(
-    DEFAULT_SHIFTS.map(s => ({ ...s, creator_id: data.id, organisation_id: organisationId, is_default: true, shift_type: 'regular' })),
-  );
+  // The page's own shifts are on its platform (that column comes with database change 034).
+  const rows = DEFAULT_SHIFTS.map(s => ({ ...s, creator_id: data.id, organisation_id: organisationId, is_default: true, shift_type: 'regular', platform }));
+  const { error: e2 } = await supabaseAdmin.from('shifts').insert(rows);
+  if (e2 && noPlatformColumn(e2)) await supabaseAdmin.from('shifts').insert(rows.map(({ platform: _p, ...r }) => r));
   return data;
 }
 
