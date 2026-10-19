@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CircleAlert, Loader2, Play, Scale, Trophy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
@@ -9,10 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { cost, dayTime, errMsg } from './shared';
+import { cost, dayTime, dollars, errMsg, fanName, shortDay } from './shared';
 
 const runName = (b) => `Test of ${dayTime(b.batch)}`;
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}%` : '–');
+const moments = (n) => `${n} moment${n === 1 ? '' : 's'}`;
+const WHO = { tie: "Can't choose", none: 'None is good' };   // picks that aren't one of the answers
 
 // Her messages as bubbles, on the right.
 function Said({ list, k }) {
@@ -23,27 +25,59 @@ function Said({ list, k }) {
   );
 }
 
-// One side of the score: AI wins, chatter wins, ties, and the AI's win rate.
-function Score({ title, t, note }) {
-  const decided = t.ai + t.chatter;
+// Who was picked as best, out of the votes cast: her chatter, each AI writer, none.
+function Score({ title, t, writers, note }) {
+  const rows = [['chatter', 'Her chatter'], ['ai', writers.ai || 'AI'], ...(writers.ai2 ? [['ai2', writers.ai2]] : []), ['none', 'None is good'], ['tie', "Can't choose"]];
+  const ai = t.ai + t.ai2;
   return (
-    <div className='flex flex-col gap-1 rounded-lg border p-4'>
+    <div className='flex flex-col gap-2 rounded-lg border p-4'>
       <span className='text-sm text-muted-foreground'>{title}</span>
-      <span className='text-2xl font-semibold tabular-nums'>{decided ? `AI ${pct(t.ai, decided)}` : '–'}</span>
-      <span className='text-xs text-muted-foreground'>AI better {t.ai} · chatter better {t.chatter} · can&apos;t choose {t.tie}</span>
+      <span className='text-2xl font-semibold tabular-nums'>{t.n ? `AI best ${pct(ai, t.n)}` : '–'}</span>
+      <div className='grid gap-1 text-xs'>
+        {rows.map(([k, label]) => (
+          <div key={k} className='flex items-center gap-2'>
+            <span className='w-32 shrink-0 truncate text-muted-foreground'>{label}</span>
+            <div className='h-1.5 flex-1 rounded bg-muted'><div className='h-1.5 rounded bg-primary' style={{ width: t.n ? `${(100 * t[k]) / t.n}%` : 0 }} /></div>
+            <span className='w-14 text-right tabular-nums'>{t[k]} · {pct(t[k], t.n)}</span>
+          </div>
+        ))}
+      </div>
       {note && <span className='text-xs text-muted-foreground'>{note}</span>}
     </div>
   );
 }
 
+// The chat up to the moment being judged, scrolled to the end.
+function Context({ duel }) {
+  const box = useRef(null);
+  useLayoutEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [duel.id]);
+  return (
+    <div ref={box} className='flex max-h-[40vh] flex-col gap-2 overflow-y-auto rounded-lg border bg-card p-3'>
+      <span className='text-center text-xs text-muted-foreground'>The whole chat up to this moment ({duel.context.length} messages)</span>
+      {duel.context.map((m, i) => (
+        <div key={i} className={cn('flex flex-col gap-2', m.from_fan ? 'items-start' : 'items-end')}>
+          {(i === 0 || shortDay(m.sent_at) !== shortDay(duel.context[i - 1].sent_at)) && <span className='self-center text-[11px] text-muted-foreground'>{dayTime(m.sent_at)}</span>}
+          <div className={cn('max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
+            m.from_fan ? 'rounded-bl-sm bg-muted' : 'rounded-br-sm bg-primary/80 text-primary-foreground',
+            m.from_fan && i === duel.context.length - 1 && 'ring-2 ring-primary/50')}>
+            {m.message || '(a photo or video)'}
+          </div>
+        </div>
+      ))}
+      <span className='text-center text-xs text-muted-foreground'>What should she answer?</span>
+    </div>
+  );
+}
+
 /**
- * The blind test: real moments from her chats where a chatter answered a fan,
- * and the AI's own answer to the same moment, shown as A and B. The manager picks
- * the better one without knowing which is which; Claude judges them too. Results
- * reveal who wrote what, and what really happened after the chatter's answer.
+ * The blind test: real moments from her chats (mostly with fans who pay) where a
+ * chatter answered a fan, with two AI writers' answers to the same moment, shown
+ * as A, B and C. The manager picks the best one, or none, without knowing who
+ * wrote which; Claude judges them too. Her chatters' answers that were followed
+ * by a purchase are the gold standard ("proven answers"); the AI learns from them.
  */
 export default function DuelTab({ page, ready, onSpent }) {
-  const [ov, setOv] = useState(null);                 // { ready, batches, job }
+  const [ov, setOv] = useState(null);                 // { ready, v2, proven_answers, batches, job }
   const [batch, setBatch] = useState(null);
   const [view, setView] = useState('judge');
   const [duel, setDuel] = useState(null);             // the moment being judged
@@ -63,7 +97,7 @@ export default function DuelTab({ page, ready, onSpent }) {
 
   const current = batch || ov?.batches?.[0]?.batch || null;
   // reload when more moments of this test come in (while it runs)
-  const ready_ = ov?.batches?.find(b => b.batch === current)?.total || 0;
+  const arrived = ov?.batches?.find(b => b.batch === current)?.total || 0;
   useEffect(() => {
     if (!current) return undefined;
     let live = true;
@@ -72,14 +106,14 @@ export default function DuelTab({ page, ready, onSpent }) {
       .then(r => { if (live) (view === 'judge' ? setDuel : setRes)(r.data); })
       .catch(e => { if (live) toast.error(errMsg(e, 'Could not load the test')); });
     return () => { live = false; };
-  }, [page.creator_id, current, view, ready_]);
+  }, [page.creator_id, current, view, arrived]);
 
   const start = async () => {
     setBusy('start');
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/duels`, { count: Number(count) });
       setOv(o => ({ ...o, job: data.job })); setBatch(data.job.batch); setView('judge'); setDuel(null);
-      toast.success('Started: the AI is answering the moments');
+      toast.success('Started');
     } catch (e) { toast.error(errMsg(e, 'Could not start')); }
     finally { setBusy(''); }
   };
@@ -88,17 +122,18 @@ export default function DuelTab({ page, ready, onSpent }) {
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/duels/${duel.id}/vote`, { vote: choice });
       setDuel(data);
-      if (data.done) { load(); toast.success('All judged: here are the results'); setView('results'); }
+      if (data.done) { load(); if (!running) { toast.success('All judged: here are the results'); setView('results'); } }
     } catch (e) { toast.error(errMsg(e, 'Could not save the vote')); }
     finally { setBusy(''); }
   };
 
   if (!ov) return <div className='grid gap-3'>{[0, 1, 2].map(i => <Skeleton key={i} className='h-14 w-full' />)}</div>;
   if (ov.error) return <p className='text-sm text-muted-foreground'>{ov.error}</p>;
-  if (!ov.ready) {
+  if (!ov.ready || !ov.v2) {
     return (
       <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm'>
-        <CircleAlert className='mt-0.5 size-4 shrink-0 text-warn' /><span>Run database change 037 (AI blind test) in Supabase first.</span>
+        <CircleAlert className='mt-0.5 size-4 shrink-0 text-warn' />
+        <span>Run database change {ov.ready ? '038 (proven answers)' : '037 (AI blind test), then 038'} in Supabase first.</span>
       </div>
     );
   }
@@ -111,8 +146,10 @@ export default function DuelTab({ page, ready, onSpent }) {
         <div className='flex max-w-2xl items-start gap-2 text-sm'>
           <Scale className='mt-0.5 size-4 shrink-0 text-muted-foreground' />
           <span>
-            Real moments from her chats where a chatter answered a fan. The AI writes its own answer to the same moment; you see both as A and B
-            and pick the better one, without knowing which is which. Claude judges them too. Each test costs about $0.10 per 100 moments.
+            Real moments from her chats, mostly with fans who pay. For each: her chatter&apos;s real answer and two AI answers to the same
+            moment, as A, B and C. Pick the best one, or none, without knowing who wrote which; Claude judges them too.
+            Her chatters&apos; answers that were followed by a purchase are the gold standard ({ov.proven_answers ? `${ov.proven_answers} proven answers` : 'built when a test starts'});
+            the AI learns from them. About $0.20 per 100 moments.
           </span>
         </div>
         <div className='flex items-end gap-2'>
@@ -128,10 +165,13 @@ export default function DuelTab({ page, ready, onSpent }) {
 
       {job?.running && (
         <p className='flex items-center gap-2 text-sm text-muted-foreground'>
-          <Loader2 className='size-4 animate-spin' />The AI is answering the moments: {job.done} of {job.total} ({cost(job.cost)} so far). You can start judging as they come in.
+          <Loader2 className='size-4 animate-spin' />
+          {job.phase === 'gold'
+            ? `Collecting proven answers: ${job.gold_done} of ${job.gold_total || '…'}`
+            : `${job.writers?.join(' and ') || 'The AI'} answering the moments: ${job.done} of ${job.total} (${cost(job.cost)} so far). You can start judging as they come in.`}
         </p>
       )}
-      {job && !job.running && job.failed > 0 && <p className='text-sm text-warn'>{job.failed} moment{job.failed === 1 ? '' : 's'} couldn&apos;t be answered ({job.last_error}).</p>}
+      {job && !job.running && job.last_error && <p className='text-sm text-warn'>{job.failed ? `${job.failed} moment${job.failed === 1 ? '' : 's'} couldn't be answered: ` : ''}{job.last_error}</p>}
 
       {!ov.batches.length ? (
         <p className='rounded-lg border border-dashed p-6 text-sm text-muted-foreground'>No test yet. Start one above.</p>
@@ -140,7 +180,7 @@ export default function DuelTab({ page, ready, onSpent }) {
           <div className='flex flex-wrap items-center gap-2'>
             {ov.batches.length > 1 && (
               <Select value={current} onValueChange={(v) => { setBatch(v); setDuel(null); setRes(null); }}>
-                <SelectTrigger className='w-72' aria-label='Test run'><SelectValue /></SelectTrigger>
+                <SelectTrigger className='w-80' aria-label='Test run'><SelectValue /></SelectTrigger>
                 <SelectContent>{ov.batches.map(b => <SelectItem key={b.batch} value={b.batch}>{runName(b)} · {b.voted} of {b.total} judged</SelectItem>)}</SelectContent>
               </Select>
             )}
@@ -160,42 +200,53 @@ export default function DuelTab({ page, ready, onSpent }) {
             </div>
           ) : (
             <div className='flex flex-col gap-4'>
-              <div className='flex flex-col gap-2 rounded-lg border bg-card p-3'>
-                <span className='text-xs text-muted-foreground'>Moment {duel.number} of {duel.total}: the chat so far</span>
-                {duel.context.map((m, i) => (
-                  <div key={i} className={cn('flex', m.from_fan ? 'justify-start' : 'justify-end')}>
-                    <div className={cn('max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
-                      m.from_fan ? 'rounded-bl-sm bg-muted' : 'rounded-br-sm bg-primary/80 text-primary-foreground',
-                      m.from_fan && i === duel.context.length - 1 && 'ring-2 ring-primary/40')}>
-                      {m.message || '(a photo or video)'}
+              <div className='flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border px-4 py-2 text-sm'>
+                <span><span className='font-medium'>{fanName(duel.fan)}</span> <span className='text-muted-foreground'>· moment {duel.number} of {duel.total}</span></span>
+                <span className='text-xs text-muted-foreground'>
+                  By then: {duel.fan.spent_before ? `spent ${dollars(duel.fan.spent_before)}` : 'hadn\'t spent anything'} · {duel.fan.messages_before} messages in the chat
+                  {duel.fan.since ? ` since ${shortDay(duel.fan.since)}` : ''}
+                </span>
+              </div>
+              <Context duel={duel} />
+              <div className={cn('grid gap-3', duel.options.length > 2 ? 'lg:grid-cols-3' : 'md:grid-cols-2')}>
+                {duel.options.map(o => (
+                  <div key={o.key} className='flex flex-col justify-between gap-3 rounded-lg border p-3'>
+                    <div className='flex flex-col gap-2'>
+                      <span className='text-sm font-medium'>Answer {o.key}</span>
+                      <Said list={o.messages} k='creator_message' />
                     </div>
-                  </div>
-                ))}
-                <span className='text-center text-xs text-muted-foreground'>What should she answer?</span>
-              </div>
-              <div className='grid gap-3 md:grid-cols-2'>
-                {[['A', duel.a], ['B', duel.b]].map(([side, list]) => (
-                  <div key={side} className='flex flex-col gap-3 rounded-lg border p-3'>
-                    <span className='text-sm font-medium'>Answer {side}</span>
-                    <Said list={list} k='creator_message' />
-                    <Button variant='outline' onClick={() => vote(side)} disabled={!!busy}>{busy === side ? <Loader2 className='animate-spin' /> : null}{side} is better</Button>
+                    <Button variant='outline' onClick={() => vote(o.key)} disabled={!!busy}>{busy === o.key && <Loader2 className='animate-spin' />}{o.key} is best</Button>
                   </div>
                 ))}
               </div>
-              <div><Button variant='ghost' onClick={() => vote('tie')} disabled={!!busy}>Can&apos;t choose</Button></div>
+              <div className='flex flex-wrap gap-2'>
+                <Button variant='ghost' onClick={() => vote('none')} disabled={!!busy}>None is good</Button>
+                <Button variant='ghost' onClick={() => vote('tie')} disabled={!!busy}>Can&apos;t choose</Button>
+              </div>
             </div>
           ))}
 
           {view === 'results' && (!res ? <Skeleton className='h-64 w-full' /> : (
             <div className='flex flex-col gap-4'>
-              <div className='grid gap-3 md:grid-cols-3'>
-                <Score title='Your votes' t={res.you} note={`${res.you.ai + res.you.chatter + res.you.tie} of ${res.total} judged`} />
-                <Score title="Claude's votes" t={res.claude} />
+              <div className='grid gap-3 lg:grid-cols-2'>
+                <Score title='Your votes: which answer was best' t={res.you} writers={res.writers} note={`${res.you.n} of ${res.total} judged`} />
+                <Score title="Claude's votes" t={res.claude} writers={res.writers} />
+              </div>
+              <div className='grid gap-3 lg:grid-cols-2'>
+                <div className='flex flex-col gap-1 rounded-lg border p-4 text-sm'>
+                  <span className='font-medium'>Against the gold standard</span>
+                  {res.proven.n ? (
+                    <>
+                      <span className='text-xs text-muted-foreground'>{moments(res.proven.n)} where her chatter&apos;s answer was followed by a purchase within a day.</span>
+                      <span>You picked an AI answer over that proven answer in {pct(res.proven.you.ai + res.proven.you.ai2, res.proven.you.n)} of them ({res.proven.you.n} judged).</span>
+                      <span>Claude: {pct(res.proven.claude.ai + res.proven.claude.ai2, res.proven.claude.n)}.</span>
+                    </>
+                  ) : <span className='text-xs text-muted-foreground'>No proven moments in this test (tests from before proven answers don&apos;t have them).</span>}
+                </div>
                 <div className='flex flex-col gap-1 rounded-lg border p-4 text-xs text-muted-foreground'>
-                  <span className='text-sm'>Reality check on Claude</span>
-                  <span>When the chatter&apos;s answer really got him writing back, Claude picked the chatter {pct(res.real_check.answered.chatter, res.real_check.answered.n)} of the time ({res.real_check.answered.n} moments).</span>
-                  <span>When he didn&apos;t write back within a day: {pct(res.real_check.unanswered.chatter, res.real_check.unanswered.n)} ({res.real_check.unanswered.n} moments).</span>
-                  <span>If Claude judges well, the first number is higher. This test cost {cost(res.cost)}.</span>
+                  <span className='text-sm text-foreground'>Reality check on Claude</span>
+                  <span>When her chatter&apos;s answer really got him writing back, Claude picked it {pct(res.real_check.answered.chatter, res.real_check.answered.n)} of the time ({moments(res.real_check.answered.n)}); when it didn&apos;t: {pct(res.real_check.unanswered.chatter, res.real_check.unanswered.n)} ({res.real_check.unanswered.n}).</span>
+                  <span>If Claude judged by what works, the first number would be clearly higher. This test cost {cost(res.cost)}.</span>
                 </div>
               </div>
 
@@ -204,13 +255,13 @@ export default function DuelTab({ page, ready, onSpent }) {
                   <table className='w-full min-w-[520px] text-sm'>
                     <thead><tr className='border-b bg-muted/40 text-left text-xs text-muted-foreground'>
                       <th className='px-3 py-2 font-medium'>Situation (Playbook)</th><th className='px-3 py-2 text-right font-medium'>Moments</th>
-                      <th className='px-3 py-2 text-right font-medium'>AI better, by Claude</th><th className='px-3 py-2 text-right font-medium'>AI better, by you</th>
+                      <th className='px-3 py-2 text-right font-medium'>AI best, by you</th><th className='px-3 py-2 text-right font-medium'>AI best, by Claude</th>
                     </tr></thead>
                     <tbody>{res.by_situation.map(s => (
                       <tr key={s.title} className='border-b last:border-b-0'>
                         <td className='px-3 py-1.5'>{s.title}</td><td className='px-3 py-1.5 text-right tabular-nums'>{s.n}</td>
-                        <td className='px-3 py-1.5 text-right tabular-nums'>{pct(s.ai_claude, s.n)}</td>
                         <td className='px-3 py-1.5 text-right tabular-nums'>{s.you_n ? pct(s.ai_you, s.you_n) : '–'}</td>
+                        <td className='px-3 py-1.5 text-right tabular-nums'>{pct(s.ai_claude, s.n)}</td>
                       </tr>
                     ))}</tbody>
                   </table>
@@ -222,26 +273,34 @@ export default function DuelTab({ page, ready, onSpent }) {
                   <div key={d.id} className='flex flex-col gap-2 rounded-lg border p-3'>
                     <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
                       <span>{dayTime(d.moment_at)}</span>
+                      {d.proven && <Badge variant='outline' className='border-good/40 font-normal text-good'>proven: a purchase followed</Badge>}
+                      {d.fan_context.spent_before != null && <span>{d.fan_context.spent_before ? `he had spent ${dollars(d.fan_context.spent_before)}` : 'no spending yet'}</span>}
                       {d.situations.map(t => <Badge key={t} variant='outline' className='font-normal'>{t}</Badge>)}
-                      {d.ai_status !== 'ok' && <Badge variant='outline' className='border-warn/40 font-normal text-warn'>AI flagged: {d.ai_status}</Badge>}
                     </div>
                     <div className='flex flex-col items-start gap-1'>
                       {d.fan_messages.map((m, i) => <div key={i} className='max-w-[80%] rounded-2xl rounded-bl-sm bg-muted px-3 py-1.5 text-sm'>{m.fan_message}</div>)}
                     </div>
-                    <div className='grid gap-3 md:grid-cols-2'>
-                      <div className='flex flex-col gap-1.5'>
-                        <span className='text-xs font-medium'>Her chatter {d.your_pick === 'chatter' && <Badge className='ms-1'>your pick</Badge>}{d.claude_pick === 'chatter' && <Badge variant='secondary' className='ms-1'>Claude&apos;s pick</Badge>}</span>
-                        <Said list={d.chatter_messages} k='chatter_message' />
-                        <span className='text-xs text-muted-foreground'>
-                          What happened: {d.outcome?.replied ? `he wrote back after ${d.outcome.reply_after_min} min` : 'no answer within a day'}{d.outcome?.bought ? ', and bought within a day' : ''}
-                        </span>
-                      </div>
-                      <div className='flex flex-col gap-1.5'>
-                        <span className='text-xs font-medium'>AI {d.your_pick === 'ai' && <Badge className='ms-1'>your pick</Badge>}{d.claude_pick === 'ai' && <Badge variant='secondary' className='ms-1'>Claude&apos;s pick</Badge>}</span>
-                        <Said list={d.ai_messages} k='creator_message' />
-                      </div>
+                    <div className={cn('grid gap-3', d.answers.length > 2 ? 'lg:grid-cols-3' : 'md:grid-cols-2')}>
+                      {d.answers.map(a => (
+                        <div key={a.key} className='flex flex-col gap-1.5'>
+                          <span className='flex flex-wrap items-center gap-1 text-xs font-medium'>
+                            {a.key}: {a.label}
+                            {d.your_pick === a.source && <Badge>your pick</Badge>}
+                            {d.claude_pick === a.source && <Badge variant='secondary'>Claude&apos;s pick</Badge>}
+                          </span>
+                          <Said list={a.messages} k={a.source === 'chatter' ? 'chatter_message' : 'creator_message'} />
+                          {a.source === 'chatter' && (
+                            <span className='text-xs text-muted-foreground'>
+                              What happened: {d.outcome?.replied ? `he wrote back after ${d.outcome.reply_after_min} min` : 'no answer within a day'}{d.outcome?.bought ? ', and bought within a day' : ''}
+                            </span>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                    {d.claude_reason && <p className='text-xs text-muted-foreground'>Claude: {d.claude_reason}</p>}
+                    <p className='text-xs text-muted-foreground'>
+                      {WHO[d.your_pick] ? `You: ${WHO[d.your_pick]}. ` : ''}
+                      {d.claude_reason ? `Claude${WHO[d.claude_pick] ? ` (${WHO[d.claude_pick].toLowerCase()})` : ''}: ${d.claude_reason}` : ''}
+                    </p>
                   </div>
                 ))}
               </div>

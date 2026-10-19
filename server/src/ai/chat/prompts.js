@@ -124,12 +124,16 @@ function cardText(card = [], money = null) {
  * `chat` = messages oldest first ({ at, from_fan, text, mass, paid, tip, gif }),
  * `notes` = the safety screen's notes for this moment, `now` = Date.
  */
-function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', now = new Date(), retry = null }) {
+function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', proven = [], now = new Date(), retry = null }) {
   const parts = [`Now: ${when(now.toISOString())} (Amsterdam time).`];
   const about = cardText(card, money);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
   if (clean(story)) parts.push(`# Your story with him so far\n${clean(story)}`);
   parts.push(`# The chat, oldest first\n${chat.length ? chat.map(chatLine).join('\n') : '(No messages yet: this is the start of your chat.)'}`);
+  if (proven.length) {
+    const one = (g) => `Him: ${g.fan_said.map(clean).join(' / ')}\nYou: ${g.answer.map(clean).join(' / ')}`;
+    parts.push(`# Answers that worked with paying fans in moments like this (each was followed by a purchase within a day). See what they do; don't copy the words\n${proven.map(one).join('\n\n')}`);
+  }
   if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
   const now_ = [...notes];
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);

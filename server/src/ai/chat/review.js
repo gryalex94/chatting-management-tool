@@ -26,7 +26,7 @@ const REPLY_SCHEMA = {
 
 const DUEL_SCHEMA = {
   type: 'object',
-  properties: { better: { type: 'string', enum: ['A', 'B', 'tie'] }, reason: { type: 'string' } },
+  properties: { better: { type: 'string', enum: ['A', 'B', 'C', 'tie', 'none'] }, reason: { type: 'string' } },
   required: ['better', 'reason'],
   additionalProperties: false,
 };
@@ -74,19 +74,23 @@ async function reviewReply({ fanTexts = [], messages = [], flags = [] }) {
 }
 
 /**
- * The blind test: which of two replies (A, B) to the same moment is better? It
- * isn't told who wrote either. Returns { better: 'A' | 'B' | 'tie', reason, declined, usage }.
+ * The blind test: which of the replies to the same moment (A, B and maybe C) is
+ * best? It isn't told who wrote any of them. `fan` = what was known about him
+ * then. Returns { better: 'A' | 'B' | 'C' | 'tie' | 'none', reason, declined, usage }.
  */
-async function judgeDuel({ profile = {}, chat = [], a = [], b = [] }) {
+async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) {
+  const letters = ['A', 'B', 'C'].slice(0, options.length);
   const said = (list) => list.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n');
   const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.style && `how she texts: ${String(profile.style).slice(0, 300)}`].filter(Boolean).join('; ');
+  const him = fan ? `About him then: ${fan.spent_before ? `he had spent $${fan.spent_before} with her` : 'he had not spent anything yet'}; ${fan.messages_before} messages in the chat so far.\n\n` : '';
   const r = await ask(
-    'You compare two possible replies a creator could send a fan on Fanvue, a subscription site for verified adults. Adult flirting and sex talk are allowed. You are not told who wrote either reply.',
-    `The creator: ${who || 'unknown'}\n\n`
+    'You compare possible replies a creator could send a fan on Fanvue, a subscription site for verified adults. Adult flirting and sex talk are allowed. You are not told who wrote any reply.',
+    `The creator: ${who || 'unknown'}\n\n${him}`
       + `The chat so far (oldest first):\n${chat.map(m => `${m.from_fan ? 'Him' : 'Her'}: ${String(m.text || '(a photo or video)').replace(/\s+/g, ' ').trim()}`).join('\n')}\n\n`
-      + `Reply A:\n${said(a)}\n\nReply B:\n${said(b)}\n\n`
-      + 'Which reply is more likely to keep him engaged and wanting more? It should answer what he said, sound like a real person texting, fit her and the moment, and not be repetitive, needy or pushy. '
-      + 'Length is not quality: a short, natural reply is often the best one in a chat. A reply that claims to be human, agrees to meet or shares contact details loses. If they are about equally good, answer tie. Give the reason in one short sentence.',
+      + letters.map((l, i) => `Reply ${l}:\n${said(options[i])}`).join('\n\n') + '\n\n'
+      + 'Which reply is most likely to keep him engaged and wanting more, so he keeps chatting and spending? It should answer what he said, sound like a real person texting, fit her and the moment, and not be repetitive, needy or pushy. '
+      + 'Length is not quality: a short, natural reply is often the best one in a chat. A reply that claims to be human, agrees to meet or shares contact details loses. '
+      + `Answer ${letters.join(', ')}; "tie" if the best ones are about equally good; "none" if none of them is good. Give the reason in one short sentence.`,
     DUEL_SCHEMA, 'medium');
   if (r.declined) return { declined: true, better: null, reason: 'Claude declined to judge this one.', usage: r.usage };
   return { better: r.answer.better, reason: String(r.answer.reason || ''), usage: r.usage };

@@ -495,7 +495,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     persona.profile.examples?.length ? persona.profile.examples : styleExamples(account.id),
     pickSituations(orgId, creatorId, fanUuid, win.messages, money),
   ]);
-  const base = { profile: persona.profile, examples, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes, situations: strategy.situationGuide(plan.ids) };
+  const proven = await provenExamples(account.id, plan.ids, { excludeFan: fanUuid });
+  const base = {
+    profile: persona.profile, examples, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes,
+    situations: strategy.situationGuide(plan.ids), proven,
+  };
 
   // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
   const speed = persona.settings?.typing || 'normal';
@@ -505,7 +509,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     screen, results,
     used: {
       messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
-      situations: plan.ids.map(strategy.situationTitle),
+      situations: plan.ids.map(strategy.situationTitle), proven: proven.length,
     },
   };
 }
@@ -521,6 +525,35 @@ async function screenLatest(orgId, creatorId, fanUuid, latest) {
     if (r.stop) screen.reasons = [...screen.reasons, `Claude: ${r.reason}`];
   }
   return screen;
+}
+
+// Proven answers (ai_gold, database change 038): what her chatters answered in
+// moments followed by a purchase within a day. Kept in memory for a few minutes.
+const goldCache = new Map();
+async function goldRows(accountId) {
+  const hit = goldCache.get(accountId);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
+  const { data, error } = await supabaseAdmin.from('ai_gold').select('fan_uuid, moment_at, fan_said, answer, situations').eq('account_id', accountId).limit(2000);
+  const rows = error ? [] : data || [];                    // none before database change 038
+  goldCache.set(accountId, { at: Date.now(), rows });
+  return rows;
+}
+const forgetGold = (accountId) => goldCache.delete(accountId);
+
+/** Up to `n` proven answers for moments like this one (sharing a situation), never from the same fan. */
+async function provenExamples(accountId, ids, { excludeFan = null, n = 4 } = {}) {
+  if (!ids.length) return [];
+  const want = new Set(ids);
+  const match = (await goldRows(accountId)).filter(g => g.fan_uuid !== excludeFan && (g.situations || []).some(id => want.has(id)));
+  const shuffled = [...match].sort(() => Math.random() - 0.5);
+  const perFan = {}, out = [];
+  for (const g of shuffled) {
+    if ((perFan[g.fan_uuid] || 0) >= 1) continue;          // a spread of fans
+    perFan[g.fan_uuid] = 1;
+    out.push(g);
+    if (out.length >= n) break;
+  }
+  return out;
 }
 
 // Which Playbook situations fit this moment (none if the picker fails: the reply
@@ -600,5 +633,5 @@ module.exports = {
   buildMemory, buildAllMemory, memoryJob, reply, usage,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
   // for the blind test (utils/aiDuels.js)
-  _engine: { pageAccount, loadPersona, styleExamples, windowFor, screenLatest, pickSituations, writeOne, logUsage, all, isMass, TEAM_TYPES },
+  _engine: { pageAccount, loadPersona, styleExamples, windowFor, screenLatest, pickSituations, provenExamples, forgetGold, writeOne, logUsage, all, isMass, TEAM_TYPES },
 };

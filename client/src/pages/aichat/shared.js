@@ -12,7 +12,10 @@ export const cost = (dollars) => {
   if (c <= 0) return '$0.00';
   return `${Number(c.toFixed(c < 0.1 ? 3 : 2))} cents`;
 };
-export const dollars = (n) => `$${(Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+export const dollars = (n) => {
+  const v = Number(n) || 0;
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 })}`;   // $85, $85.50
+};
 
 export const dayTime = (iso) => (iso ? new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
 export const shortDay = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '—');
