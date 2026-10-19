@@ -21,9 +21,10 @@ const WRITERS = [
   { id: 'thedrummer/cydonia-24b-v4.1', label: 'Cydonia 24B (roleplay)', price: [0.3, 0.5] },
   { id: 'sao10k/l3.1-euryale-70b', label: 'Euryale 70B (roleplay)', price: [0.85, 0.85] },
 ];
-// Venice by default: Mistral Large 3 writes best but is often busy on OpenRouter's
-// shared capacity (half the replies in the first test, 19 Oct 2026).
-const DEFAULT_WRITER = 'cognitivecomputations/dolphin-mistral-24b-venice-edition';
+// Mistral Large 3 writes best. On OpenRouter's shared capacity it was often busy,
+// so the agency's own Mistral key is connected in OpenRouter (19 Oct 2026); the
+// background jobs still fall back to Venice or Cydonia when it is.
+const DEFAULT_WRITER = WRITERS[0].id;
 // For work in the background (her profile, fan memory): when the chosen writer is
 // busy, OpenRouter moves on to these.
 const BACKUPS = ['cognitivecomputations/dolphin-mistral-24b-venice-edition', 'thedrummer/cydonia-24b-v4.1'];
