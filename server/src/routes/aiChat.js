@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireMinRole } = require('../middleware/auth');
 const A = require('../utils/aiChat');
+const D = require('../utils/aiDuels');
 
 // The AI chat for the Fanvue AI creator (utils/aiChat.js): her profile, what she
 // remembers about each fan, and the practice room. Managers and up. Nothing here
@@ -101,6 +102,42 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
       test: Array.isArray(test) ? test : [], models: Array.isArray(models) ? models : [],
     }));
   } catch (e) { fail(res, e, 'draft a reply'); }
+});
+
+// ── The blind test: AI against her chatters (utils/aiDuels.js) ──────────────
+const BATCH_RE = /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/;
+const batchOf = (req, res) => {
+  const b = String(req.query.batch || '');
+  if (!BATCH_RE.test(b)) { res.status(400).json({ error: 'Pick a test run' }); return null; }
+  return b;
+};
+
+// GET /api/ai-chat/pages/:creatorId/duels — the test runs and the running one.
+router.get('/pages/:creatorId/duels', async (req, res) => {
+  try { res.json(await D.overview(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load the blind tests'); }
+});
+
+// POST /api/ai-chat/pages/:creatorId/duels { count } — start a blind test (20–150 moments).
+router.post('/pages/:creatorId/duels', async (req, res) => {
+  try { res.json({ job: await D.startDuels(org(req), req.params.creatorId, req.body?.count) }); } catch (e) { fail(res, e, 'start the blind test'); }
+});
+
+// GET /api/ai-chat/pages/:creatorId/duels/next?batch= — the next moment to judge (blind).
+router.get('/pages/:creatorId/duels/next', async (req, res) => {
+  const batch = batchOf(req, res); if (!batch) return;
+  try { res.json(await D.nextDuel(org(req), req.params.creatorId, batch)); } catch (e) { fail(res, e, 'load the next moment'); }
+});
+
+// GET /api/ai-chat/pages/:creatorId/duels/results?batch= — the results, answers revealed.
+router.get('/pages/:creatorId/duels/results', async (req, res) => {
+  const batch = batchOf(req, res); if (!batch) return;
+  try { res.json(await D.results(org(req), req.params.creatorId, batch)); } catch (e) { fail(res, e, 'load the results'); }
+});
+
+// POST /api/ai-chat/pages/:creatorId/duels/:duelId/vote { vote: 'A' | 'B' | 'tie' } — returns the next moment.
+router.post('/pages/:creatorId/duels/:duelId/vote', async (req, res) => {
+  if (!/^\d+$/.test(req.params.duelId)) return res.status(404).json({ error: 'Not found' });
+  try { res.json(await D.vote(org(req), req.params.creatorId, Number(req.params.duelId), req.body?.vote, req.user.id)); } catch (e) { fail(res, e, 'save the vote'); }
 });
 
 module.exports = router;

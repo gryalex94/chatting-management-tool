@@ -9,6 +9,7 @@ import PlatformNotice from '@/components/shared/PlatformNotice';
 import PracticeTab from './PracticeTab';
 import ProfileTab from './ProfileTab';
 import MemoryTab from './MemoryTab';
+import DuelTab from './DuelTab';
 import { cost, errMsg } from './shared';
 
 const Notice = ({ children }) => (
@@ -86,6 +87,7 @@ export default function AiChatPage() {
             <TabsTrigger value='practice'>Practice</TabsTrigger>
             <TabsTrigger value='profile'>Her profile</TabsTrigger>
             <TabsTrigger value='memory'>Fan memory</TabsTrigger>
+            <TabsTrigger value='duel'>Blind test</TabsTrigger>
           </TabsList>
         </div>
         {/* kept mounted, so a practice chat survives a look at the other tabs */}
@@ -97,6 +99,9 @@ export default function AiChatPage() {
         </TabsContent>
         <TabsContent value='memory'>
           <MemoryTab key={page.creator_id} page={page} ready={data.ready} onSpent={loadSpent} />
+        </TabsContent>
+        <TabsContent value='duel'>
+          <DuelTab key={page.creator_id} page={page} ready={data.ready} onSpent={loadSpent} />
         </TabsContent>
       </Tabs>
     </div>

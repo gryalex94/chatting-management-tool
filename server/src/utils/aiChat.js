@@ -20,6 +20,10 @@ const { screenFan, checkReply, personaProblems } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
+const strategy = require('../ai/chat/strategy');
+
+// Picks which Playbook situations fit a moment: small, quick and cheap.
+const PICKER = 'mistralai/ministral-8b-2512';
 
 const NOT_READY = 'Run database change 036 (AI chat) in Supabase first';
 const LONG_CHAT = 100;                 // over this many messages, the writer reads the last 40 and the story so far
@@ -480,6 +484,34 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (!latest.length) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
 
   // 1. the safety screen, before any writer sees anything
+  const screen = await screenLatest(orgId, creatorId, fanUuid, latest);
+  if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: null };
+
+  // 2. the briefing, with the Playbook situations that fit this moment
+  const win = windowFor(convo);
+  long = win.long;
+  const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
+  const [examples, plan] = await Promise.all([
+    persona.profile.examples?.length ? persona.profile.examples : styleExamples(account.id),
+    pickSituations(orgId, creatorId, fanUuid, win.messages, money),
+  ]);
+  const base = { profile: persona.profile, examples, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes, situations: strategy.situationGuide(plan.ids) };
+
+  // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
+  const speed = persona.settings?.typing || 'normal';
+  const emojis = persona.settings?.emojis || 'rarely';
+  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis })));
+  return {
+    screen, results,
+    used: {
+      messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
+      situations: plan.ids.map(strategy.situationTitle),
+    },
+  };
+}
+
+// The safety screen on his latest message(s); Claude judges the doubtful ones.
+async function screenLatest(orgId, creatorId, fanUuid, latest) {
   const screen = { ...screenFan(latest), review: null };
   if (screen.action === 'review') {
     const r = await reviewFan(latest);
@@ -488,23 +520,20 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     screen.action = r.stop ? 'stop' : 'continue';
     if (r.stop) screen.reasons = [...screen.reasons, `Claude: ${r.reason}`];
   }
-  if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: null };
+  return screen;
+}
 
-  // 2. the briefing
-  const win = windowFor(convo);
-  long = win.long;
-  const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
-  const examples = persona.profile.examples?.length ? persona.profile.examples : await styleExamples(account.id);
-  const base = { profile: persona.profile, examples, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes };
-
-  // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
-  const speed = persona.settings?.typing || 'normal';
-  const emojis = persona.settings?.emojis || 'rarely';
-  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis })));
-  return {
-    screen, results,
-    used: { messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money },
-  };
+// Which Playbook situations fit this moment (none if the picker fails: the reply
+// still has the game plan).
+async function pickSituations(orgId, creatorId, fanUuid, chat, money) {
+  try {
+    const res = await or.chat({ model: PICKER, maxTokens: 120, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money }) });
+    await logUsage(orgId, 'plan', res.model, res.usage, { creatorId, fanUuid });
+    return { ids: strategy.readPick(P.parseJsonObject(res.text)), cost: res.usage.cost || 0 };
+  } catch (e) {
+    console.error('[ai-chat] situations:', e.message);
+    return { ids: [], cost: 0 };
+  }
 }
 
 async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis }) {
@@ -570,4 +599,6 @@ module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
+  // for the blind test (utils/aiDuels.js)
+  _engine: { pageAccount, loadPersona, styleExamples, windowFor, screenLatest, pickSituations, writeOne, logUsage, all, isMass, TEAM_TYPES },
 };

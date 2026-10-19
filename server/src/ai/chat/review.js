@@ -24,13 +24,20 @@ const REPLY_SCHEMA = {
   additionalProperties: false,
 };
 
-async function ask(system, user, schema) {
+const DUEL_SCHEMA = {
+  type: 'object',
+  properties: { better: { type: 'string', enum: ['A', 'B', 'tie'] }, reason: { type: 'string' } },
+  required: ['better', 'reason'],
+  additionalProperties: false,
+};
+
+async function ask(system, user, schema, effort = 'low') {
   const res = await client.messages.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 2048,
     system,
     messages: [{ role: 'user', content: user }],
-    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
+    output_config: { effort, format: { type: 'json_schema', schema } },
   });
   const usage = { input: res.usage?.input_tokens || 0, output: res.usage?.output_tokens || 0 };
   usage.cost = (usage.input * PRICE[0] + usage.output * PRICE[1]) / 1e6;
@@ -66,4 +73,23 @@ async function reviewReply({ fanTexts = [], messages = [], flags = [] }) {
   return { ok: !!r.answer.ok, problems: (r.answer.problems || []).map(String).filter(Boolean), usage: r.usage };
 }
 
-module.exports = { reviewFan, reviewReply, MODEL };
+/**
+ * The blind test: which of two replies (A, B) to the same moment is better? It
+ * isn't told who wrote either. Returns { better: 'A' | 'B' | 'tie', reason, declined, usage }.
+ */
+async function judgeDuel({ profile = {}, chat = [], a = [], b = [] }) {
+  const said = (list) => list.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n');
+  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.style && `how she texts: ${String(profile.style).slice(0, 300)}`].filter(Boolean).join('; ');
+  const r = await ask(
+    'You compare two possible replies a creator could send a fan on Fanvue, a subscription site for verified adults. Adult flirting and sex talk are allowed. You are not told who wrote either reply.',
+    `The creator: ${who || 'unknown'}\n\n`
+      + `The chat so far (oldest first):\n${chat.map(m => `${m.from_fan ? 'Him' : 'Her'}: ${String(m.text || '(a photo or video)').replace(/\s+/g, ' ').trim()}`).join('\n')}\n\n`
+      + `Reply A:\n${said(a)}\n\nReply B:\n${said(b)}\n\n`
+      + 'Which reply is more likely to keep him engaged and wanting more? It should answer what he said, sound like a real person texting, fit her and the moment, and not be repetitive, needy or pushy. '
+      + 'Length is not quality: a short, natural reply is often the best one in a chat. A reply that claims to be human, agrees to meet or shares contact details loses. If they are about equally good, answer tie. Give the reason in one short sentence.',
+    DUEL_SCHEMA, 'medium');
+  if (r.declined) return { declined: true, better: null, reason: 'Claude declined to judge this one.', usage: r.usage };
+  return { better: r.answer.better, reason: String(r.answer.reason || ''), usage: r.usage };
+}
+
+module.exports = { reviewFan, reviewReply, judgeDuel, MODEL };

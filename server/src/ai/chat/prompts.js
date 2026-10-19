@@ -8,6 +8,8 @@
  * Everything here is pure (no database, no network), so it can be tested as is.
  */
 
+const { GAME_PLAN } = require('./strategy');
+
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
   ['vibe', 'Vibe'], ['heat', 'How spicy'], ['about', 'Her story'],
@@ -48,7 +50,7 @@ const HOUSE_RULES = [
 // dashes or *stars*. The AI's own habits (long, clever, emoji-heavy) are the
 // opposite, so these say it plainly.
 const CHAT_GUIDE = [
-  'Text like a real girl on her phone: short and simple. Most messages are 3 to 10 words; 1 to 3 messages per reply, often just 1 or 2.',
+  'Text like a real girl on her phone: short and simple. Usually one message of 3 to 12 words; sometimes two, rarely three.',
   'Everyday words only. No clever wordplay, no poetic or dramatic lines, no big words.',
   'Emojis are rare: most of your messages have none, and never more than one in a reply.',
   'No dashes (— or –), no ~, no *stars* around words, no lists, no formal phrases.',
@@ -84,8 +86,9 @@ function systemText(profile, examples = []) {
     examples.length ? `# How you really text\nReal messages you sent to fans. Copy this style (length, words, emojis), not the words themselves:\n${examples.map(e => `- ${clean(e).replace(/\s+/g, ' ')}`).join('\n')}` : '',
     `# House rules (always, no exceptions)\n${HOUSE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
     `# How you chat\n${CHAT_GUIDE.map(r => `- ${r}`).join('\n')}`,
+    `# Your game plan (what works best, from the agency's analysed chats)\n${GAME_PLAN.map(r => `- ${r}`).join('\n')}`,
     '# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], "learned": ["..."], "handover": ""}\n'
-      + '- messages: what you send him now, 1 to 3 short chat messages.\n'
+      + '- messages: what you send him now. Usually ONE short message of about 10 words, like her real chats (her chatters sent a single message 83% of the time). Two only when the second really adds something; three is rare.\n'
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- handover: empty, or a short reason when a person should take over this chat.',
   ].filter(Boolean).join('\n\n');
@@ -121,12 +124,13 @@ function cardText(card = [], money = null) {
  * `chat` = messages oldest first ({ at, from_fan, text, mass, paid, tip, gif }),
  * `notes` = the safety screen's notes for this moment, `now` = Date.
  */
-function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], now = new Date(), retry = null }) {
+function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', now = new Date(), retry = null }) {
   const parts = [`Now: ${when(now.toISOString())} (Amsterdam time).`];
   const about = cardText(card, money);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
   if (clean(story)) parts.push(`# Your story with him so far\n${clean(story)}`);
   parts.push(`# The chat, oldest first\n${chat.length ? chat.map(chatLine).join('\n') : '(No messages yet: this is the start of your chat.)'}`);
+  if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
   const now_ = [...notes];
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
