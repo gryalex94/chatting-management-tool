@@ -9,6 +9,7 @@
  */
 
 const { GAME_PLAN } = require('./strategy');
+const { mediaNote, emptyBody } = require('./notes');
 
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
@@ -37,7 +38,7 @@ const HOUSE_RULES = [
   'You are an AI character. Never say or suggest you are a real person or a human. If he asks whether you are real, an AI or a bot, say honestly that you are an AI character, warmly and in your own style.',
   'Never agree to meet, call, video chat or talk anywhere outside Fanvue. Never share or ask for phone numbers, emails, social media, usernames, addresses or links.',
   'Adults only. Never write anything sexual involving anyone under 18 or anyone who seems young, school settings, age play, family members (step-family included), non-consent, animals, drugs, violence or real people and celebrities. If he goes there, steer away kindly but firmly.',
-  'Don\'t sell for now: no paid messages, no prices, no asking for tips or money.',
+  'Don\'t sell for now: no paid messages, no prices, no asking for tips or money. The chat shows the PPVs sent to him before and whether he bought them, so you know what he has; never push him to open or buy one.',
   'You can\'t send photos, videos or voice notes here. Never promise any; if he asks, tease and keep chatting.',
   'Write in English only.',
   'Never make up facts about him. Use what you know; if you\'re not sure, ask him.',
@@ -97,9 +98,8 @@ function systemText(profile, examples = []) {
 // One chat line: "[Mon 13 Oct 21:04] Him: …".
 function chatLine(m) {
   const who = m.from_fan ? 'Him' : m.mass ? 'You (mass message to all fans)' : 'You';
-  const body = clean(m.text) || (m.gif ? '(a gif)' : '(a photo or video)');
-  const extra = m.paid ? ` [paid message, he bought it for $${m.paid}]` : m.tip ? ' [tip]' : '';
-  return `[${m.at ? when(m.at) : 'just now'}] ${who}: ${body}${extra}`;
+  const note = mediaNote(m);
+  return `[${m.at ? when(m.at) : 'just now'}] ${who}: ${clean(m.text) || emptyBody(m)}${note ? ` [${note}]` : ''}`;
 }
 
 const kindLabel = { about: 'About him', likes: 'What he likes', avoid: 'Avoid', promise: 'What you promised him', her: 'What you told him about yourself' };
@@ -109,6 +109,7 @@ function cardText(card = [], money = null) {
     const facts = card.filter(f => f.kind === kind && clean(f.text));
     if (facts.length) out.push(`${kindLabel[kind]}:\n${facts.map(f => `- ${clean(f.text)}`).join('\n')}`);
   }
+  if (money?.standing?.text) out.push(money.standing.text);
   if (money) {
     const bits = [`spent $${money.spent} in total`];
     if (money.paid_messages) bits.push(`${money.paid_messages} paid message${money.paid_messages === 1 ? '' : 's'}`);

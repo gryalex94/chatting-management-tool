@@ -310,9 +310,9 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
           {real && detail?.long && <p className='text-center text-xs text-muted-foreground'>A long chat: the AI reads the last 40 messages here, plus the story so far from memory.</p>}
           {real && detail?.messages?.map((m, i) => (
             m.mass
-              ? <p key={i} className='mx-auto max-w-[80%] text-center text-xs italic text-muted-foreground'>Mass message, {dayTime(m.sent_at)}: {m.message}</p>
-              : <Bubble key={i} fromFan={m.from_fan} meta={`${dayTime(m.sent_at)}${m.paid ? ` · paid message, bought for $${m.paid}` : ''}${m.tip ? ' · tip' : ''}`}>
-                  {m.message || (m.gif ? '(a gif)' : '(a photo or video)')}
+              ? <p key={i} className='mx-auto max-w-[80%] text-center text-xs italic text-muted-foreground'>Mass message, {dayTime(m.sent_at)}: {m.message || m.empty}{m.note ? ` (${m.note})` : ''}</p>
+              : <Bubble key={i} fromFan={m.from_fan} meta={`${dayTime(m.sent_at)}${m.note ? ` · ${m.note}` : ''}`}>
+                  {m.message || m.empty || (m.gif ? '(a gif)' : '(a photo or video)')}
                 </Bubble>
           ))}
           {(real ? detail : true) && (

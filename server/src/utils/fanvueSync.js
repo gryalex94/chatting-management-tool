@@ -5,7 +5,9 @@
  *   3. the messages of each chat that changed: the whole history the first time,
  *      then only what's new (kept per chat: a mass message has one id for every
  *      fan who got it),
- *   4. earnings (subscriptions, PPVs, tips, refunds…).
+ *   4. the photos, videos and PPVs of those chats (what was attached, the PPV
+ *      price, whether he bought it: Fanvue's message list has only the text),
+ *   5. earnings (subscriptions, PPVs, tips, refunds…).
  * Safe to stop at any point: each chat records how far it was copied, so the
  * next run carries on (a deploy restarting the server costs nothing but time).
  * Chats are read with markAsRead=false, so the team's unread badges never change.
@@ -44,7 +46,7 @@ function messageRow(accountId, fanUuid, m) {
 async function knownFans(accountId) {
   const out = new Map();
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabaseAdmin.from('fanvue_fans').select('fan_uuid, history_done, messages_through')
+    const { data, error } = await supabaseAdmin.from('fanvue_fans').select('fan_uuid, history_done, messages_through, media_done')
       .eq('account_id', accountId).range(from, from + 999);
     if (error) throw error;
     for (const f of data || []) out.set(f.fan_uuid, f);
@@ -82,6 +84,42 @@ async function copyChat(accountId, fanUuid, { whole, progress }) {
   return false;   // hit the guard: leave it marked unfinished
 }
 
+const cents = (p) => (Number.isFinite(p?.USD?.price) ? Math.round(p.USD.price) : null);
+
+/**
+ * Copy one chat's media list (039_fanvue_media.sql), newest first. `whole`: all of
+ * it; otherwise stop at the first page holding an item we already have. Returns
+ * false when the table isn't there yet (database change 039 not run).
+ */
+async function copyMedia(accountId, fanUuid, { whole, progress }) {
+  let cursor = null;
+  for (let page = 0; page < 200; page++) {
+    const body = await fv.request(accountId, `/v1/chats/${encodeURIComponent(fanUuid)}/media`, { params: { limit: PAGE, cursor: cursor || undefined } });
+    const items = (body?.data || []).filter(m => m?.uuid);
+    if (!items.length) return true;
+    const rows = [...new Map(items.map(m => [`${m.messageUuid || ''}|${m.uuid}`, {
+      account_id: accountId, fan_uuid: fanUuid, message_uuid: m.messageUuid || '', media_uuid: m.uuid,
+      media_type: m.mediaType || null, from_fan: m.ownerUuid === fanUuid, sent_at: m.sentAt || m.created_at || null,
+      price_cents: cents(m.pricing), paid_cents: cents(m.amountPaid), purchased_at: m.purchasedAt || null,
+    }])).values()];
+    let seenBefore = false;
+    if (!whole) {
+      const { data: have } = await supabaseAdmin.from('fanvue_media').select('media_uuid')
+        .eq('account_id', accountId).eq('fan_uuid', fanUuid).in('media_uuid', items.map(m => m.uuid));
+      seenBefore = (have || []).length > 0;
+    }
+    const { error } = await supabaseAdmin.from('fanvue_media').upsert(rows, { onConflict: 'account_id,fan_uuid,message_uuid,media_uuid' });
+    if (error) {
+      if (/fanvue_media/.test(error.message)) return false;
+      throw error;
+    }
+    progress.media += rows.length;
+    cursor = body?.nextCursor || null;
+    if (seenBefore || !cursor) return true;
+  }
+  return true;
+}
+
 // Earnings in 90-day windows (the API caps how much one list may span).
 async function copyEarnings(accountId, fromIso, progress) {
   const end = Date.now();
@@ -108,7 +146,7 @@ async function copyEarnings(accountId, fromIso, progress) {
 
 async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
   if (running.has(accountId)) return { skipped: 'already running' };
-  const progress = { started_at: new Date().toISOString(), phase: 'profile', chats_listed: 0, chats_to_read: 0, chats_read: 0, messages: 0, earnings: 0 };
+  const progress = { started_at: new Date().toISOString(), phase: 'profile', chats_listed: 0, chats_to_read: 0, chats_read: 0, messages: 0, media: 0, earnings: 0 };
   running.set(accountId, progress);
   const t0 = Date.now();
   const warnings = [];
@@ -164,6 +202,27 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
       progress.chats_read++;
     }
 
+    // 3b. Photos, videos and PPVs: of every chat read now, and every chat whose
+    //     whole media list hasn't been copied yet (the first time: all of them).
+    progress.phase = 'media';
+    const mediaTodo = new Map([...todo].map(([fan, t]) => [fan, { whole: full || !known.get(fan)?.media_done }]));
+    for (const [fan, k] of known) if (!k.media_done && !mediaTodo.has(fan)) mediaTodo.set(fan, { whole: true });
+    let mediaFailed = 0;
+    for (const [fan, t] of mediaTodo) {
+      let ok;
+      try { ok = await copyMedia(accountId, fan, { whole: t.whole, progress }); }
+      catch (e) {
+        if (NETWORK.test(String(e.message)) || e.reconnect) throw e;
+        mediaFailed += 1;                                         // one odd chat doesn't stop the rest
+        console.error('[FanvueSync] media:', fan, e.message);
+        continue;
+      }
+      if (!ok) { warnings.push('Photos and PPVs not copied: run database change 039 in Supabase'); break; }
+      if (t.whole) await supabaseAdmin.from('fanvue_fans').update({ media_done: true }).eq('account_id', accountId).eq('fan_uuid', fan);
+    }
+
+    if (mediaFailed) warnings.push(`Photos and PPVs of ${mediaFailed} chat${mediaFailed === 1 ? '' : 's'} couldn't be copied`);
+
     // 4. Earnings: from the account's start the first time, then the last 3 days
     //    again (statuses settle) and onwards.
     progress.phase = 'earnings';
@@ -180,7 +239,7 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
 
     const summary = {
       finished_at: new Date().toISOString(), took_s: Math.round((Date.now() - t0) / 1000),
-      chats_listed: progress.chats_listed, chats_read: progress.chats_read, messages: progress.messages, earnings: progress.earnings, warnings,
+      chats_listed: progress.chats_listed, chats_read: progress.chats_read, messages: progress.messages, media: progress.media, earnings: progress.earnings, warnings,
     };
     await supabaseAdmin.from('fanvue_accounts').update({ synced_at: summary.finished_at, sync_error: warnings[0] || null, status: 'connected' }).eq('id', accountId);
     lastResult.set(accountId, summary);
@@ -209,4 +268,4 @@ async function syncAllFanvue() {
 const fanvueProgress = (id) => running.get(id) || null;
 const fanvueLastResult = (id) => lastResult.get(id) || null;
 
-module.exports = { runFanvueSync, syncAllFanvue, fanvueProgress, fanvueLastResult, _test: { messageRow } };
+module.exports = { runFanvueSync, syncAllFanvue, fanvueProgress, fanvueLastResult, _test: { messageRow, copyMedia } };

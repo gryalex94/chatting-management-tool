@@ -8,6 +8,7 @@
  * Pure (no database, no network).
  */
 const PLAYBOOK = require('./playbook.json');
+const { mediaNote } = require('./notes');
 
 const clean = (s) => String(s ?? '').trim();
 // Advice for human chatters that doesn't apply to an AI (she always answers in time).
@@ -36,11 +37,15 @@ function momentFacts(chat, money) {
     else if (h >= 6) out.push(`He is back after ${Math.round(h)} hours.`);
   }
   if (!chat.some(m => !m.from_fan && !m.mass)) out.push('You have never chatted with him one to one before.');
+  if (money?.standing?.text) out.push(money.standing.text);
   if (money?.spent > 0) out.push(`He has spent $${money.spent} with you.`);
   return out.join(' ');
 }
 
-const line = (m) => `${m.from_fan ? 'Him' : 'You'}: ${clean(m.text).replace(/\s+/g, ' ') || '(a photo or video)'}`;
+const line = (m) => {
+  const note = mediaNote(m);
+  return `${m.from_fan ? 'Him' : 'You'}: ${clean(m.text).replace(/\s+/g, ' ') || '(a photo or video)'}${note ? ` [${note}]` : ''}`;
+};
 
 /** The messages for the situation picker: the menu, the facts and the last messages. */
 function pickPrompt({ chat, money }) {

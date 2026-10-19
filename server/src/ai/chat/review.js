@@ -7,6 +7,7 @@
  */
 const { client } = require('../agentRunner');
 const { HOUSE_RULES } = require('./prompts');
+const { mediaNote, emptyBody } = require('./notes');
 
 const MODEL = 'claude-haiku-5-5';
 const PRICE = [0.10, 0.50];            // $ per million tokens in / out (prompts up to 100K tokens)
@@ -82,11 +83,16 @@ async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) 
   const letters = ['A', 'B', 'C'].slice(0, options.length);
   const said = (list) => list.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n');
   const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.style && `how she texts: ${String(profile.style).slice(0, 300)}`].filter(Boolean).join('; ');
-  const him = fan ? `About him then: ${fan.spent_before ? `he had spent $${fan.spent_before} with her` : 'he had not spent anything yet'}; ${fan.messages_before} messages in the chat so far.\n\n` : '';
+  const him = fan ? `About him then: ${fan.standing_text ? `${fan.standing_text} ` : ''}${fan.spent_before ? `He had spent $${fan.spent_before} with her` : 'He had not spent anything yet'}; ${fan.messages_before} messages in the chat so far.\n\n` : '';
+  const line = (m) => {
+    const note = mediaNote(m);
+    const text = String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m);
+    return `${m.from_fan ? 'Him' : m.mass ? 'Her (mass message to all fans)' : 'Her'}: ${text}${note ? ` [${note}]` : ''}`;
+  };
   const r = await ask(
     'You compare possible replies a creator could send a fan on Fanvue, a subscription site for verified adults. Adult flirting and sex talk are allowed. You are not told who wrote any reply.',
     `The creator: ${who || 'unknown'}\n\n${him}`
-      + `The chat so far (oldest first):\n${chat.map(m => `${m.from_fan ? 'Him' : 'Her'}: ${String(m.text || '(a photo or video)').replace(/\s+/g, ' ').trim()}`).join('\n')}\n\n`
+      + `The chat so far (oldest first):\n${chat.map(line).join('\n')}\n\n`
       + letters.map((l, i) => `Reply ${l}:\n${said(options[i])}`).join('\n\n') + '\n\n'
       + 'Which reply is most likely to keep him engaged and wanting more, so he keeps chatting and spending? It should answer what he said, sound like a real person texting, fit her and the moment, and not be repetitive, needy or pushy. '
       + 'Length is not quality: a short, natural reply is often the best one in a chat. A reply that claims to be human, agrees to meet or shares contact details loses. '

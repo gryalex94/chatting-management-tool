@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CircleAlert, Loader2, Play, Scale, Trophy } from 'lucide-react';
+import { CircleAlert, Image as ImageIcon, Loader2, Lock, Play, Scale, Trophy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -47,21 +47,38 @@ function Score({ title, t, writers, note }) {
   );
 }
 
+// What came with a message: a PPV (and whether he had bought it by then), photos, a tip.
+function Note({ text }) {
+  const ppv = text.startsWith('PPV');
+  return (
+    <span className={cn('flex items-center gap-1 px-1 text-[11px]', ppv ? 'text-warn' : 'text-muted-foreground')}>
+      {ppv ? <Lock className='size-3' /> : <ImageIcon className='size-3' />}{text}
+    </span>
+  );
+}
+
 // The chat up to the moment being judged, scrolled to the end.
 function Context({ duel }) {
   const box = useRef(null);
   useLayoutEffect(() => { if (box.current) box.current.scrollTop = box.current.scrollHeight; }, [duel.id]);
   return (
     <div ref={box} className='flex max-h-[40vh] flex-col gap-2 overflow-y-auto rounded-lg border bg-card p-3'>
-      <span className='text-center text-xs text-muted-foreground'>The whole chat up to this moment ({duel.context.length} messages)</span>
+      <span className='text-center text-xs text-muted-foreground'>The whole chat up to this moment, as her chatter saw it then: photos, PPVs and the mass messages he answered</span>
       {duel.context.map((m, i) => (
-        <div key={i} className={cn('flex flex-col gap-2', m.from_fan ? 'items-start' : 'items-end')}>
-          {(i === 0 || shortDay(m.sent_at) !== shortDay(duel.context[i - 1].sent_at)) && <span className='self-center text-[11px] text-muted-foreground'>{dayTime(m.sent_at)}</span>}
-          <div className={cn('max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
-            m.from_fan ? 'rounded-bl-sm bg-muted' : 'rounded-br-sm bg-primary/80 text-primary-foreground',
-            m.from_fan && i === duel.context.length - 1 && 'ring-2 ring-primary/50')}>
-            {m.message || '(a photo or video)'}
-          </div>
+        <div key={i} className={cn('flex flex-col gap-1', m.mass ? 'items-center' : m.from_fan ? 'items-start' : 'items-end')}>
+          {(i === 0 || shortDay(m.sent_at) !== shortDay(duel.context[i - 1].sent_at)) && <span className='mb-1 self-center text-[11px] text-muted-foreground'>{dayTime(m.sent_at)}</span>}
+          {m.mass ? (
+            <p className='max-w-[80%] text-center text-xs italic text-muted-foreground'>{m.mass}: {m.message || m.empty}{m.note ? ` (${m.note})` : ''}</p>
+          ) : (
+            <>
+              <div className={cn('max-w-[80%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
+                m.from_fan ? 'rounded-bl-sm bg-muted' : 'rounded-br-sm bg-primary/80 text-primary-foreground',
+                m.from_fan && i === duel.context.length - 1 && 'ring-2 ring-primary/50')}>
+                {m.message || m.empty}
+              </div>
+              {m.note && <Note text={m.note} />}
+            </>
+          )}
         </div>
       ))}
       <span className='text-center text-xs text-muted-foreground'>What should she answer?</span>
@@ -203,8 +220,10 @@ export default function DuelTab({ page, ready, onSpent }) {
               <div className='flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border px-4 py-2 text-sm'>
                 <span><span className='font-medium'>{fanName(duel.fan)}</span> <span className='text-muted-foreground'>· moment {duel.number} of {duel.total}</span></span>
                 <span className='text-xs text-muted-foreground'>
-                  By then: {duel.fan.spent_before ? `spent ${dollars(duel.fan.spent_before)}` : 'hadn\'t spent anything'} · {duel.fan.messages_before} messages in the chat
-                  {duel.fan.since ? ` since ${shortDay(duel.fan.since)}` : ''}
+                  By then: {duel.fan.standing && <span className='font-medium text-foreground'>{duel.fan.standing}</span>}
+                  {' · '}{duel.fan.spent_before ? `spent ${dollars(duel.fan.spent_before)}` : 'hadn\'t spent anything'}
+                  {duel.fan.paid_messages ? ` (${duel.fan.paid_messages} PPV${duel.fan.paid_messages === 1 ? '' : 's'} bought, last ${shortDay(duel.fan.last_purchase)})` : ''}
+                  {' · '}{duel.fan.messages_before} messages in the chat{duel.fan.since ? ` since ${shortDay(duel.fan.since)}` : ''}
                 </span>
               </div>
               <Context duel={duel} />
@@ -275,6 +294,7 @@ export default function DuelTab({ page, ready, onSpent }) {
                       <span>{dayTime(d.moment_at)}</span>
                       {d.proven && <Badge variant='outline' className='border-good/40 font-normal text-good'>proven: a purchase followed</Badge>}
                       {d.fan_context.spent_before != null && <span>{d.fan_context.spent_before ? `he had spent ${dollars(d.fan_context.spent_before)}` : 'no spending yet'}</span>}
+                      {d.fan_context.standing && <span>{d.fan_context.standing}</span>}
                       {d.situations.map(t => <Badge key={t} variant='outline' className='font-normal'>{t}</Badge>)}
                     </div>
                     <div className='flex flex-col items-start gap-1'>

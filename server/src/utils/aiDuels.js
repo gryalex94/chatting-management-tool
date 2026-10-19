@@ -9,9 +9,11 @@
  *    Fanvue's AI writer, nothing paid or about prices, nothing the safety screen
  *    would stop). About 80% come from chats with fans who paid, half of those
  *    from proven moments.
- *  - For each moment two AI writers answer from the same chat up to then (no fan
+ *  - For each moment two AI writers answer from what her chatter knew then: the
+ *    chat up to that moment (mass messages, photos and PPVs with whether he had
+ *    bought them yet), what he had spent and whether he was subscribed. No fan
  *    notes: they were built from later messages; no proven answers from the same
- *    fan). The three answers are shown as A, B and C in random order. A manager
+ *    fan. The three answers are shown as A, B and C in random order. A manager
  *    picks the best (or none) without knowing who wrote which; Claude does too.
  */
 const { supabaseAdmin } = require('./supabase');
@@ -20,11 +22,13 @@ const or = require('../integrations/openrouter');
 const strategy = require('../ai/chat/strategy');
 const { screenFan } = require('../ai/chat/safety');
 const { judgeDuel, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { mediaNote, emptyBody } = require('../ai/chat/notes');
 
 const E = A._engine;
 const NOT_READY = 'Run database change 037 (AI blind test) in Supabase first';
 const NOT_READY_V2 = 'Run database change 038 (proven answers) in Supabase first';
-const SELLING = /\$\s?\d|\b\d+\s?(?:usd|dollars?|bucks)\b|\bppv\b|\bunlock\w*|\btips?\b|\bvault\b/i;
+// Her chatter selling (the AI doesn't sell yet): prices, tips, PPVs, "did you open the content I sent".
+const SELLING = /\$\s?\d|\b\d+\s?(?:usd|dollars?|bucks)\b|\bppv\b|\bunlock\w*|\btips?\b|\bvault\b|\bcontent\b|\bopen(?:ed)?\s+(?:it|my|the|what)\b|\b(?:surprise|pics?|videos?)\s+i\s+(?:sent|left|made)\b/i;
 const ANSWERED_WITHIN = 60 * 60_000;      // her chatter answered within the hour
 const SAME_REPLY = 10 * 60_000;           // her messages that belong to one answer
 const OUTCOME_WITHIN = 24 * 3600_000;     // he wrote back / bought within a day
@@ -34,6 +38,10 @@ const PAYING_SHARE = 0.8;                 // of the moments, from chats with fan
 const VENICE = 'cognitivecomputations/dolphin-mistral-24b-venice-edition';
 const MISTRAL = 'mistralai/mistral-large-2512';
 const LETTERS = ['A', 'B', 'C'];
+const MASS_LABEL = {
+  BROADCAST: 'Mass message', AUTOMATED_NEW_SUBSCRIBER: 'Automatic welcome: he subscribed', AUTOMATED_NEW_FOLLOWER: 'Automatic welcome: he followed',
+  AUTOMATED_FIRST_MESSAGE_REPLY: 'Automatic reply to his first message',
+};
 const round = (n) => Math.round(n * 1e6) / 1e6;
 const tableMissing = (e, t = 'ai_duels') => new RegExp(t).test(String(e?.message || ''));
 const shuffle = (list) => [...list].sort(() => Math.random() - 0.5);
@@ -41,10 +49,11 @@ const iso = (t) => new Date(t).toISOString();
 
 /** Every usable moment in an account's chats, with what happened after the chatter's answer. */
 async function findMoments(accountId) {
-  const [rows, earn] = await Promise.all([
-    E.all(() => supabaseAdmin.from('fanvue_messages').select('uuid, fan_uuid, from_fan, type, text, sent_at').eq('account_id', accountId)
-      .neq('type', 'BROADCAST').order('fan_uuid').order('sent_at').order('uuid')),
+  const [rows, earn, media] = await Promise.all([
+    E.all(() => supabaseAdmin.from('fanvue_messages').select('uuid, fan_uuid, from_fan, type, text, sent_at, gif:raw->gif').eq('account_id', accountId)
+      .order('fan_uuid').order('sent_at').order('uuid')),
     E.all(() => supabaseAdmin.from('fanvue_earnings').select('fan_uuid, source, paid_at, gross_cents, message_uuid').eq('account_id', accountId).order('paid_at').order('transaction_order_id')),
+    E.mediaFor(accountId),
   ]);
   const paidMessage = new Set(earn.filter(e => e.message_uuid).map(e => e.message_uuid));
   const buys = {}, money = {};
@@ -52,16 +61,13 @@ async function findMoments(accountId) {
     if (e.source === 'message' || e.source === 'tip') (buys[e.fan_uuid] ||= []).push(Date.parse(e.paid_at));
     (money[e.fan_uuid] ||= []).push(e);
   }
-  const spentBefore = (fan, t) => Math.round((money[fan] || []).reduce((s, e) => {
-    if (Date.parse(e.paid_at) >= t) return s;
-    const amount = Math.abs(e.gross_cents || 0) / 100;
-    return e.source === 'refund' || e.source === 'chargeback' ? s - amount : s + amount;
-  }, 0) * 100) / 100;
   const byFan = {};
-  for (const m of rows) if (m.sent_at && (m.from_fan || !E.isMass(m.type))) (byFan[m.fan_uuid] ||= []).push(m);
+  for (const m of rows) if (m.sent_at) (byFan[m.fan_uuid] ||= []).push(m);
 
   const out = [];
-  for (const [fan, list] of Object.entries(byFan)) {
+  for (const [fan, all] of Object.entries(byFan)) {
+    const full = E.chatOf(all, money[fan] || [], media, fan);       // with mass messages, photos and PPVs
+    const list = all.filter(m => m.from_fan || !E.isMass(m.type));  // the one-to-one chat: where moments are
     const paying = (buys[fan] || []).length > 0;
     let i = 0;
     while (i < list.length) {
@@ -79,18 +85,22 @@ async function findMoments(accountId) {
       while (b < list.length && !list[b].from_fan && answer.length < 3 && Date.parse(list[b].sent_at) - Date.parse(answer[answer.length - 1].sent_at) <= SAME_REPLY) {
         answer.push(list[b]); b += 1;
       }
-      if (answer.some(m => !E.TEAM_TYPES.includes(m.type) || !String(m.text || '').trim() || paidMessage.has(m.uuid) || SELLING.test(m.text))) continue;
+      if (answer.some(m => !E.TEAM_TYPES.includes(m.type) || !String(m.text || '').trim() || paidMessage.has(m.uuid) || media[`${fan}|${m.uuid}`] || SELLING.test(m.text))) continue;
       const latest = list.slice(start, j + 1).map(m => String(m.text || '').trim()).filter(Boolean);
       if (!latest.length || screenFan(latest).action !== 'continue') continue;
       const answerEnd = Date.parse(answer[answer.length - 1].sent_at);
       const next = list.slice(b).find(m => m.from_fan);
       const nextAt = next ? Date.parse(next.sent_at) : null;
       const replied = !!nextAt && nextAt - answerEnd <= OUTCOME_WITHIN;
+      const then = E.moneyOf(money[fan] || [], list[j].sent_at, list[0].sent_at);   // what her chatter could see then
       out.push({
-        fan_uuid: fan, at: list[j].sent_at, latest, paying,
-        context: list.slice(0, j + 1),
+        fan_uuid: fan, at: list[j].sent_at, latest, paying, money: then,
+        context: full.filter(m => Date.parse(m.at) <= hisAt),       // as of then: see E.asOf
         human: answer.map(m => m.text.trim()),
-        fan_context: { spent_before: spentBefore(fan, hisAt), messages_before: j + 1, since: list[0].sent_at },
+        fan_context: {
+          spent_before: then.spent, messages_before: j + 1, since: list[0].sent_at, paid_messages: then.paid_messages,
+          last_purchase: then.last_purchase, standing: then.standing.label, standing_text: then.standing.text,
+        },
         outcome: {
           replied, reply_after_min: replied ? Math.round((nextAt - answerEnd) / 60_000) : null,
           bought: (buys[fan] || []).some(t => t > herAt && t - herAt <= OUTCOME_WITHIN),
@@ -145,8 +155,7 @@ async function buildGold(orgId, creatorId, accountId, pool, job) {
     while (queue.length) {
       const m = queue.shift();
       try {
-        const chat = m.context.map(x => ({ at: x.sent_at, from_fan: x.from_fan, text: x.text || '', mass: false }));
-        const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, E.windowFor(chat).messages, null);
+        const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, E.windowFor(E.asOf(m.context, m.at)).messages, m.money);
         job.cost += plan.cost;
         const { error: e } = await supabaseAdmin.from('ai_gold').upsert({
           account_id: accountId, organisation_id: orgId, fan_uuid: m.fan_uuid, moment_at: m.at,
@@ -163,15 +172,15 @@ async function buildGold(orgId, creatorId, accountId, pool, job) {
 
 // One moment: two AI answers, Claude's blind vote, saved. Returns what it cost.
 async function oneDuel({ orgId, creatorId, accountId, persona, examples, writers, batch, m }) {
-  const chat = m.context.map(x => ({ at: x.sent_at, from_fan: x.from_fan, text: x.text || '', mass: false }));
+  const chat = E.asOf(m.context, m.at);          // what he had bought by then, not later
   const win = E.windowFor(chat);
-  const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, win.messages, null);
+  const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, win.messages, m.money);
   const proven = await E.provenExamples(accountId, plan.ids, { excludeFan: m.fan_uuid });
   const base = {
-    profile: persona.profile, examples, fan: {}, card: [], money: null, story: '', chat: win.messages,
-    notes: screenFan(m.latest).notes, situations: strategy.situationGuide(plan.ids), proven,
+    profile: persona.profile, examples, fan: {}, card: [], money: m.money, story: '', chat: win.messages,
+    notes: screenFan(m.latest).notes, situations: strategy.situationGuide(plan.ids), proven, now: new Date(m.at),
   };
-  const recentHer = chat.filter(x => !x.from_fan).slice(-8).map(x => x.text);
+  const recentHer = chat.filter(x => !x.from_fan && !x.mass).slice(-8).map(x => x.text);
   const answers = await Promise.all(writers.map(model => E.writeOne({
     orgId, creatorId, fanUuid: m.fan_uuid, model, base, latest: m.latest, recentHer, speed: 'normal', emojis: persona.settings?.emojis || 'rarely',
   })));
@@ -298,18 +307,35 @@ async function nextDuel(orgId, creatorId, batch) {
   const rows = await batchRows(orgId, creatorId, batch);
   const left = rows.filter(r => !r.user_vote);
   if (!left.length) return { done: true, total: rows.length, voted: rows.length };
-  const d = left[0];
-  const [ctx, { data: person }] = await Promise.all([
-    E.all(() => supabaseAdmin.from('fanvue_messages').select('from_fan, type, text, sent_at').eq('account_id', d.account_id).eq('fan_uuid', d.fan_uuid)
-      .lte('sent_at', d.moment_at).neq('type', 'BROADCAST').order('sent_at').order('uuid')),
+  return { done: false, number: rows.length - left.length + 1, total: rows.length, voted: rows.length - left.length, ...(await momentView(left[0])) };
+}
+
+// One moment as the judge sees it: who he is, where he stood, the chat as her chatter saw it then, the answers.
+async function momentView(d) {
+  const [ctx, earn, media, { data: person }] = await Promise.all([
+    E.all(() => supabaseAdmin.from('fanvue_messages').select('uuid, from_fan, type, text, sent_at, gif:raw->gif').eq('account_id', d.account_id).eq('fan_uuid', d.fan_uuid)
+      .lte('sent_at', d.moment_at).order('sent_at').order('uuid')),
+    E.all(() => supabaseAdmin.from('fanvue_earnings').select('source, paid_at, gross_cents, message_uuid').eq('account_id', d.account_id).eq('fan_uuid', d.fan_uuid).order('paid_at').order('transaction_order_id')),
+    E.mediaFor(d.account_id, d.fan_uuid),
     supabaseAdmin.from('fanvue_fans').select('handle, display_name, nickname').eq('account_id', d.account_id).eq('fan_uuid', d.fan_uuid).maybeSingle(),
   ]);
-  const context = ctx.filter(m => m.from_fan || !E.isMass(m.type)).map(m => ({ sent_at: m.sent_at, from_fan: m.from_fan, message: m.text || '' }));
+  // the chat as her chatter saw it then: mass messages too, PPVs bought by then
+  const chat = E.asOf(E.chatOf(ctx, earn, media, d.fan_uuid), d.moment_at);
+  // of the mass messages: the ones he answered, the last 3 and the automatic welcomes (the rest is noise)
+  const answered = new Array(chat.length).fill(false);
+  for (let i = chat.length - 1, next = false; i >= 0; i--) { answered[i] = next; if (!chat[i].mass) next = chat[i].from_fan; }
+  const recent = new Set(chat.map((m, i) => (m.mass ? i : -1)).filter(i => i >= 0).slice(-3));
+  const context = chat.filter((m, i) => !m.mass || m.type !== 'BROADCAST' || answered[i] || recent.has(i)).map(m => ({
+    sent_at: m.at, from_fan: m.from_fan, message: m.text, empty: emptyBody(m), note: mediaNote(m),
+    mass: m.mass ? (MASS_LABEL[m.type] || 'Automatic message') : null,
+  }));
+  const then = E.moneyOf(earn, d.moment_at, chat.find(m => !m.mass)?.at);
   return {
-    done: false, id: d.id, number: rows.length - left.length + 1, total: rows.length, voted: rows.length - left.length,
+    id: d.id,
     fan: {
       display_name: person?.display_name || null, fan_username: person?.handle || null, fan_nickname: person?.nickname || null,
-      spent_before: d.fan_context?.spent_before ?? null, messages_before: d.fan_context?.messages_before ?? context.length, since: d.fan_context?.since || context[0]?.sent_at || null,
+      spent_before: then.spent, paid_messages: then.paid_messages, last_purchase: then.last_purchase, standing: then.standing.label,
+      messages_before: d.fan_context?.messages_before ?? chat.filter(m => !m.mass).length, since: d.fan_context?.since || chat.find(m => !m.mass)?.at || null,
     },
     context,
     options: optionsOf(d).map((o, i) => ({ key: LETTERS[i], messages: o.text.map(t => ({ creator_message: t })) })),
@@ -331,6 +357,12 @@ async function vote(orgId, creatorId, duelId, choice, userId) {
 /** A run's results, with every answer revealed. */
 async function results(orgId, creatorId, batch) {
   const rows = await batchRows(orgId, creatorId, batch);
+  // where each fan stood then, for tests from before it was saved with the moment
+  const earnBy = {};
+  if (rows.length && rows.some(r => !r.fan_context?.standing)) {
+    const earn = await E.all(() => supabaseAdmin.from('fanvue_earnings').select('fan_uuid, source, paid_at, gross_cents, message_uuid').eq('account_id', rows[0].account_id).order('paid_at').order('transaction_order_id'));
+    for (const e of earn) (earnBy[e.fan_uuid] ||= []).push(e);
+  }
   const tally = () => ({ chatter: 0, ai: 0, ai2: 0, tie: 0, none: 0, n: 0 });
   const you = tally(), claude = tally(), provenYou = tally(), provenClaude = tally();
   const realCheck = { answered: { n: 0, chatter: 0 }, unanswered: { n: 0, chatter: 0 } };
@@ -357,7 +389,8 @@ async function results(orgId, creatorId, batch) {
       if (u) { s.you_n += 1; if (u === 'ai' || u === 'ai2') s.ai_you += 1; }
     }
     return {
-      id: r.id, moment_at: r.moment_at, proven: !!r.proven, fan_context: r.fan_context || {},
+      id: r.id, moment_at: r.moment_at, proven: !!r.proven,
+      fan_context: { ...(r.fan_context || {}), standing: r.fan_context?.standing || E.moneyOf(earnBy[r.fan_uuid] || [], r.moment_at, r.fan_context?.since).standing.label },
       fan_messages: (r.fan_said || []).map(t => ({ fan_message: t })),
       answers: opts.map((o, i) => ({
         key: LETTERS[i], source: o.source, label: o.source === 'chatter' ? 'Her chatter' : or.writerLabel(o.model || r.ai_model), status: o.status || null,
@@ -373,4 +406,4 @@ async function results(orgId, creatorId, batch) {
   };
 }
 
-module.exports = { startDuels, duelJob, overview, nextDuel, vote, results, _test: { findMoments, sample } };
+module.exports = { startDuels, duelJob, overview, nextDuel, vote, results, _test: { findMoments, sample, momentView } };

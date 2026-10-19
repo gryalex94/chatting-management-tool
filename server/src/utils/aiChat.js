@@ -21,6 +21,7 @@ const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
+const { mediaNote, emptyBody, standingAt } = require('../ai/chat/notes');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -263,23 +264,70 @@ async function draftProfile(orgId, creatorId) {
 }
 
 // ── A fan's chat, memory and money ──────────────────────────────────────────
-// The whole chat with a fan, oldest first, as the writer reads it.
-async function loadChat(accountId, fanUuid) {
-  const [rows, earn] = await Promise.all([
-    all(() => supabaseAdmin.from('fanvue_messages').select('uuid, from_fan, type, text, sent_at, raw').eq('account_id', accountId).eq('fan_uuid', fanUuid).order('sent_at').order('uuid')),
-    supabaseAdmin.from('fanvue_earnings').select('source, gross_cents, net_cents, paid_at, message_uuid').eq('account_id', accountId).eq('fan_uuid', fanUuid),
-  ]);
-  const paid = {};
-  for (const e of earn.data || []) if (e.source === 'message' && e.message_uuid) paid[e.message_uuid] = (e.gross_cents || 0) / 100;
-  const chat = rows.map(m => ({
-    uuid: m.uuid, at: m.sent_at, from_fan: m.from_fan, text: m.text || '', type: m.type,
-    mass: !m.from_fan && isMass(m.type), tip: m.type === 'TIP', gif: !!m.raw?.gif, paid: paid[m.uuid] || null,
-  }));
-  return { chat, money: moneyOf(earn.data || []) };
+// What came with each message (photos, videos, a PPV and whether he bought it),
+// keyed "fan|message": a mass message has one id for every fan who got it.
+// From fanvue_media (database change 039); none before it ran.
+async function mediaFor(accountId, fanUuid = null) {
+  let rows = [];
+  try {
+    rows = await all(() => {
+      const q = supabaseAdmin.from('fanvue_media').select('fan_uuid, media_uuid, message_uuid, media_type, price_cents, purchased_at').eq('account_id', accountId);
+      return (fanUuid ? q.eq('fan_uuid', fanUuid) : q).order('fan_uuid').order('media_uuid');
+    });
+  } catch { return {}; }
+  const out = {};
+  for (const r of rows) {
+    if (!r.message_uuid) continue;
+    const m = (out[`${r.fan_uuid}|${r.message_uuid}`] ||= { photos: 0, videos: 0, other: 0, price: null, bought_at: null });
+    if (r.media_type === 'image') m.photos += 1; else if (r.media_type === 'video') m.videos += 1; else m.other += 1;
+    if (r.price_cents) m.price = r.price_cents / 100;
+    if (r.purchased_at && (!m.bought_at || r.purchased_at < m.bought_at)) m.bought_at = r.purchased_at;
+  }
+  return out;
 }
 
-// What a fan has spent, from Fanvue's own numbers (refunds taken off).
-function moneyOf(rows) {
+// A fan's messages as the writer reads them: each with what came with it and,
+// for a paid message, when he bought it.
+function chatOf(rows, earn, media, fanUuid) {
+  const paid = {};
+  for (const e of earn) if (e.source === 'message' && e.message_uuid) paid[e.message_uuid] = { amount: (e.gross_cents || 0) / 100, at: e.paid_at };
+  return rows.map(m => ({
+    uuid: m.uuid, at: m.sent_at, from_fan: m.from_fan, text: m.text || '', type: m.type,
+    mass: !m.from_fan && isMass(m.type), tip: m.type === 'TIP', gif: !!m.gif,
+    paid: paid[m.uuid]?.amount || null, paid_at: paid[m.uuid]?.at || null, media: media[`${fanUuid}|${m.uuid}`] || null,
+  }));
+}
+
+// The chat as it stood at `at`: what he bought later isn't bought yet.
+function asOf(chat, at) {
+  const t = Date.parse(at);
+  const later = (x) => !!x && Date.parse(x) > t;
+  return chat.map((m) => {
+    if (!later(m.paid_at) && !later(m.media?.bought_at)) return m;
+    const x = { ...m };
+    if (later(m.paid_at)) { x.paid = null; x.paid_at = null; }
+    if (later(m.media?.bought_at)) x.media = { ...m.media, bought_at: null };
+    return x;
+  });
+}
+
+// The whole chat with a fan, oldest first, as the writer reads it.
+async function loadChat(accountId, fanUuid) {
+  const [rows, earn, media] = await Promise.all([
+    all(() => supabaseAdmin.from('fanvue_messages').select('uuid, from_fan, type, text, sent_at, gif:raw->gif').eq('account_id', accountId).eq('fan_uuid', fanUuid).order('sent_at').order('uuid')),
+    supabaseAdmin.from('fanvue_earnings').select('source, gross_cents, net_cents, paid_at, message_uuid').eq('account_id', accountId).eq('fan_uuid', fanUuid),
+    mediaFor(accountId, fanUuid),
+  ]);
+  const chat = chatOf(rows, earn.data || [], media, fanUuid);
+  return { chat, money: moneyOf(earn.data || [], null, chat.find(m => !m.mass)?.at) };
+}
+
+// What a fan has spent, from Fanvue's own numbers (refunds taken off), and where
+// he stands with her (subscribed or not); `at` = as it was then (default now),
+// `chatSince` = their first message.
+function moneyOf(allRows, at = null, chatSince = null) {
+  const t = at ? Date.parse(at) : Date.now();
+  const rows = at ? allRows.filter(e => e.paid_at && Date.parse(e.paid_at) <= t) : allRows;
   let spent = 0, paid = 0, tips = 0, last = null;
   for (const e of rows) {
     const amount = Math.abs(e.gross_cents || 0) / 100;
@@ -289,7 +337,7 @@ function moneyOf(rows) {
     if (e.source === 'tip') tips++;
     if ((e.source === 'message' || e.source === 'tip') && (!last || e.paid_at > last)) last = e.paid_at;
   }
-  return { spent: Math.round(spent * 100) / 100, paid_messages: paid, tips, last_purchase: last };
+  return { spent: Math.round(spent * 100) / 100, paid_messages: paid, tips, last_purchase: last, standing: standingAt(rows, t, chatSince) };
 }
 
 // The part of a chat the writer reads: all of it, or the last 40 messages of a
@@ -356,7 +404,7 @@ async function fanDetail(orgId, creatorId, fanUuid) {
     money,
     total: chat.filter(m => !m.mass).length,
     long: win.long,
-    messages: win.messages.map(m => ({ sent_at: m.at, from_fan: m.from_fan, message: m.text, mass: m.mass, paid: m.paid, tip: m.tip, gif: m.gif })),
+    messages: win.messages.map(m => ({ sent_at: m.at, from_fan: m.from_fan, message: m.text, mass: m.mass, paid: m.paid, tip: m.tip, gif: m.gif, note: mediaNote(m), empty: emptyBody(m) })),
   };
 }
 
@@ -633,5 +681,5 @@ module.exports = {
   buildMemory, buildAllMemory, memoryJob, reply, usage,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
   // for the blind test (utils/aiDuels.js)
-  _engine: { pageAccount, loadPersona, styleExamples, windowFor, screenLatest, pickSituations, provenExamples, forgetGold, writeOne, logUsage, all, isMass, TEAM_TYPES },
+  _engine: { pageAccount, loadPersona, styleExamples, windowFor, screenLatest, pickSituations, provenExamples, forgetGold, writeOne, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf },
 };
