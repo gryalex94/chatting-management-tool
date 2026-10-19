@@ -27,9 +27,22 @@ const FIELDS = [
   ['limits', 'Her limits', 'Things she won\'t do or talk about.', 2],
   ['facts', 'Things she has told fans about herself', 'One per line (her pet, her job, her city…). She keeps these the same with every fan.', 4],
   ['real_answer', 'If a fan asks whether she\'s real', 'She always says she\'s an AI character; this is how she puts it.', 2],
+  ['examples', 'How she really texts', 'Real messages from her chats, one per line: the AI copies their style, not the words. Empty: some of her real messages are used.', 6],
 ];
-const toForm = (p) => Object.fromEntries(FIELDS.map(([k]) => [k, k === 'facts' ? (p?.facts || []).join('\n') : p?.[k] || '']));
-const fromForm = (f) => ({ ...f, facts: f.facts.split('\n').map(s => s.trim()).filter(Boolean) });
+const TYPING = [
+  ['relaxed', 'Relaxed', 'a 60-letter message takes about 20 seconds'],
+  ['normal', 'Normal', 'about 13 seconds, like texting on a phone'],
+  ['quick', 'Quick', 'about 9 seconds'],
+];
+const EMOJIS = [
+  ['none', 'None'],
+  ['rarely', 'Rarely', 'about 1 reply in 4, like her real chats'],
+  ['sometimes', 'Sometimes', 'about half her replies'],
+  ['often', 'Often', 'most replies'],
+];
+const LISTS = ['facts', 'examples'];
+const toForm = (p) => Object.fromEntries(FIELDS.map(([k]) => [k, LISTS.includes(k) ? (p?.[k] || []).join('\n') : p?.[k] || '']));
+const fromForm = (f) => ({ ...f, ...Object.fromEntries(LISTS.map(k => [k, f[k].split('\n').map(s => s.trim()).filter(Boolean)])) });
 
 /**
  * Who she is, as the AI writes her: drafted by the AI from her own past
@@ -40,13 +53,15 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
   const [writer, setWriter] = useState('');
+  const [typing, setTyping] = useState('normal');
+  const [emojis, setEmojis] = useState('rarely');
   const [drafted, setDrafted] = useState(null);       // { read, cost, model } after a draft, until saved
   const [busy, setBusy] = useState('');
   const [generating, setGenerating] = useState(false);  // the "Generate from a description" window
 
   useEffect(() => {
     api.get(`/api/ai-chat/pages/${page.creator_id}/profile`).then(r => {
-      setData(r.data); setForm(toForm(r.data.profile)); setWriter(r.data.writer);
+      setData(r.data); setForm(toForm(r.data.profile)); setWriter(r.data.writer); setTyping(r.data.typing || 'normal'); setEmojis(r.data.emojis || 'rarely');
     }).catch(e => setData({ error: errMsg(e, 'Could not load her profile') }));
   }, [page.creator_id]);
 
@@ -54,7 +69,7 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
   if (data.error) return <p className='text-sm text-muted-foreground'>{data.error}</p>;
 
   const saved = toForm(data.profile);
-  const dirty = !!drafted || writer !== data.writer || FIELDS.some(([k]) => form[k] !== saved[k]);
+  const dirty = !!drafted || writer !== data.writer || typing !== (data.typing || 'normal') || emojis !== (data.emojis || 'rarely') || FIELDS.some(([k]) => form[k] !== saved[k]);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const draft = async () => {
@@ -71,8 +86,8 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
   const save = async () => {
     setBusy('save');
     try {
-      const { data: d } = await api.put(`/api/ai-chat/pages/${page.creator_id}/profile`, { profile: fromForm(form), writer, drafted: !!drafted });
-      setData(d); setForm(toForm(d.profile)); setWriter(d.writer); setDrafted(null);
+      const { data: d } = await api.put(`/api/ai-chat/pages/${page.creator_id}/profile`, { profile: fromForm(form), writer, typing, emojis, drafted: !!drafted });
+      setData(d); setForm(toForm(d.profile)); setWriter(d.writer); setTyping(d.typing || 'normal'); setEmojis(d.emojis || 'rarely'); setDrafted(null);
       toast.success('Profile saved');
       onSaved?.();
     } catch (e) { toast.error(errMsg(e, 'Could not save')); }
@@ -122,6 +137,22 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
         ))}
 
         <div className='flex flex-wrap items-end justify-between gap-3'>
+          <div className='grid gap-1.5'>
+            <Label>Typing speed</Label>
+            <Select value={typing} onValueChange={setTyping}>
+              <SelectTrigger className='w-40' aria-label='Typing speed'><SelectValue /></SelectTrigger>
+              <SelectContent>{TYPING.map(([id, label]) => <SelectItem key={id} value={id}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className='text-xs text-muted-foreground'>Her messages arrive one at a time: {TYPING.find(t => t[0] === typing)?.[2]}.</span>
+          </div>
+          <div className='grid gap-1.5'>
+            <Label>Emojis</Label>
+            <Select value={emojis} onValueChange={setEmojis}>
+              <SelectTrigger className='w-40' aria-label='Emojis'><SelectValue /></SelectTrigger>
+              <SelectContent>{EMOJIS.map(([id, label]) => <SelectItem key={id} value={id}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className='text-xs text-muted-foreground'>{emojis === 'none' ? 'Never.' : `At most one per reply, in ${EMOJIS.find(e => e[0] === emojis)?.[2]}.`}</span>
+          </div>
           <div className='grid gap-1.5'>
             <Label>Writes her replies</Label>
             <Select value={writer} onValueChange={setWriter}>

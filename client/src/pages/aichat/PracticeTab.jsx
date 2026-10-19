@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, Loader2, MessageSquareReply, RotateCcw, Search, Send, ShieldAlert, UserRoundPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
@@ -43,9 +43,46 @@ const readLine = (u) => {
   return `The AI read ${bits.join(', ')}.`;
 };
 
-// One writer's answer: the reply, whether it passed the checks, and what it cost.
-function Draft({ result, kept, onKeep, canKeep }) {
+// When each of her messages starts and finishes being typed, counted from when he
+// wrote (`startAt`); played back as it would happen, unless skipped.
+function usePlayback(timing, startAt, off) {
+  const schedule = useMemo(() => (timing || []).reduce((list, x) => {
+    const start = (list.length ? list[list.length - 1].end : startAt) + x.wait_ms;
+    return [...list, { start, end: start + x.typing_ms }];
+  }, []), [timing, startAt]);
+  const [now, setNow] = useState(0);
+  const [skipped, setSkipped] = useState(false);
+  const last = schedule.length ? schedule[schedule.length - 1].end : 0;
+  const done = off || skipped || (now > 0 && now >= last);
+  useEffect(() => {
+    if (done) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [done]);
+  return {
+    shown: done ? schedule.length : schedule.filter(x => now >= x.end).length,
+    typing: !done && schedule.some(x => now >= x.start && now < x.end),
+    done, skip: () => setSkipped(true),
+    arrivedAfter: schedule.map(x => Math.round((x.end - startAt) / 1000)),
+  };
+}
+
+// "typing…": three dots, like a chat app.
+const Typing = () => (
+  <div className='flex justify-end'>
+    <div className='flex gap-1 rounded-2xl rounded-br-sm bg-primary/70 px-3 py-2.5' aria-label='She is typing'>
+      {[0, 150, 300].map(d => <span key={d} className='size-1.5 animate-bounce rounded-full bg-primary-foreground' style={{ animationDelay: `${d}ms` }} />)}
+    </div>
+  </div>
+);
+
+// One writer's answer: the reply (one message at a time, at her typing speed),
+// whether it passed the checks, and what it cost.
+function Draft({ result, startAt, kept, onKeep, canKeep, onGrow }) {
   const s = STATUS[result.status] || STATUS.error;
+  const live = ['ok', 'check'].includes(result.status);
+  const play = usePlayback(result.timing, startAt, !live || kept);
+  useEffect(() => { onGrow?.(); }, [play.shown, play.typing, onGrow]);
   return (
     <div className={cn('flex flex-col gap-2 rounded-lg border p-3', kept && 'border-primary/50 bg-primary/5')}>
       <div className='flex flex-wrap items-center gap-2 text-xs'>
@@ -56,7 +93,16 @@ function Draft({ result, kept, onKeep, canKeep }) {
       </div>
       {result.status === 'error' ? <p className='text-sm text-bad'>{result.error}</p> : (
         <div className='flex flex-col gap-1.5'>
-          {result.replies.map((r, i) => <Bubble key={i} tone={result.status === 'blocked' ? 'opacity-60' : null}>{r.creator_message}</Bubble>)}
+          {result.replies.slice(0, play.shown).map((r, i) => (
+            <Bubble key={i} tone={result.status === 'blocked' ? 'opacity-60' : null}
+              meta={live && result.timing ? `arrived after ${play.arrivedAfter[i]} s` : null}>{r.creator_message}</Bubble>
+          ))}
+          {play.typing && <Typing />}
+          {!play.done && (
+            <button type='button' onClick={play.skip} className='self-end text-xs text-link hover:underline'>
+              {play.shown ? 'Skip the wait' : `${result.replies.length} message${result.replies.length === 1 ? '' : 's'} on the way · skip the wait`}
+            </button>
+          )}
         </div>
       )}
       {result.status === 'handover' && <p className='text-xs text-warn'>The AI asks a person to take over: {result.reason}</p>}
@@ -71,10 +117,10 @@ function Draft({ result, kept, onKeep, canKeep }) {
       {result.learned?.length > 0 && (
         <p className='text-xs text-muted-foreground'>Would remember: {result.learned.map(l => l.note).join(' · ')}</p>
       )}
-      {canKeep && ['ok', 'check'].includes(result.status) && result.replies.length > 0 && (
+      {canKeep && live && play.done && result.replies.length > 0 && (
         <div>
           <Button size='sm' variant={kept ? 'secondary' : 'outline'} onClick={onKeep} disabled={kept}>
-            <Check />{kept ? 'Kept' : 'Keep this reply and go on'}
+            <Check />{kept ? 'Kept' : 'Use this reply'}
           </Button>
         </div>
       )}
@@ -145,6 +191,7 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
   const blocked = !page.has_profile || !ready.writer || !ready.tables;
 
   const ask = async (nextTest) => {
+    const askedAt = Date.now();         // her timing counts from when he wrote
     setBusy(true);
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, {
@@ -153,7 +200,7 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
         test: nextTest.map(({ from, text: t }) => ({ from, text: t })),
         models,
       });
-      setRounds(r => [...r, { at: nextTest.length, ...data, kept: null }]);
+      setRounds(r => [...r, { at: nextTest.length, askedAt, ...data, kept: null }]);
       onSpent?.();
     } catch (e) { toast.error(errMsg(e, 'Could not get a reply')); }
     finally { setBusy(false); }
@@ -161,7 +208,18 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
   const send = () => {
     const t = text.trim();
     if (!t || busy || blocked) return;
-    const next = [...test, { from: 'fan', text: t }];
+    // no reply picked for his last message: the first one that passed counts, so
+    // the chat goes on from her answer (otherwise she'd never have answered)
+    let next = [...test];
+    const last = rounds[rounds.length - 1];
+    if (last && !last.kept && last.at === test.length) {
+      const first = (last.results || []).find(r => ['ok', 'check'].includes(r.status) && r.replies.length);
+      if (first) {
+        next = [...next, ...first.replies.map(r => ({ from: 'her', text: r.creator_message, label: first.label }))];
+        setRounds(rs => rs.map(r => (r === last ? { ...r, kept: first.model } : r)));
+      }
+    }
+    next = [...next, { from: 'fan', text: t }];
     setTest(next);
     setText('');
     ask(next);
@@ -170,6 +228,8 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
     setTest(t => [...t, ...result.replies.map(r => ({ from: 'her', text: r.creator_message, label: result.label }))]);
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
   };
+  // keep the newest message in view while her messages arrive one by one
+  const toBottom = useCallback(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, []);
   const toggleModel = (id) => setModels(m => (m.includes(id) ? (m.length > 1 ? m.filter(x => x !== id) : m) : m.length < 3 ? [...m, id] : m));
 
   const roundsAt = (n) => rounds.filter(r => r.at === n).map((round, i) => (
@@ -179,11 +239,11 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
           {round.screen?.review && <p className='text-xs text-muted-foreground'>Claude checked his message first: {round.screen.review.reason}</p>}
           <div className={cn('grid gap-2', round.results.length > 1 && 'lg:grid-cols-2', round.results.length > 2 && '2xl:grid-cols-3')}>
             {round.results.map(res => (
-              <Draft key={res.model} result={res} kept={round.kept === res.model}
+              <Draft key={res.model} result={res} startAt={round.askedAt} kept={round.kept === res.model} onGrow={toBottom}
                 canKeep={!round.kept && round === rounds[rounds.length - 1]} onKeep={() => keep(round, res)} />
             ))}
           </div>
-          {round.used && <p className='text-xs text-muted-foreground'>{readLine(round.used)}</p>}
+          {round.used && <p className='text-xs text-muted-foreground'>{readLine(round.used)}{!round.kept && round.results.length > 1 ? ' If you just write on, the first reply that passed is used.' : ''}</p>}
         </>
       )}
     </div>

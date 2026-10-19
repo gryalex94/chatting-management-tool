@@ -44,15 +44,21 @@ const HOUSE_RULES = [
 ];
 
 // How she chats (from the agency's Playbook, the parts that aren't about selling).
+// Her team's real messages (Oct 2026): median 7 words, 1 in 6 with an emoji, no
+// dashes or *stars*. The AI's own habits (long, clever, emoji-heavy) are the
+// opposite, so these say it plainly.
 const CHAT_GUIDE = [
-  'Keep it short, like texting: 1 to 3 messages, most under 20 words.',
-  'Answer what he said or asked first, then keep it going: a question about him, a tease or a playful hook.',
+  'Text like a real girl on her phone: short and simple. Most messages are 3 to 10 words; 1 to 3 messages per reply, often just 1 or 2.',
+  'Everyday words only. No clever wordplay, no poetic or dramatic lines, no big words.',
+  'Emojis are rare: most of your messages have none, and never more than one in a reply.',
+  'No dashes (— or –), no ~, no *stars* around words, no lists, no formal phrases.',
+  'Answer what he said first. Then keep it going, but not always with a question: sometimes a reaction, a tease or a bit about your day.',
+  'If you are already chatting, don\'t greet him again.',
   'Get to know him and use it: his name, his day, things he told you before.',
   'Match his energy and pace. Don\'t be needy or pushy.',
   'When it gets flirty or hot, build it up step by step and follow his lead; don\'t jump ahead.',
   'After a hot moment, be warm and personal.',
   'Vary your words. Never repeat a line you have already sent him.',
-  'Write like a person texting, in your own style, not like an assistant: no lists, no formal phrases.',
 ];
 
 const clean = (s) => String(s ?? '').trim();
@@ -70,18 +76,19 @@ function profileText(p = {}) {
   return lines.join('\n');
 }
 
-function systemText(profile) {
+function systemText(profile, examples = []) {
   const name = clean(profile?.name) || 'the creator';
   return [
     `You write chat replies as ${name}, an AI character on Fanvue, a subscription site for adults. Every fan is a verified adult who subscribes to you.`,
     `# Who you are\n${profileText(profile) || `Your name is ${name}.`}`,
+    examples.length ? `# How you really text\nReal messages you sent to fans. Copy this style (length, words, emojis), not the words themselves:\n${examples.map(e => `- ${clean(e).replace(/\s+/g, ' ')}`).join('\n')}` : '',
     `# House rules (always, no exceptions)\n${HOUSE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
     `# How you chat\n${CHAT_GUIDE.map(r => `- ${r}`).join('\n')}`,
     '# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], "learned": ["..."], "handover": ""}\n'
       + '- messages: what you send him now, 1 to 3 short chat messages.\n'
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- handover: empty, or a short reason when a person should take over this chat.',
-  ].join('\n\n');
+  ].filter(Boolean).join('\n\n');
 }
 
 // One chat line: "[Mon 13 Oct 21:04] Him: …".
@@ -114,7 +121,7 @@ function cardText(card = [], money = null) {
  * `chat` = messages oldest first ({ at, from_fan, text, mass, paid, tip, gif }),
  * `notes` = the safety screen's notes for this moment, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], now = new Date(), retry = null }) {
+function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], now = new Date(), retry = null }) {
   const parts = [`Now: ${when(now.toISOString())} (Amsterdam time).`];
   const about = cardText(card, money);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -124,7 +131,7 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
   return [
-    { role: 'system', content: systemText(profile) },
+    { role: 'system', content: systemText(profile, examples) },
     { role: 'user', content: parts.join('\n\n') },
   ];
 }
@@ -189,6 +196,8 @@ function generatePrompt({ input, own = [] }) {
           opt('Pet names she uses for fans', g.pet_names, 'choose some that fit the vibe'), opt('Her limits', g.limits, 'none given'),
         ].join('\n'),
         own.length ? `Things she has already written to fans. Stay consistent with any facts about herself in them:\n${own.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '',
+        own.length ? styleStats(own) : '',
+        'Leave out anything about selling, prices, tips or unlocking content: she doesn\'t sell for now.',
         'Write her profile, about her (she/her, or the pronouns that fit the gender). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
           + '{"name": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
           + '- name: the name given, or a fitting first name.\n'
@@ -206,6 +215,17 @@ function generatePrompt({ input, own = [] }) {
   ];
 }
 
+// How her real messages measure, so a drafted style matches them.
+const EMOJI_TEST = /\p{Extended_Pictographic}/u;
+function styleStats(texts) {
+  const list = texts.map(clean).filter(Boolean);
+  if (!list.length) return '';
+  const pct = (f) => `${Math.round((100 * list.filter(f).length) / list.length)}%`;
+  const words = list.map(t => t.split(/\s+/).length).sort((a, b) => a - b);
+  return `How her ${list.length} messages measure: half are ${words[Math.floor(words.length / 2)]} words or fewer; ${pct(t => EMOJI_TEST.test(t))} have an emoji; `
+    + `${pct(t => /^[a-z]/.test(t))} start with a small letter; ${pct(t => t.includes('?'))} ask a question. Describe her style so it matches these numbers.`;
+}
+
 /** Draft her profile from her own past messages (strings), mass and welcome messages. */
 function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
   const block = (title, list) => (list.length ? `${title}:\n${list.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '');
@@ -221,6 +241,8 @@ function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
         block('Messages she wrote to fans one to one', own),
         block('Messages she sent to all fans at once', mass),
         block('Her welcome messages', welcome),
+        styleStats(own),
+        'Leave out anything about selling, prices, tips or unlocking content: she doesn\'t sell for now.',
         'Write her profile, about her (she/her). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
           + '{"name": "", "age": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
           + '- name: what she calls herself.\n'
@@ -236,6 +258,29 @@ function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
       ].filter(Boolean).join('\n\n'),
     },
   ];
+}
+
+// The AI's habits that give it away, tidied in code whatever it wrote: *stars*
+// around words, long dashes, "~" (her team never types it), and more than one
+// emoji in a reply (her team: about 1 message in 6 has one).
+const EMOJI = /\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic}\uFE0F?)*/gu;
+// How often a reply may carry an emoji (her profile's "Emojis" setting).
+const EMOJI_CHANCE = { none: 0, rarely: 0.25, sometimes: 0.5, often: 0.85 };
+function tidyMessages(list, { emojis = 'rarely' } = {}) {
+  let seen = Math.random() < (EMOJI_CHANCE[emojis] ?? EMOJI_CHANCE.rarely) ? 0 : 1;   // 1 = none this time
+  return list.map((m) => {
+    return String(m)
+      .replace(/\*([^*\n]+)\*/g, '$1')
+      .replace(/\s*[—–]\s*/g, ', ')
+      .replace(/~+(\s+)(?=\p{Ll})/gu, ',$1')
+      .replace(/~+/g, '')
+      .replace(EMOJI, e => (++seen > 1 ? '' : e))
+      .replace(/,\s*([,.!?])/g, '$1')
+      .replace(/^[,\s]+/, '')
+      .replace(/\s+([,.!?])/g, '$1')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }).filter(Boolean);
 }
 
 // The first JSON object in a model's answer (models sometimes add words or ``` fences).
@@ -271,4 +316,4 @@ function readReply(text) {
   return { messages: lines, learned: [], handover: '', format_ok: false };
 }
 
-module.exports = { HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, replyPrompt, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, chatLine };
+module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, replyPrompt, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, chatLine };

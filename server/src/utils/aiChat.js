@@ -19,13 +19,16 @@ const or = require('../integrations/openrouter');
 const { screenFan, checkReply, personaProblems } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 
 const NOT_READY = 'Run database change 036 (AI chat) in Supabase first';
 const LONG_CHAT = 100;                 // over this many messages, the writer reads the last 40 and the story so far
 const RECENT = 40;
 const MASS_KEPT = 3;                   // mass messages the writer sees, at most
 const MEMORY_CHUNK = 250;              // messages per memory update call
-const OWN_TYPES = ['SINGLE_RECIPIENT', 'CHAT_TEXT_GENERATION', 'CHAT_TEXT_REPLY', 'CHAT_TEXT_REWRITE'];
+// Her messages typed by her team: what drafts and examples learn from. Fanvue's own
+// AI writer (CHAT_TEXT_…) wrote long, emoji-heavy messages that aren't her style.
+const TEAM_TYPES = ['SINGLE_RECIPIENT'];
 const WELCOME_TYPES = ['AUTOMATED_NEW_SUBSCRIBER', 'AUTOMATED_FIRST_MESSAGE_REPLY'];
 
 class AiChatError extends Error {
@@ -109,7 +112,9 @@ const asText = (v) => (Array.isArray(v) ? v.map(asText).filter(Boolean).join(', 
 function cleanProfile(p = {}) {
   const out = {};
   for (const [k] of P.PROFILE_FIELDS) out[k] = asText(p[k]).slice(0, 2000);
-  out.facts = (Array.isArray(p.facts) ? p.facts : String(p.facts || '').split('\n')).map(asText).filter(Boolean).slice(0, 40).map(f => f.slice(0, 200));
+  const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map(asText).filter(Boolean);
+  out.facts = lines(p.facts).slice(0, 40).map(f => f.slice(0, 200));
+  out.examples = lines(p.examples).slice(0, 25).map(f => f.slice(0, 200));
   const age = parseInt(out.age, 10);
   if (out.age && Number.isFinite(age) && age < 18) throw new AiChatError('Her age must be 18 or over');
   return out;
@@ -120,26 +125,56 @@ async function getProfile(orgId, creatorId) {
   const p = await loadPersona(orgId, creatorId);
   return {
     page: { creator_id: page.id, name: page.name, handle: account.handle, is_ai_creator: account.is_ai_creator },
-    profile: p?.profile || null, writer: p?.settings?.writer || or.DEFAULT_WRITER,
+    profile: p?.profile || null, writer: p?.settings?.writer || or.DEFAULT_WRITER, typing: p?.settings?.typing || 'normal', emojis: p?.settings?.emojis || 'rarely',
     drafted_at: p?.drafted_at || null, updated_at: p?.updated_at || null,
     house_rules: P.HOUSE_RULES, chat_guide: P.CHAT_GUIDE, options: P.GENERATE_OPTIONS,
   };
 }
 
-async function saveProfile(orgId, creatorId, { profile, writer, drafted }, userId) {
+async function saveProfile(orgId, creatorId, { profile, writer, typing, emojis, drafted }, userId) {
   await pageAccount(orgId, creatorId);
   const clean_ = cleanProfile(profile);
   if (!clean_.name) throw new AiChatError('Give her a name');
   if (writer != null && !or.isModelId(writer)) throw new AiChatError('Pick a writer');
+  if (typing != null && !SPEEDS[typing]) throw new AiChatError('Pick her typing speed');
+  if (emojis != null && !(emojis in P.EMOJI_CHANCE)) throw new AiChatError('Pick how often she uses emojis');
   const cur = await loadPersona(orgId, creatorId);
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin.from('ai_personas').upsert({
     creator_id: creatorId, organisation_id: orgId, profile: clean_,
-    settings: { ...(cur?.settings || {}), writer: writer || cur?.settings?.writer || or.DEFAULT_WRITER },
+    settings: {
+      ...(cur?.settings || {}), writer: writer || cur?.settings?.writer || or.DEFAULT_WRITER,
+      typing: typing || cur?.settings?.typing || 'normal',
+      emojis: emojis || cur?.settings?.emojis || 'rarely',
+    },
     drafted_at: drafted ? now : cur?.drafted_at || null, updated_by: userId, updated_at: now,
   }, { onConflict: 'creator_id' });
   check(error);
   return getProfile(orgId, creatorId);
+}
+
+// Real messages her team typed, as examples of how she texts: short ones, spread
+// over time, without links, numbers, fans' names or anything about minors. Kept
+// for a few hours per account.
+const exampleCache = new Map();
+async function styleExamples(accountId, n = 15) {
+  const hit = exampleCache.get(accountId);
+  if (hit && Date.now() - hit.at < 6 * 3600_000) return hit.list.slice(0, n);
+  const [rows, people] = await Promise.all([
+    all(() => supabaseAdmin.from('fanvue_messages').select('text, sent_at').eq('account_id', accountId).eq('from_fan', false)
+      .in('type', TEAM_TYPES).not('text', 'is', null).order('sent_at').order('uuid')),
+    all(() => supabaseAdmin.from('fanvue_fans').select('handle, display_name, nickname').eq('account_id', accountId).order('fan_uuid')),
+  ]);
+  const names = new Set(people.flatMap(f => [f.handle, f.display_name, f.nickname])
+    .flatMap(v => String(v || '').toLowerCase().split(/\s+/)).filter(w => w.length >= 3));
+  const word = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}_.-]/gu, '');
+  const fits = (t) => {
+    const w = t.trim().split(/\s+/);
+    return w.length >= 2 && w.length <= 14 && !/https?:|www\.|@|\$|\d{3,}/i.test(t) && !w.some(x => names.has(word(x))) && !personaProblems(t).length;
+  };
+  const list = spread(distinct(rows.map(r => r.text)).filter(fits), 25);
+  exampleCache.set(accountId, { at: Date.now(), list });
+  return list.slice(0, n);
 }
 
 // An even spread of `n` items from a list (oldest to newest).
@@ -181,7 +216,7 @@ async function generateProfile(orgId, creatorId, raw = {}) {
   let own = [];
   if (raw.use_history) {
     const rows = await all(() => supabaseAdmin.from('fanvue_messages').select('text, sent_at').eq('account_id', account.id).eq('from_fan', false)
-      .in('type', OWN_TYPES).not('text', 'is', null).order('sent_at').order('uuid'));
+      .in('type', TEAM_TYPES).not('text', 'is', null).order('sent_at').order('uuid'));
     own = spread(distinct(rows.map(m => m.text)).map(t => t.slice(0, 300)), 120);
   }
   const res = await or.chat({ model, maxTokens: 2000, temperature: 0.7, fallbacks: or.backupsFor(model), messages: P.generatePrompt({ input, own }) });
@@ -191,8 +226,9 @@ async function generateProfile(orgId, creatorId, raw = {}) {
   const profile = cleanProfile({
     ...j, name: input.name || j.name, from: input.from || j.from, gender: input.gender, age: String(input.age),
     orientation: input.orientation, vibe: input.vibes.join(', '), heat: input.heat,
+    examples: raw.use_history ? await styleExamples(account.id) : [],
   });
-  const wrote = personaProblems(Object.entries(profile).filter(([k]) => k !== 'limits').flatMap(([, v]) => v).join('\n'));
+  const wrote = personaProblems(Object.entries(profile).filter(([k]) => !['limits', 'examples'].includes(k)).flatMap(([, v]) => v).join('\n'));
   if (wrote.length) throw new AiChatError(`The AI's profile wasn't usable (${wrote[0]}) Try again, or change the description.`, 502);
   return { profile, cost: res.usage.cost, model: or.writerLabel(res.model), read: own.length };
 }
@@ -205,7 +241,7 @@ async function draftProfile(orgId, creatorId) {
   const model = persona?.settings?.writer || or.DEFAULT_WRITER;
   const [own, mass, welcome] = await Promise.all([
     all(() => supabaseAdmin.from('fanvue_messages').select('text, sent_at').eq('account_id', account.id).eq('from_fan', false)
-      .in('type', OWN_TYPES).not('text', 'is', null).order('sent_at').order('uuid')),
+      .in('type', TEAM_TYPES).not('text', 'is', null).order('sent_at').order('uuid')),
     supabaseAdmin.from('fanvue_messages').select('text').eq('account_id', account.id).eq('type', 'BROADCAST').order('sent_at', { ascending: false }).limit(1000),
     supabaseAdmin.from('fanvue_messages').select('text').eq('account_id', account.id).in('type', WELCOME_TYPES).order('sent_at', { ascending: false }).limit(200),
   ]);
@@ -218,7 +254,7 @@ async function draftProfile(orgId, creatorId) {
   await logUsage(orgId, 'profile', res.model, res.usage, { creatorId });
   const j = P.parseJsonObject(res.text);
   if (!j) throw new AiChatError('The AI\'s draft came back unreadable: try again', 502);
-  const profile = cleanProfile({ ...j, age: parseInt(j.age, 10) >= 18 ? String(j.age) : '' });
+  const profile = cleanProfile({ ...j, age: parseInt(j.age, 10) >= 18 ? String(j.age) : '', examples: await styleExamples(account.id) });
   return { profile, cost: res.usage.cost, model: or.writerLabel(res.model), read: ownTexts.length };
 }
 
@@ -458,17 +494,20 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const win = windowFor(convo);
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
-  const base = { profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes };
+  const examples = persona.profile.examples?.length ? persona.profile.examples : await styleExamples(account.id);
+  const base = { profile: persona.profile, examples, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes };
 
   // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
-  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer })));
+  const speed = persona.settings?.typing || 'normal';
+  const emojis = persona.settings?.emojis || 'rarely';
+  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis })));
   return {
     screen, results,
     used: { messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money },
   };
 }
 
-async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer }) {
+async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis }) {
   const started = Date.now();
   const out = { model, label: or.writerLabel(model), cost: 0 };
   try {
@@ -478,6 +517,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
       draft = P.readReply(res.text);
+      draft.messages = P.tidyMessages(draft.messages, { emojis });
       if (draft.handover) return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started };
       const c = checkReply(draft.messages, { recent: recentHer });
       verdict = c.verdict; problems = c.problems; review = null;
@@ -497,6 +537,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       ...out,
       status: verdict === 'ok' ? 'ok' : verdict === 'person' ? 'check' : 'blocked',
       replies: draft.messages.map(m => ({ creator_message: m })),
+      // one message at a time, at her typing speed (never all in the same second)
+      timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
       learned: draft.learned.map(t => ({ note: t })),
       problems, review, retried: !!first, first_problems: first || [], format_ok: draft.format_ok,
       ms: Date.now() - started,
