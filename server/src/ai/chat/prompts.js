@@ -164,7 +164,7 @@ function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
         block('Messages she wrote to fans one to one', own),
         block('Messages she sent to all fans at once', mass),
         block('Her welcome messages', welcome),
-        'Write her profile. Reply with JSON only:\n'
+        'Write her profile, about her (she/her). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
           + '{"name": "", "age": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
           + '- name: what she calls herself.\n'
           + '- age: only if she says it and it is 18 or over; otherwise empty.\n'

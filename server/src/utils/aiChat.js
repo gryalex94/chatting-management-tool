@@ -100,11 +100,16 @@ async function loadPersona(orgId, creatorId) {
   return data && data.organisation_id === orgId ? data : null;
 }
 
+// A model sometimes answers a field with a list or an object: make it plain text.
+const asText = (v) => (Array.isArray(v) ? v.map(asText).filter(Boolean).join(', ')
+  : v && typeof v === 'object' ? Object.entries(v).map(([k, x]) => `${k}: ${asText(x)}`).join('; ')
+    : clean(v));
+
 // A profile as typed (or drafted), trimmed to sensible sizes. Her age must be 18+.
 function cleanProfile(p = {}) {
   const out = {};
-  for (const [k] of P.PROFILE_FIELDS) out[k] = clean(p[k]).slice(0, 2000);
-  out.facts = (Array.isArray(p.facts) ? p.facts : String(p.facts || '').split('\n')).map(clean).filter(Boolean).slice(0, 40).map(f => f.slice(0, 200));
+  for (const [k] of P.PROFILE_FIELDS) out[k] = asText(p[k]).slice(0, 2000);
+  out.facts = (Array.isArray(p.facts) ? p.facts : String(p.facts || '').split('\n')).map(asText).filter(Boolean).slice(0, 40).map(f => f.slice(0, 200));
   const age = parseInt(out.age, 10);
   if (out.age && Number.isFinite(age) && age < 18) throw new AiChatError('Her age must be 18 or over');
   return out;
@@ -156,14 +161,14 @@ async function draftProfile(orgId, creatorId) {
   const ownTexts = spread(distinct(own.map(m => m.text)).map(t => t.slice(0, 300)), 300);
   if (ownTexts.length < 10) throw new AiChatError('There are too few of her own messages to draft a profile from: fill it in by hand');
   const res = await or.chat({
-    model, maxTokens: 2000, temperature: 0.3,
+    model, maxTokens: 2000, temperature: 0.3, fallbacks: or.backupsFor(model),
     messages: P.profilePrompt({ handle: account.handle, own: ownTexts, mass: distinct((mass.data || []).map(m => m.text)).slice(0, 30), welcome: distinct((welcome.data || []).map(m => m.text)).slice(0, 8) }),
   });
   await logUsage(orgId, 'profile', res.model, res.usage, { creatorId });
   const j = P.parseJsonObject(res.text);
   if (!j) throw new AiChatError('The AI\'s draft came back unreadable: try again', 502);
   const profile = cleanProfile({ ...j, age: parseInt(j.age, 10) >= 18 ? String(j.age) : '' });
-  return { profile, cost: res.usage.cost, model: or.writerLabel(model), read: ownTexts.length };
+  return { profile, cost: res.usage.cost, model: or.writerLabel(res.model), read: ownTexts.length };
 }
 
 // ── A fan's chat, memory and money ──────────────────────────────────────────
@@ -310,7 +315,7 @@ async function buildMemory(orgId, creatorId, fanUuid, { full = false } = {}) {
   let cost = 0;
   for (let i = 0; i < fresh.length; i += MEMORY_CHUNK) {
     const res = await or.chat({
-      model, maxTokens: 1500, temperature: 0.2,
+      model, maxTokens: 1500, temperature: 0.2, fallbacks: or.backupsFor(model),
       messages: P.memoryPrompt({ name: persona?.profile?.name, fan: { name: fanName(person) }, known: facts, story, chat: fresh.slice(i, i + MEMORY_CHUNK) }),
     });
     cost += res.usage.cost || 0;

@@ -24,7 +24,11 @@ const DOUBTFUL_WORDS = /\b(?:kids?|child|children|daughters?|sons?|nieces?|nephe
 const CRISIS = /\b(?:kill(?:ing)?\s+my\s?self|suicid\w*|end(?:ing)?\s+(?:it\s+all|my\s+life)|self[-\s]?harm\w*|cut(?:ting)?\s+my\s?self|want(?:ed)?\s+to\s+die|don'?t\s+want\s+to\s+(?:live|be\s+alive)|no\s+reason\s+to\s+live)\b/i;
 const PAYMENT_DISPUTE = /\b(?:refund\w*|charge\s?backs?|scam\w*|ripped\s+off|fraud|stole|stolen|money\s+back|didn'?t\s+(?:get|receive)\s+(?:it|what|the|my))\b/i;
 const ASKS_REAL = /\b(?:are\s+(?:you|u)\s+(?:a\s+)?(?:real|human|bot|robot|ai|a\.i\.|fake|a\s+person|actually\s+real)|(?:you'?re|ur|you\s+are)\s+(?:a\s+)?(?:bot|robot|ai|fake|not\s+real)|is\s+this\s+(?:a\s+)?(?:bot|ai|real)|real\s+person|chat\s?gpt)\b/i;
-const WANTS_MEET = /\b(?:meet(?:\s+up|\s+you|\s+me|\s+irl|\s+in\s+person)?|date\s+(?:me|you)|come\s+over|hang\s+out|your\s+(?:address|number|phone|insta\w*|snap\w*|whats\s?app|telegram|socials?)|whats\s?app|telegram|snap\s?chat|instagram|insta\b|kik\b|discord|call\s+(?:me|you)|face\s?time|video\s+(?:call|chat))\b/i;
+// "Nice to meet you" is a greeting, not a meet-up.
+const NOT_GREETING = '(?<!(?:nice|glad|good|great|lovely|happy|pleasure|pleased|cool|awesome)\\s+to\\s+)';
+const WANTS_MEET = new RegExp(`\\b(?:${NOT_GREETING}meet(?:\\s+up|\\s+you|\\s+me|\\s+irl|\\s+in\\s+person)?\\b(?!\\s+(?:you\\s+)?(?:here|on\\s+fanvue))`
+  + '|date\\s+(?:me|you)|come\\s+over|hang\\s+out|your\\s+(?:address|number|phone|insta\\w*|snap\\w*|whats\\s?app|telegram|socials?)'
+  + '|whats\\s?app|telegram|snap\\s?chat|instagram|insta\\b|kik\\b|discord|call\\s+(?:me|you)|face\\s?time|video\\s+(?:call|chat))', 'i');
 const WANTS_STOP = /\b(?:stop\s+(?:texting|messaging|writing|sending)|leave\s+me\s+alone|don'?t\s+(?:text|message|write\s+to)\s+me|unsubscrib\w*|i'?m\s+(?:leaving|done\s+with\s+(?:you|this)))\b/i;
 const WANTS_MEDIA = /\b(?:send\s+(?:me\s+)?(?:a\s+|some\s+|more\s+)?(?:pic|pics|picture|pictures|photo|photos|video|videos|vid|vids|selfie|nudes?|voice\s+(?:note|message))|show\s+me\s+(?:your|ur|some))\b/i;
 
@@ -71,7 +75,7 @@ const CONTACT = [
 const CLAIMS_HUMAN = /\b(?:i'?m|im|i\s+am)\s+(?:a\s+)?(?:real(?!ly)\b|human|not\s+(?:an?\s+)?(?:ai|a\.i\.|bot|robot|fake|program))|\bnot\s+(?:an?\s+)?(?:ai|a\.i\.|bot|robot)\b|\breal\s+(?:girl|woman|person|human)\b|\bflesh\s+and\s+blood\b/i;
 const SELLS = /\$\s?\d|\b\d+\s?(?:usd|dollars?|bucks|euros?)\b|\bppv\b|\bunlock\w*\b|\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips?\b|\bpay\s+(?:me|for)\b|\bbuy\s+(?:it|this|my|me)\b|\bvault\b/i;
 const PROMISES_MEDIA = /\b(?:i'?ll|i\s+will|gonna|going\s+to|let\s+me|i\s+can|i'?m\s+(?:sending|recording))\s+(?:\w+\s+){0,3}?(?:send|show|record|film|shoot|snap)\b(?:\s+\w+){0,4}?\s+(?:pics?|pictures?|photos?|videos?|vids?|selfies?|clips?|voice\s+(?:notes?|messages?))\b|\b(?:here'?s|sending\s+you)\s+(?:a\s+)?(?:pic|picture|photo|video|selfie)\b/i;
-const MEETING = /\b(?:meet(?:\s+up|\s+you|\s+irl|\s+in\s+person)|come\s+over|my\s+place|your\s+place|in\s+person|irl|hotel|my\s+address|grab\s+(?:a\s+)?(?:drink|coffee|dinner))\b/i;
+const MEETING = new RegExp(`\\b(?:${NOT_GREETING}meet(?:\\s+up|\\s+you|\\s+irl|\\s+in\\s+person)|come\\s+over|my\\s+place|your\\s+place|in\\s+person|irl|hotel|my\\s+address|grab\\s+(?:a\\s+)?(?:drink|coffee|dinner))\\b`, 'i');
 const MAX_MESSAGES = 3;
 const MAX_CHARS = 400;
 const normText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
