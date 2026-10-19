@@ -291,10 +291,26 @@ function tidyMessages(list, { emojis = 'rarely' } = {}) {
   }).filter(Boolean);
 }
 
-// The first JSON object in a model's answer (models sometimes add words or ``` fences).
+// Line breaks and tabs typed straight into a JSON text ("…good day!⏎"]), which
+// makes it invalid: written the proper way (\\n) instead.
+function escapeRawBreaks(s) {
+  let out = '', inStr = false, esc = false;
+  for (const ch of s) {
+    if (esc) { esc = false; out += ch; continue; }
+    if (ch === '\\') { esc = true; out += ch; continue; }
+    if (ch === '"') inStr = !inStr;
+    out += inStr && ch === '\n' ? '\\n' : inStr && ch === '\r' ? '' : inStr && ch === '\t' ? ' ' : ch;
+  }
+  return out;
+}
+const tryJson = (s) => { try { return JSON.parse(s); } catch { try { return JSON.parse(escapeRawBreaks(s)); } catch { return undefined; } } };
+
+// The first JSON object in a model's answer (models sometimes add words or ``` fences,
+// or break a line inside a text).
 function parseJsonObject(text) {
   const s = String(text || '').replace(/```(?:json)?/gi, '').trim();
-  try { return JSON.parse(s); } catch { /* look inside */ }
+  const whole = tryJson(s);
+  if (whole !== undefined) return whole;
   const start = s.indexOf('{');
   if (start < 0) return null;
   let depth = 0, inStr = false, esc = false;
@@ -305,9 +321,7 @@ function parseJsonObject(text) {
     if (ch === '"') { inStr = !inStr; continue; }
     if (inStr) continue;
     if (ch === '{') depth++;
-    else if (ch === '}' && --depth === 0) {
-      try { return JSON.parse(s.slice(start, i + 1)); } catch { return null; }
-    }
+    else if (ch === '}' && --depth === 0) return tryJson(s.slice(start, i + 1)) ?? null;
   }
   return null;
 }
@@ -318,6 +332,12 @@ function readReply(text) {
   const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
   if (j && (Array.isArray(j.messages) || typeof j.messages === 'string')) {
     return { messages: strings(j.messages), learned: strings(j.learned).slice(0, 10), handover: clean(j.handover), format_ok: true };
+  }
+  // broken JSON (cut off, a stray quote): the texts inside "messages", if they can be found
+  const inside = /"messages"\s*:\s*\[([\s\S]*?)(?:\]|$)/.exec(String(text || ''));
+  if (inside) {
+    const texts = [...inside[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => tryJson(`"${escapeRawBreaks(x[1])}"`) ?? x[1]);
+    if (texts.length) return { messages: strings(texts), learned: [], handover: '', format_ok: false };
   }
   // not the JSON asked for: the whole answer is the reply, one message per line
   const lines = clean(text).split(/\n+/).map(clean).filter(Boolean);

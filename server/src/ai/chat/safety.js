@@ -85,6 +85,8 @@ const normText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
  * { verdict: 'ok' | 'review' | 'block', problems: [...] }: block = rewrite it,
  * review = Claude decides. `recent` is her last few messages to this fan.
  */
+// The writer's answer format leaking into a message: {"messages": [" … "]}.
+const LOOKS_LIKE_CODE = /^\s*[{[]\s*"|"\s*[\]}]|"(?:messages|learned|handover)"|"\w+"\s*:\s*[[{"]/;
 function checkReply(messages, { recent = [] } = {}) {
   const list = (messages || []).map(m => String(m || '').trim()).filter(Boolean);
   if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'] };
@@ -97,6 +99,7 @@ function checkReply(messages, { recent = [] } = {}) {
   if (has(PROMISES_MEDIA, all)) block.push('It promises a photo, video or voice note. She can\'t send any.');
   if (list.length > MAX_MESSAGES) block.push(`It has ${list.length} messages; the most is ${MAX_MESSAGES}.`);
   if (list.some(m => m.length > MAX_CHARS)) block.push('A message is too long for a chat.');
+  if (list.some(m => LOOKS_LIKE_CODE.test(m))) block.push('It came out as code (brackets, quotes or "messages"), not a chat message.');
   const seen = new Set(recent.map(normText).filter(t => t.length >= 12));
   if (list.some(m => seen.has(normText(m)))) block.push('It repeats something she already sent him.');
   if (has(MEETING, all)) review.push('It talks about meeting in person.');
