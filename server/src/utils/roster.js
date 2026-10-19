@@ -86,13 +86,16 @@ async function ensureSlots(orgId, platform) {
  * (null: every platform, e.g. a chatter's profile). `ready` is false until
  * migration 025 has run (the tables don't exist yet).
  */
-async function loadRoster(orgId, from, to, platform = 'onlyfans') {
+async function loadRoster(orgId, from, to, platform = 'onlyfans', { removed = false } = {}) {
   const [slots, pages, { data: chatters }] = await Promise.all([
     loadSlots(orgId, platform),
     loadPages(orgId, platform),
     supabaseAdmin.from('chatters').select('id, name, is_active').eq('organisation_id', orgId).order('name'),
   ]);
-  const a = await supabaseAdmin.from('roster_assignments').select('*').eq('organisation_id', orgId).eq('is_active', true);
+  // `removed`: also the rows taken off the roster (payroll counts each until the day it was removed)
+  let q = supabaseAdmin.from('roster_assignments').select('*').eq('organisation_id', orgId);
+  if (!removed) q = q.eq('is_active', true);
+  const a = await q;
   if (a.error) return { ready: false, platform, slots, pages, chatters: chatters || [], assignments: [], changes: [] };
   // One platform: the roster rows on its shifts. A whole day off (no shift) is the
   // person's, so it shows for everyone who works on this platform.

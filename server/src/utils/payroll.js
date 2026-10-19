@@ -27,9 +27,10 @@ const R = require('./roster');
  *  - Other platforms (Fanvue, migration 035): one report per person still; the
  *    report's columns are the OnlyFans part and each other platform is a line in
  *    `lines`, added to the total. Fanvue doesn't say which chatter sent what, so its
- *    hours are the Fanvue shifts people were rostered on, and each PPV bought or
- *    tip goes to whoever was on that page's shift when the PPV was sent, split when
- *    several were (net = Fanvue's own figure after its cut). Time already paid on
+ *    hours are the Fanvue shifts people were rostered on (from the day they were put
+ *    on the roster), and each PPV bought or tip goes to whoever was on that page's
+ *    shift when the PPV was sent, split when several were (net = Fanvue's own
+ *    figure after its cut). Time already paid on
  *    OnlyFans isn't paid twice. Rates per platform: the person's own for it, else
  *    the team's for it, else the team's general ones.
  */
@@ -271,6 +272,10 @@ const FANVUE_SALES = new Set(['message', 'tip']);           // what a chatter se
 const minOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
 const amsClock = (iso) => infloww.toStoreTime(new Date(iso)).getTime();    // real UTC → the chats' Amsterdam clock
 const overlapMs = ([a, b], list) => list.reduce((sum, [c, d]) => sum + Math.max(0, Math.min(b, d) - Math.max(a, c)), 0);
+const amsDay = (iso) => new Date(amsClock(iso)).toISOString().slice(0, 10);
+// The roster keeps no history, so a row counts from the day it was added until the
+// day it was taken off; days before that need a one-day change (or hours typed in).
+const onRoster = (a, date) => (!a.created_at || amsDay(a.created_at) <= date) && (a.is_active !== false || (!!a.updated_at && amsDay(a.updated_at) > date));
 
 // A rostered shift (or part of one) on `date`, as [start, end) in the Amsterdam clock.
 function rosterInterval(date, slot, from, to) {
@@ -301,7 +306,7 @@ async function fanvueLines(orgId, period, paidByChatter) {
   if (!pages.length) return { byChatter: out, warnings };
   const pageIds = new Set(pages.map(p => p.id));
   // from the day before: a night shift that started then still covers the first hours
-  const roster = await R.loadRoster(orgId, R.addDays(period.start, -1), period.end, 'fanvue');
+  const roster = await R.loadRoster(orgId, R.addDays(period.start, -1), period.end, 'fanvue', { removed: true });
   if (!roster.ready) {
     warnings.push('Fanvue has no shift times yet, so nobody\'s Fanvue hours or sales could be counted. Open Shifts with Fanvue picked once, then recalculate.');
     return { byChatter: out, warnings };
@@ -341,7 +346,7 @@ function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChat
   const slotById = Object.fromEntries(roster.slots.map(x => [x.id, x]));
   const entries = [];
   for (let d = R.addDays(period.start, -1); d <= period.end; d = R.addDays(d, 1)) {
-    for (const e of R.effectiveDay(d, roster.assignments, roster.changes).entries) {
+    for (const e of R.effectiveDay(d, roster.assignments.filter(a => onRoster(a, d)), roster.changes).entries) {
       const slot = slotById[e.shift_id];
       const onPages = (e.creator_ids || []).filter(id => pageIds.has(id));
       if (!slot || !onPages.length) continue;
@@ -392,7 +397,7 @@ function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChat
       l.pages[pageName[page]] = (l.pages[pageName[page]] || 0) + gross * share;
     }
   }
-  if (nobody >= 1) warnings.push(`Fanvue: ${money(nobody)} in sales came in while nobody was rostered on that page, so it's on no report. Put the Fanvue team on the roster (Shifts, with Fanvue picked), then recalculate.`);
+  if (nobody >= 1) warnings.push(`Fanvue: ${money(nobody)} in sales came in while nobody was on the Fanvue roster for that page, so it's on no report. The roster counts from the day someone is put on it: for days before that, add one-day changes (Shifts, with Fanvue picked), then recalculate.`);
   return { byChatter: out, warnings };
 }
 
