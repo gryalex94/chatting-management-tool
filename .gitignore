@@ -28,6 +28,8 @@ graphify-out/
 DISMISSED_CALIBRATION.md
 ARCHIVED_AUDIT.md
 CREATOR_REPORT_DUMP.md
+# The Oct 2026 chat analysis (35k dialogues): labels, lines and moments from real chats.
+analysis-data/
 
 # PC Guard: real bot token/chat id + runtime files must never be committed
 pc-guard/config.ini
