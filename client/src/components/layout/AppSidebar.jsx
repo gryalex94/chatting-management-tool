@@ -1,7 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet, BookOpen,
-  ChevronsUpDown, LogOut, Sun, Moon, Check,
+  ChevronsUpDown, LogOut, Sun, Moon, Check, Bot,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { useTheme } from '@/context/ThemeContext'
@@ -28,6 +28,7 @@ export const NAV_GROUPS = [
       { url: '/daily', title: 'Daily Check', icon: ShieldCheck },
       { url: '/tasks', title: 'Tasks', icon: ListChecks },
       { url: '/rules', title: 'AI Rules', icon: BookCheck },
+      { url: '/ai-chat', title: 'AI chat', icon: Bot, managerOnly: true, platform: 'fanvue' },
     ],
   },
   {
@@ -55,7 +56,9 @@ export function AppSidebar() {
   const { user, isManager } = useAuth()
   // Chatters only see what's made for them (the Playbook); staff see the rest
   const isChatter = user?.role === 'chatter'
-  const visible = (item) => (isChatter ? item.forChatters : !item.managerOnly || isManager)
+  const { platform } = usePlatform()
+  // a screen made for one platform shows only while that platform is picked
+  const visible = (item) => (isChatter ? item.forChatters : (!item.managerOnly || isManager) && (!item.platform || item.platform === platform))
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
   const orgName = user?.organisation?.name || 'Organisation'

@@ -1,0 +1,35 @@
+// Helpers shared by the AI chat screens (AiChatPage and its tabs).
+export const errMsg = (e, d) => e?.response?.data?.error || d;
+
+// The name a manager knows the fan by (demo mode replaces these with pseudonyms).
+export const fanName = (f) => f?.display_name || f?.fan_nickname || (f?.fan_username ? `@${f.fan_username}` : 'A fan');
+
+// What an AI call cost: 0.08¢ · 1.25¢ · $1.40
+export const cost = (dollars) => {
+  const c = (Number(dollars) || 0) * 100;
+  if (c >= 100) return `$${(c / 100).toFixed(2)}`;
+  return `${c > 0 && c < 0.1 ? c.toFixed(3) : c.toFixed(2)}¢`;
+};
+export const dollars = (n) => `$${(Number(n) || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+
+export const dayTime = (iso) => (iso ? new Date(iso).toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
+export const shortDay = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '—');
+
+// The kinds of notes kept about a fan, in the order they're shown.
+export const KINDS = [
+  ['about', 'About him'],
+  ['likes', 'What he likes'],
+  ['avoid', 'Avoid'],
+  ['promise', 'What she promised him'],
+  ['her', 'What she told him about herself'],
+];
+
+// "Spent $45 · 3 paid messages · 1 tip · last bought 2 Oct"
+export const moneyLine = (m) => {
+  if (!m) return '';
+  const bits = [`Spent ${dollars(m.spent)}`];
+  if (m.paid_messages) bits.push(`${m.paid_messages} paid message${m.paid_messages === 1 ? '' : 's'}`);
+  if (m.tips) bits.push(`${m.tips} tip${m.tips === 1 ? '' : 's'}`);
+  if (m.last_purchase) bits.push(`last bought ${shortDay(m.last_purchase)}`);
+  return bits.join(' · ');
+};

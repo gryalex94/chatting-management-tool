@@ -15,6 +15,7 @@ import TasksPage from './pages/tasks/TasksPage';
 import RulesPage from './pages/rules/RulesPage';
 import ShiftsPage from './pages/shifts/ShiftsPage';
 import PayrollPage from './pages/payroll/PayrollPage';
+import AiChatPage from './pages/aichat/AiChatPage';
 import PlaybookPage from './pages/playbook/PlaybookPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import FanvueCallback from './pages/fanvue/FanvueCallback';
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Route path="rules" element={<RulesPage />} />
         <Route path="shifts" element={<ShiftsPage />} />
         <Route path="payroll" element={<PayrollPage />} />
+        <Route path="ai-chat" element={<AiChatPage />} />
         <Route path="playbook" element={<PlaybookPage />} />
         <Route path="creators" element={<CreatorsPage />} />
         <Route path="reports" element={<ReportsPage />} />

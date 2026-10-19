@@ -141,6 +141,11 @@ app.use('/api/payroll', staffOnly, payrollRoutes);
 const fanvueRoutes = require('./src/routes/fanvue');
 app.use('/api/fanvue', staffOnly, fanvueRoutes);
 
+// AI chat for the Fanvue AI creator: her profile, fan memory, the practice room
+// (managers only, inside the route; nothing is sent to Fanvue)
+const aiChatRoutes = require('./src/routes/aiChat');
+app.use('/api/ai-chat', staffOnly, aiChatRoutes);
+
 // ---------------------
 // ERROR HANDLING
 // ---------------------

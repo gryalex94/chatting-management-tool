@@ -1,0 +1,136 @@
+import { useEffect, useState } from 'react';
+import { Loader2, Lock, Sparkles } from 'lucide-react';
+import toast from 'react-hot-toast';
+import api from '@/services/api';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { cost, dayTime, errMsg } from './shared';
+
+// Her profile, field by field: [key, label, hint, rows (0 = one line)].
+const FIELDS = [
+  ['name', 'Her name', '', 0],
+  ['age', 'Age', '18 or over. Leave empty if she never says.', 0],
+  ['from', 'Where she lives', '', 0],
+  ['about', 'Her story', 'A few sentences: what she shares about her life.', 3],
+  ['personality', 'Personality', '', 3],
+  ['style', 'How she writes', 'Message length, emojis, capitals, slang, the pet names she uses, how she keeps a chat going.', 4],
+  ['likes', 'What she likes', '', 3],
+  ['limits', 'Her limits', 'Things she won\'t do or talk about.', 2],
+  ['facts', 'Things she has told fans about herself', 'One per line (her pet, her job, her city…). She keeps these the same with every fan.', 4],
+  ['real_answer', 'If a fan asks whether she\'s real', 'She always says she\'s an AI character; this is how she puts it.', 2],
+];
+const toForm = (p) => Object.fromEntries(FIELDS.map(([k]) => [k, k === 'facts' ? (p?.facts || []).join('\n') : p?.[k] || '']));
+const fromForm = (f) => ({ ...f, facts: f.facts.split('\n').map(s => s.trim()).filter(Boolean) });
+
+/**
+ * Who she is, as the AI writes her: drafted by the AI from her own past
+ * messages, then checked and saved by a manager. Next to it, the house rules
+ * every reply keeps, which can't be switched off.
+ */
+export default function ProfileTab({ page, writers, ready, onSaved }) {
+  const [data, setData] = useState(null);
+  const [form, setForm] = useState(null);
+  const [writer, setWriter] = useState('');
+  const [drafted, setDrafted] = useState(null);       // { read, cost, model } after a draft, until saved
+  const [busy, setBusy] = useState('');
+
+  useEffect(() => {
+    api.get(`/api/ai-chat/pages/${page.creator_id}/profile`).then(r => {
+      setData(r.data); setForm(toForm(r.data.profile)); setWriter(r.data.writer);
+    }).catch(e => setData({ error: errMsg(e, 'Could not load her profile') }));
+  }, [page.creator_id]);
+
+  if (!data) return <div className='grid gap-3'>{[0, 1, 2, 3].map(i => <Skeleton key={i} className='h-14 w-full' />)}</div>;
+  if (data.error) return <p className='text-sm text-muted-foreground'>{data.error}</p>;
+
+  const saved = toForm(data.profile);
+  const dirty = !!drafted || writer !== data.writer || FIELDS.some(([k]) => form[k] !== saved[k]);
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const draft = async () => {
+    if (data.profile?.name && !window.confirm('Replace what\'s in the form with a fresh draft from her messages? Nothing is saved until you press Save.')) return;
+    setBusy('draft');
+    try {
+      const { data: d } = await api.post(`/api/ai-chat/pages/${page.creator_id}/profile/draft`);
+      setForm(toForm(d.profile));
+      setDrafted({ read: d.read, cost: d.cost, model: d.model });
+      toast.success('Drafted: check it, then save');
+    } catch (e) { toast.error(errMsg(e, 'Could not draft her profile')); }
+    finally { setBusy(''); }
+  };
+  const save = async () => {
+    setBusy('save');
+    try {
+      const { data: d } = await api.put(`/api/ai-chat/pages/${page.creator_id}/profile`, { profile: fromForm(form), writer, drafted: !!drafted });
+      setData(d); setForm(toForm(d.profile)); setWriter(d.writer); setDrafted(null);
+      toast.success('Profile saved');
+      onSaved?.();
+    } catch (e) { toast.error(errMsg(e, 'Could not save')); }
+    finally { setBusy(''); }
+  };
+
+  return (
+    <div className='grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]'>
+      <div className='flex flex-col gap-4'>
+        <div className='flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-3'>
+          <div className='text-sm'>
+            <p className='font-medium'>{data.page.name} <span className='font-normal text-muted-foreground'>@{data.page.handle}</span></p>
+            <p className='text-xs text-muted-foreground'>
+              {drafted ? `Drafted by ${drafted.model} from ${drafted.read} of her messages (${cost(drafted.cost)}). Check it, change what's wrong, then save.`
+                : data.updated_at ? `Saved ${dayTime(data.updated_at)}.` : 'No profile yet: let the AI draft one from her own messages, then check it.'}
+            </p>
+          </div>
+          <Button variant='outline' onClick={draft} disabled={!!busy || !ready.writer || !ready.tables}>
+            {busy === 'draft' ? <><Loader2 className='animate-spin' />Reading her messages…</> : <><Sparkles />Draft from her messages</>}
+          </Button>
+        </div>
+
+        <div className='grid gap-4 sm:grid-cols-3'>
+          {FIELDS.filter(([, , , rows]) => !rows).map(([k, label, hint]) => (
+            <div key={k} className='grid content-start gap-1.5'>
+              <Label htmlFor={`pf-${k}`}>{label}</Label>
+              <Input id={`pf-${k}`} value={form[k]} onChange={set(k)} inputMode={k === 'age' ? 'numeric' : undefined} />
+              {hint && <span className='text-xs text-muted-foreground'>{hint}</span>}
+            </div>
+          ))}
+        </div>
+        {FIELDS.filter(([, , , rows]) => rows).map(([k, label, hint, rows]) => (
+          <div key={k} className='grid gap-1.5'>
+            <Label htmlFor={`pf-${k}`}>{label}</Label>
+            <Textarea id={`pf-${k}`} rows={rows} value={form[k]} onChange={set(k)} />
+            {hint && <span className='text-xs text-muted-foreground'>{hint}</span>}
+          </div>
+        ))}
+
+        <div className='flex flex-wrap items-end justify-between gap-3'>
+          <div className='grid gap-1.5'>
+            <Label>Writes her replies</Label>
+            <Select value={writer} onValueChange={setWriter}>
+              <SelectTrigger className='w-64' aria-label='Writer'><SelectValue /></SelectTrigger>
+              <SelectContent>{writers.map(w => <SelectItem key={w.id} value={w.id}>{w.label}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className='text-xs text-muted-foreground'>Also keeps her memory of each fan. You can compare others in Practice.</span>
+          </div>
+          <Button onClick={save} disabled={!dirty || !!busy || !form.name.trim()}>{busy === 'save' ? 'Saving…' : dirty ? 'Save' : 'Saved'}</Button>
+        </div>
+      </div>
+
+      <div className='flex flex-col gap-4'>
+        <div className='flex flex-col gap-2 rounded-lg border bg-muted/30 p-4'>
+          <p className='flex items-center gap-1.5 text-sm font-medium'><Lock className='size-3.5' />House rules, in every reply</p>
+          <p className='text-xs text-muted-foreground'>Always on; they can&apos;t be switched off. The tool also checks every reply against them.</p>
+          <ol className='list-decimal space-y-1.5 ps-4 text-sm'>{data.house_rules.map((r, i) => <li key={i}>{r}</li>)}</ol>
+        </div>
+        <div className='flex flex-col gap-2 rounded-lg border p-4'>
+          <p className='text-sm font-medium'>How she chats</p>
+          <p className='text-xs text-muted-foreground'>From the Playbook, without the selling parts (she doesn&apos;t sell yet).</p>
+          <ul className='list-disc space-y-1.5 ps-4 text-sm'>{data.chat_guide.map((r, i) => <li key={i}>{r}</li>)}</ul>
+        </div>
+      </div>
+    </div>
+  );
+}
