@@ -77,7 +77,10 @@ async function chat({ model, messages, maxTokens = 600, temperature = 0.8, timeo
     const u = data.usage || {};
     const input = u.prompt_tokens || 0, output = u.completion_tokens || 0;
     const price = WRITERS.find(w => w.id === (data.model || model))?.price;
-    const cost = typeof u.cost === 'number' ? u.cost : price ? (input * price[0] + output * price[1]) / 1e6 : null;
+    // with our own provider key (Mistral), OpenRouter charges only its fee and the
+    // provider bills the rest directly: count both, so the tool shows what it really costs
+    const upstream = u.is_byok ? Number(u.cost_details?.upstream_inference_cost) || (price ? (input * price[0] + output * price[1]) / 1e6 : 0) : 0;
+    const cost = typeof u.cost === 'number' ? u.cost + upstream : price ? (input * price[0] + output * price[1]) / 1e6 : null;
     const text = choice?.message?.content || '';
     if (!text.trim() && choice?.finish_reason === 'length') throw new Error('This writer used up its space thinking and wrote no reply.');
     return { text, finish: choice?.finish_reason || null, model: data.model || model, usage: { input, output, cost } };

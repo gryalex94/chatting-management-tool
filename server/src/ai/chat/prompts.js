@@ -9,10 +9,25 @@
  */
 
 const PROFILE_FIELDS = [
-  ['name', 'Name'], ['age', 'Age'], ['from', 'Where she lives'], ['about', 'Her story'],
+  ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
+  ['vibe', 'Vibe'], ['heat', 'How spicy'], ['about', 'Her story'],
   ['personality', 'Personality'], ['style', 'How she writes'], ['likes', 'What she likes'],
   ['limits', 'Her limits'], ['real_answer', 'If someone asks whether she is real'],
 ];
+
+// The choices offered when generating a profile from a description (the tool
+// shows these; the server only accepts these).
+const GENERATE_OPTIONS = {
+  genders: ['Woman', 'Man', 'Trans woman', 'Non-binary'],
+  orientations: ['Straight', 'Bisexual', 'Lesbian', 'Gay', 'Pansexual'],
+  vibes: ['Sweet girlfriend', 'Playful tease', 'Bratty', 'Dominant', 'Submissive', 'Switch', 'Shy', 'Bold and confident', 'Mysterious', 'Romantic'],
+  heats: [
+    { id: 'mild', label: 'Mild', hint: 'flirty and suggestive, never graphic' },
+    { id: 'medium', label: 'Medium', hint: 'gets sexy and descriptive when he leads, building it up slowly' },
+    { id: 'hot', label: 'Hot', hint: 'very open about sex and explicit when he wants it, still keeping every house rule' },
+  ],
+  styles: ['Casual and lowercase, lots of emojis', 'Casual, some emojis', 'Neat and proper, few emojis'],
+};
 const FACT_KINDS = ['about', 'likes', 'avoid', 'promise', 'her'];
 
 // Rules for every reply. Not editable in the tool.
@@ -149,6 +164,48 @@ function memoryPrompt({ name, fan = {}, known = [], story = '', chat = [] }) {
   ];
 }
 
+/**
+ * A new profile from a manager's description and choices (GENERATE_OPTIONS);
+ * `own` = some of her past messages, to stay consistent with them (optional).
+ */
+function generatePrompt({ input, own = [] }) {
+  const g = input;
+  const opt = (label, v, fallback) => `${label}: ${clean(v) || fallback}`;
+  return [
+    {
+      role: 'system',
+      content: 'You create the character profile for an AI creator on Fanvue, a subscription site for verified adults. The character is an AI and admits it if asked. '
+        + 'Turn the manager\'s notes into a vivid, consistent, believable character. She is an adult: never describe her as young-looking, a teen, at school or childlike, and nothing about minors. '
+        + 'Use plain, neutral words: no explicit sexual detail in the profile itself.',
+    },
+    {
+      role: 'user',
+      content: [
+        `The manager's notes: ${clean(g.description)}`,
+        [
+          opt('Name', g.name, 'choose a fitting first name'), `Gender: ${g.gender}`, `Age: ${g.age}`, `Sexuality: ${g.orientation}`,
+          `Vibe: ${g.vibes.join(', ')}`, `How spicy: ${g.heat}`, `Texting style: ${g.style}`,
+          opt('Where she lives', g.from, 'choose somewhere that fits'), opt('Interests', g.interests, 'choose some that fit'),
+          opt('Pet names she uses for fans', g.pet_names, 'choose some that fit the vibe'), opt('Her limits', g.limits, 'none given'),
+        ].join('\n'),
+        own.length ? `Things she has already written to fans. Stay consistent with any facts about herself in them:\n${own.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '',
+        'Write her profile, about her (she/her, or the pronouns that fit the gender). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
+          + '{"name": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
+          + '- name: the name given, or a fitting first name.\n'
+          + '- from: where she lives.\n'
+          + '- about: her story in 3 to 5 sentences: who she is, her daily life, what she is like with fans.\n'
+          + '- personality: 4 to 6 traits that fit the vibe, each with how it shows in a chat.\n'
+          + '- style: exactly how she texts: message length, which emojis and how often, capitals, punctuation, slang, the pet names, how she opens and keeps a chat going. Specific enough to copy.\n'
+          + '- likes: hobbies and interests, and what she enjoys when flirting, in plain neutral words.\n'
+          + '- limits: what she won\'t do or talk about, including the limits given.\n'
+          + '- facts: 6 to 10 concrete details of her life to keep consistent (pets, job, places, favourite things), each under 15 words. '
+          + 'She can\'t send photos, videos or voice notes in the chat, so give her no habits about sending them.\n'
+          + '- real_answer: one or two lines in her own style, admitting warmly that she is an AI character.',
+      ].filter(Boolean).join('\n\n'),
+    },
+  ];
+}
+
 /** Draft her profile from her own past messages (strings), mass and welcome messages. */
 function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
   const block = (title, list) => (list.length ? `${title}:\n${list.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '');
@@ -214,4 +271,4 @@ function readReply(text) {
   return { messages: lines, learned: [], handover: '', format_ok: false };
 }
 
-module.exports = { HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, FACT_KINDS, replyPrompt, memoryPrompt, profilePrompt, parseJsonObject, readReply, chatLine };
+module.exports = { HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, replyPrompt, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, chatLine };

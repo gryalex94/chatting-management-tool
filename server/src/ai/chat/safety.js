@@ -106,4 +106,14 @@ function checkReply(messages, { recent = [] } = {}) {
   return { verdict: 'ok', problems: [] };
 }
 
-module.exports = { screenFan, checkReply, MAX_MESSAGES };
+// A character must come across as an adult: nothing young, school-age or about minors.
+const YOUNG = /\b(?:teen\w*|high\s?school\w*|middle\s?school\w*|school\s?girls?|school\s?boys?|school\s+uniforms?|young[-\s]?looking|looks?\s+(?:so\s+|very\s+)?young|childlike|childish|child|children|kids?|little\s+(?:girl|boy)|barely\s+legal|baby[-\s]?faced?)\b/i;
+/** Problems with a character description or profile text (empty list = fine). */
+function personaProblems(text) {
+  const s = String(text || '');
+  return has(UNDER_18, s) || has(MINOR_WORDS, s) || has(YOUNG, s)
+    ? ['It describes her as young, or mentions minors, children or school. She must come across as an adult.']
+    : [];
+}
+
+module.exports = { screenFan, checkReply, personaProblems, MAX_MESSAGES };

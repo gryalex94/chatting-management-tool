@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
-const { screenFan, checkReply } = require('../ai/chat/safety');
+const { screenFan, checkReply, personaProblems } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 
@@ -122,7 +122,7 @@ async function getProfile(orgId, creatorId) {
     page: { creator_id: page.id, name: page.name, handle: account.handle, is_ai_creator: account.is_ai_creator },
     profile: p?.profile || null, writer: p?.settings?.writer || or.DEFAULT_WRITER,
     drafted_at: p?.drafted_at || null, updated_at: p?.updated_at || null,
-    house_rules: P.HOUSE_RULES, chat_guide: P.CHAT_GUIDE,
+    house_rules: P.HOUSE_RULES, chat_guide: P.CHAT_GUIDE, options: P.GENERATE_OPTIONS,
   };
 }
 
@@ -145,6 +145,57 @@ async function saveProfile(orgId, creatorId, { profile, writer, drafted }, userI
 // An even spread of `n` items from a list (oldest to newest).
 const spread = (list, n) => (list.length <= n ? list : Array.from({ length: n }, (_, i) => list[Math.floor((i * list.length) / n)]));
 const distinct = (texts) => [...new Set(texts.map(clean).filter(t => t.length >= 2))];
+
+/**
+ * A new profile from a manager's description and choices (P.GENERATE_OPTIONS):
+ * { description (3+ words), name, gender, age (18+), orientation, vibes (1–3),
+ * heat, style, from, interests, pet_names, limits, use_history }. With
+ * use_history it stays consistent with what she already told fans. Not saved.
+ */
+async function generateProfile(orgId, creatorId, raw = {}) {
+  if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
+  const O = P.GENERATE_OPTIONS;
+  const text = (v, max = 300) => clean(v).slice(0, max);
+  const input = {
+    description: text(raw.description, 600), name: text(raw.name, 60), from: text(raw.from, 120),
+    interests: text(raw.interests), pet_names: text(raw.pet_names, 120), limits: text(raw.limits),
+    gender: O.genders.includes(raw.gender) ? raw.gender : null,
+    orientation: O.orientations.includes(raw.orientation) ? raw.orientation : null,
+    style: O.styles.includes(raw.style) ? raw.style : null,
+    vibes: (Array.isArray(raw.vibes) ? raw.vibes : []).filter(v => O.vibes.includes(v)).slice(0, 3),
+    age: parseInt(raw.age, 10),
+  };
+  const heat = O.heats.find(h => h.id === raw.heat);
+  if (input.description.split(/\s+/).filter(Boolean).length < 3) throw new AiChatError('Describe her in a few words (at least 3)');
+  if (!input.gender || !input.orientation || !input.style || !heat) throw new AiChatError('Pick her gender, sexuality, texting style and how spicy she is');
+  if (!input.vibes.length) throw new AiChatError('Pick at least one vibe');
+  if (!Number.isFinite(input.age) || input.age < 18 || input.age > 70) throw new AiChatError('Her age must be between 18 and 70');
+  // her limits are refusals ("no minors"): those words are welcome there
+  const typed = [input.description, input.name, input.from, input.interests, input.pet_names].join('\n');
+  if (personaProblems(typed).length) throw new AiChatError(`Change the description: ${personaProblems(typed)[0]}`);
+  input.heat = `${heat.label}: ${heat.hint}`;
+
+  const { account } = await pageAccount(orgId, creatorId);
+  const persona = await loadPersona(orgId, creatorId);
+  const model = persona?.settings?.writer || or.DEFAULT_WRITER;
+  let own = [];
+  if (raw.use_history) {
+    const rows = await all(() => supabaseAdmin.from('fanvue_messages').select('text, sent_at').eq('account_id', account.id).eq('from_fan', false)
+      .in('type', OWN_TYPES).not('text', 'is', null).order('sent_at').order('uuid'));
+    own = spread(distinct(rows.map(m => m.text)).map(t => t.slice(0, 300)), 120);
+  }
+  const res = await or.chat({ model, maxTokens: 2000, temperature: 0.7, fallbacks: or.backupsFor(model), messages: P.generatePrompt({ input, own }) });
+  await logUsage(orgId, 'profile', res.model, res.usage, { creatorId });
+  const j = P.parseJsonObject(res.text);
+  if (!j) throw new AiChatError('The AI\'s profile came back unreadable: try again', 502);
+  const profile = cleanProfile({
+    ...j, name: input.name || j.name, from: input.from || j.from, gender: input.gender, age: String(input.age),
+    orientation: input.orientation, vibe: input.vibes.join(', '), heat: input.heat,
+  });
+  const wrote = personaProblems(Object.entries(profile).filter(([k]) => k !== 'limits').flatMap(([, v]) => v).join('\n'));
+  if (wrote.length) throw new AiChatError(`The AI's profile wasn't usable (${wrote[0]}) Try again, or change the description.`, 502);
+  return { profile, cost: res.usage.cost, model: or.writerLabel(res.model), read: own.length };
+}
 
 /** Draft her profile from her own past messages. Not saved: the manager checks and saves it. */
 async function draftProfile(orgId, creatorId) {
@@ -474,7 +525,7 @@ async function usage(orgId) {
 }
 
 module.exports = {
-  AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, fans, fanDetail, saveMemory,
+  AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
 };

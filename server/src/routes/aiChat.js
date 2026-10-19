@@ -46,6 +46,13 @@ router.post('/pages/:creatorId/profile/draft', async (req, res) => {
   try { res.json(await A.draftProfile(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'draft her profile'); }
 });
 
+// POST /api/ai-chat/pages/:creatorId/profile/generate { description, name, gender, age,
+// orientation, vibes, heat, style, from, interests, pet_names, limits, use_history }
+// — the AI writes a whole profile from a description and choices (not saved).
+router.post('/pages/:creatorId/profile/generate', async (req, res) => {
+  try { res.json(await A.generateProfile(org(req), req.params.creatorId, req.body || {})); } catch (e) { fail(res, e, 'generate her profile'); }
+});
+
 // GET /api/ai-chat/pages/:creatorId/fans — the fans who wrote, and the memory job.
 router.get('/pages/:creatorId/fans', async (req, res) => {
   try { res.json({ fans: await A.fans(org(req), req.params.creatorId), job: A.memoryJob(req.params.creatorId) }); }
