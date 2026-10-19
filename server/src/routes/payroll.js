@@ -3,6 +3,8 @@ const router = express.Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
 const P = require('../utils/payroll');
+const { isPlatform } = require('../utils/pages');
+const NO_LINES = 'Run database change 035 (payroll across platforms) in Supabase first';
 
 // The Payroll page (utils/payroll.js): what each chatter earned in a two-week
 // period. Pay is private: managers and up only.
@@ -13,6 +15,7 @@ const NO_OVERTIME = 'Run migration 029 (payroll overtime) in Supabase to set ove
 const missingTable = (msg) => /payroll_(reports|periods)|hourly_rate|commission_pct/.test(String(msg || ''));
 const fail = (res, e, what) => {
   console.error(`[payroll] ${what}:`, e.message);
+  if (/^Run (database change|migration)/.test(e.message)) return res.status(409).json({ error: e.message });
   if (/overtime_/.test(e.message)) return res.status(409).json({ error: NO_OVERTIME });
   return res.status(missingTable(e.message) ? 409 : 500).json({ error: missingTable(e.message) ? NOT_READY : `Could not ${what}` });
 };
@@ -61,8 +64,11 @@ router.post('/calculate', async (req, res) => {
 });
 
 // PATCH /api/payroll/reports/:id { hours, overtime_hours, additions, deductions, notes,
-// hourly_rate, commission_pct, overtime_rate } — send only what changed. Drafts only.
-// A rate sent here is also saved as the chatter's own, for their next reports.
+// hourly_rate, commission_pct, overtime_rate, lines: { fanvue: { hours, overtime_hours,
+// hourly_rate, commission_pct, overtime_rate } } } — send only what changed. Drafts
+// only. The top-level hours and rates are the OnlyFans part; `lines` another
+// platform's. A rate sent here is also saved as the chatter's own (for that
+// platform), for their next reports.
 router.patch('/reports/:id', async (req, res) => {
   try {
     const orgId = req.user.organisationId;
@@ -80,8 +86,30 @@ router.patch('/reports/:id', async (req, res) => {
       update[k] = f.value;
     }
     if (req.body.notes !== undefined) update.notes = String(req.body.notes || '').trim().slice(0, 1000) || null;
+    // another platform's line: its hours and rates
+    const lineRates = {};
+    if (req.body.lines && typeof req.body.lines === 'object') {
+      const lines = { ...(cur.lines || {}) };
+      for (const [platform, sent] of Object.entries(req.body.lines)) {
+        if (!isPlatform(platform) || platform === 'onlyfans' || !lines[platform] || !sent || typeof sent !== 'object') {
+          return res.status(400).json({ error: 'This report has no line for that platform' });
+        }
+        const next = { ...lines[platform] };
+        for (const k of ['hours', 'overtime_hours', ...RATES]) {
+          if (sent[k] === undefined) continue;
+          const f = field(sent[k], LIMITS[k]);
+          if (f.error) return res.status(400).json({ error: `Check the ${platform} ${k.replace('_', ' ')}` });
+          if (f.value === null && !NULLABLE.has(k)) return res.status(400).json({ error: `Fill in the ${platform} ${k.replace('_', ' ')}` });
+          next[k] = f.value;
+        }
+        lines[platform] = next;
+        lineRates[platform] = Object.fromEntries(RATES.filter(k => sent[k] !== undefined).map(k => [k, next[k]]));
+      }
+      update.lines = lines;
+    }
     const { data, error: ue } = await supabaseAdmin.from('payroll_reports').update(update).eq('id', cur.id).select().single();
-    if (ue) throw new Error(ue.message);
+    if (ue) throw new Error(/\blines\b/.test(ue.message) ? NO_LINES : ue.message);
+    for (const [platform, r] of Object.entries(lineRates)) await P.setPlatformRates(orgId, cur.chatter_id, platform, r);
     const rate = Object.fromEntries(RATES.filter(k => update[k] !== undefined).map(k => [k, update[k]]));
     if (Object.keys(rate).length) {
       const { error: ce } = await supabaseAdmin.from('chatters').update(rate).eq('id', cur.chatter_id).eq('organisation_id', orgId);
@@ -115,18 +143,21 @@ router.post('/finalize', async (req, res) => {
   } catch (e) { fail(res, e, 'finalize'); }
 });
 
-// GET /api/payroll/rates — the team's rates and every active chatter's own.
+// GET /api/payroll/rates?platform= — the team's rates and every active chatter's own,
+// for one platform (OnlyFans unless another is asked for).
 router.get('/rates', async (req, res) => {
-  try { res.json(await P.loadRates(req.user.organisationId)); }
+  try { res.json(await P.loadRates(req.user.organisationId, isPlatform(req.query.platform) ? req.query.platform : 'onlyfans')); }
   catch (e) { fail(res, e, 'load the pay rates'); }
 });
 
-// PUT /api/payroll/rates { team: { hourly_rate, commission_pct, overtime_rate },
+// PUT /api/payroll/rates { platform?, team: { hourly_rate, commission_pct, overtime_rate },
 // chatters: [{ id, hourly_rate, commission_pct, overtime_rate }] } — a chatter's empty
-// rate means the team's; the team's empty overtime rate means each one's hourly rate.
+// rate means the team's; the team's empty overtime rate means each one's hourly rate,
+// and on another platform any empty team rate means the general team rate.
 // Draft reports take the new rates straight away; final ones keep theirs.
 router.put('/rates', async (req, res) => {
   try {
+    const platform = isPlatform(req.body.platform) ? req.body.platform : 'onlyfans';
     const clean = (o, nullable) => {
       const out = {};
       for (const k of RATES) {
@@ -137,7 +168,7 @@ router.put('/rates', async (req, res) => {
       }
       return out;
     };
-    const team = req.body.team ? clean(req.body.team, k => k === 'overtime_rate') : undefined;
+    const team = req.body.team ? clean(req.body.team, k => platform !== 'onlyfans' || k === 'overtime_rate') : undefined;
     if (team === null) return res.status(400).json({ error: 'Check the team rates' });
     const chatters = [];
     for (const c of Array.isArray(req.body.chatters) ? req.body.chatters : []) {
@@ -145,7 +176,7 @@ router.put('/rates', async (req, res) => {
       if (!r || !c.id) return res.status(400).json({ error: 'Check the chatters\' rates' });
       chatters.push({ id: String(c.id), ...r });
     }
-    res.json(await P.saveRates(req.user.organisationId, { team, chatters }));
+    res.json(await P.saveRates(req.user.organisationId, { platform, team, chatters }));
   } catch (e) { fail(res, e, 'save the pay rates'); }
 });
 

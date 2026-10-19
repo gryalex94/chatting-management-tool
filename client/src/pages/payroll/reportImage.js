@@ -2,6 +2,8 @@
 // manager previews is exactly what the chatter gets. Same look as the reports sent
 // before: a black table, labels in bold italic, then sales per page and the shifts.
 
+import { platformInfo } from '@/utils/platforms';
+
 const FONT = '"Helvetica Neue", Helvetica, Arial, sans-serif';
 const W = 640;                       // CSS pixels; drawn at `scale` × for sharp text
 const PAD = 20;
@@ -64,15 +66,33 @@ function paint(ctx, r, period, draw) {
   const regularHours = Number(r.hours_paid) || 0;
   ctx.font = `14px ${FONT}`;
   const notes = r.notes ? wrap(ctx, r.notes, valueW - 24) : [];
+  // other platforms (Fanvue): their own rows, and the OnlyFans ones say so
+  const others = r.platforms || [];
+  const of = others.length ? 'OnlyFans ' : '';
+  const hasOf = !others.length || regularHours + ot > 0 || Number(r.sales_gross) > 0;
+  const otherRows = others.flatMap(l => {
+    const name = platformInfo(l.platform).name;
+    const n = (r.lines?.[l.platform]?.shifts || []).filter(x => !x.overtime && x.hours > 0).length;
+    return [
+      { label: `${name} sales:`, value: money(l.sales_gross), extra: `(net ${money(l.sales_net)} after ${name}'s cut)` },
+      { label: `${name} commission (${pct(l.commission_pct)}%):`, value: money(l.commission) },
+      { label: `${name} hours:`, value: hoursText(l.hours_paid + l.overtime_paid), extra: `(${n} shift${n === 1 ? '' : 's'}${l.overtime_paid ? ` + ${hoursText(l.overtime_paid)} h overtime` : ''}, as rostered)` },
+      { label: `${name} hourly pay:`, value: money(l.hourly_pay), extra: `(${hoursText(l.hours_paid)} h × ${money(l.hourly_rate)})` },
+      ...(l.overtime_paid ? [{ label: `${name} overtime pay:`, value: money(l.overtime_pay), extra: `(${hoursText(l.overtime_paid)} h × ${money(l.overtime_rate_paid)})` }] : []),
+    ];
+  });
   const rows = [
     { label: 'Name:', value: r.chatter_name, strong: true },
     { label: 'Period:', value: `${fmtDay(period.start)} 00:00 – ${fmtDay(period.end)} 23:59`, sub: 'CET (Amsterdam time)' },
-    { label: 'Sales brutto:', value: money(r.sales_gross) },
-    { label: `Sales netto (${pct(100 - r.of_cut_pct)}%):`, value: money(r.sales_net) },
-    { label: `Commission (${pct(r.commission_pct)}%):`, value: money(r.commission) },
-    { label: 'Hours worked:', value: hoursText(regularHours + ot), extra: `(${shiftsCount} shift${shiftsCount === 1 ? '' : 's'}${ot ? ` + ${hoursText(ot)} h overtime` : ''})` },
-    { label: 'Hourly pay:', value: money(r.hourly_pay), extra: `(${hoursText(regularHours)} h × ${money(r.hourly_rate)})` },
-    ...(ot ? [{ label: 'Overtime pay:', value: money(r.overtime_pay), extra: `(${hoursText(ot)} h × ${money(r.overtime_rate_paid)})` }] : []),
+    ...(hasOf ? [
+      { label: `${of}Sales brutto:`, value: money(r.sales_gross) },
+      { label: `${of}Sales netto (${pct(100 - r.of_cut_pct)}%):`, value: money(r.sales_net) },
+      { label: `${of}Commission (${pct(r.commission_pct)}%):`, value: money(r.commission) },
+      { label: `${of ? 'OnlyFans hours' : 'Hours worked'}:`, value: hoursText(regularHours + ot), extra: `(${shiftsCount} shift${shiftsCount === 1 ? '' : 's'}${ot ? ` + ${hoursText(ot)} h overtime` : ''})` },
+      { label: `${of}Hourly pay:`, value: money(r.hourly_pay), extra: `(${hoursText(regularHours)} h × ${money(r.hourly_rate)})` },
+      ...(ot ? [{ label: `${of}Overtime pay:`, value: money(r.overtime_pay), extra: `(${hoursText(ot)} h × ${money(r.overtime_rate_paid)})` }] : []),
+    ] : []),
+    ...otherRows,
     { label: 'Other additions:', value: money(r.additions) },
     { label: 'Deductions:', value: money(r.deductions) },
     { label: 'Notes:', notes, minH: 48 },
@@ -98,8 +118,8 @@ function paint(ctx, r, period, draw) {
   line(valueX, top, valueX, y, C.grid);
   line(W - PAD, top, W - PAD, y, C.grid);
 
-  // sales per page, two to a row
-  const pages = r.details?.pages || [];
+  // sales per page, two to a row (other platforms' pages too)
+  const pages = [...(r.details?.pages || []), ...others.flatMap(l => r.lines?.[l.platform]?.pages || [])];
   if (pages.length) {
     y += 26;
     text('Sales per page', PAD, y, '13px', C.muted);
@@ -117,14 +137,19 @@ function paint(ctx, r, period, draw) {
     }
   }
 
-  // the shifts worked
-  const shifts = r.details?.shifts || [];
+  // the shifts worked (other platforms': as rostered, named with the platform)
+  const shifts = [
+    ...(r.details?.shifts || []),
+    ...others.flatMap(l => (r.lines?.[l.platform]?.shifts || []).filter(x => x.hours > 0)
+      .map(x => ({ ...x, shift: `${platformInfo(l.platform).name} · ${x.shift}`, first: x.from, last: x.to }))),
+  ].sort((a, b) => a.date.localeCompare(b.date));
   if (shifts.length) {
     y += 26;
     text('Shifts worked', PAD, y, '13px', C.muted);
     y += 8;
     for (const s of shifts) {
-      const what = isOvertime(s) ? `${s.shift} overtime, ${s.first}–${s.last}` : s.whole ? `${s.shift} ${s.from}–${s.to}` : `${s.shift} ${s.first}–${s.last}`;
+      const what = (isOvertime(s) ? `${s.shift} overtime, ${s.first}–${s.last}` : s.whole ? `${s.shift} ${s.from}–${s.to}` : `${s.shift} ${s.first}–${s.last}`)
+        + (s.paid_on_onlyfans ? ` (${hoursText(s.paid_on_onlyfans)} h paid on OnlyFans)` : '');
       text(fmtDay(s.date), PAD + 10, y + 19, '13px', C.soft);
       text(what, PAD + 130, y + 19, '13px', C.soft);
       text(`${hoursText(s.hours)} h`, W - PAD - 10, y + 19, '13px', C.soft, 'right');
@@ -137,7 +162,9 @@ function paint(ctx, r, period, draw) {
   y += 22;
   ctx.font = `11px ${FONT}`;
   const made = new Date(r.finalized_at || r.calculated_at || Date.now()).toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
-  const foot = wrap(ctx, `Sales as Infloww shows them (Amsterdam time), refunds included. Hours: the shifts that started in this period. Made ${fmtDay(made)} ${made.slice(0, 4)}.`, inner);
+  const ofNote = hasOf ? `${of ? 'OnlyFans sales' : 'Sales'} as Infloww shows them (Amsterdam time), refunds included. ` : '';
+  const otherNote = others.length ? ` ${others.map(l => platformInfo(l.platform).name).join(', ')}: hours as rostered; each sale credited to whoever was on shift when it was sent.` : '';
+  const foot = wrap(ctx, `${ofNote}Hours: the shifts that started in this period.${otherNote} Made ${fmtDay(made)} ${made.slice(0, 4)}.`, inner);
   foot.forEach((l, i) => text(l, PAD, y + i * 15, '11px', C.foot));
   y += (foot.length - 1) * 15 + PAD;
   return Math.ceil(y);

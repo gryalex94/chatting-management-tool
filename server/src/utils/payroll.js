@@ -24,6 +24,14 @@ const R = require('./roster');
  *    (else the hourly rate); total = commission + both + additions − deductions.
  *  - Rates: the chatter's own, else the team's (daily_check_config payroll_*), else
  *    $2/h and 5%; no overtime rate = overtime paid at the hourly rate.
+ *  - Other platforms (Fanvue, migration 035): one report per person still; the
+ *    report's columns are the OnlyFans part and each other platform is a line in
+ *    `lines`, added to the total. Fanvue doesn't say which chatter sent what, so its
+ *    hours are the Fanvue shifts people were rostered on, and each PPV bought or
+ *    tip goes to whoever was on that page's shift when the PPV was sent, split when
+ *    several were (net = Fanvue's own figure after its cut). Time already paid on
+ *    OnlyFans isn't paid twice. Rates per platform: the person's own for it, else
+ *    the team's for it, else the team's general ones.
  */
 
 const ANCHOR = '2026-09-28';          // a payroll period starts on this Monday, and every 14 days from it
@@ -31,6 +39,10 @@ const PERIOD_DAYS = 14;
 const DEFAULT_RATE = 2;               // $ per hour, until the team's or a chatter's own rate is set
 const DEFAULT_COMMISSION = 5;         // % of net sales
 const RATE_KEYS = { hourly_rate: 'payroll_hourly_rate', commission_pct: 'payroll_commission_pct', overtime_rate: 'payroll_overtime_rate' };
+// The team's rates for another platform: the same keys with ':platform' (payroll_hourly_rate:fanvue).
+const rateKeys = (platform) => (platform === 'onlyfans' ? RATE_KEYS
+  : Object.fromEntries(Object.entries(RATE_KEYS).map(([k, v]) => [k, `${v}:${platform}`])));
+const RATE_FIELDS = Object.keys(RATE_KEYS);
 const SHORT_SHIFT_MIN = 7 * 60;       // a whole shift with less chatting than this is flagged for a look
 const H = 3600000, DAY_MS = 86400000;
 
@@ -71,19 +83,65 @@ function totals(row) {
   const commission = r2(net * num(row.commission_pct, 0) / 100);
   const hourlyPay = r2(hours * num(row.hourly_rate, 0));
   const overtimePay = r2(overtime * otRate);
-  const total = r2(commission + hourlyPay + overtimePay + num(row.additions, 0) - num(row.deductions, 0));
-  return { hours_paid: hours, overtime_paid: overtime, overtime_rate_paid: otRate, sales_net: net, commission, hourly_pay: hourlyPay, overtime_pay: overtimePay, total };
+  // other platforms' lines (Fanvue), each with its pay
+  const platforms = Object.entries(row.lines || {}).filter(([, l]) => l && typeof l === 'object').map(([platform, l]) => ({ platform, ...lineTotals(l) }));
+  const extra = (k) => platforms.reduce((sum, x) => sum + x[k], 0);
+  const total = r2(commission + hourlyPay + overtimePay + extra('pay') + num(row.additions, 0) - num(row.deductions, 0));
+  return {
+    // the OnlyFans part (the report's own columns), as before
+    hours_paid: hours, overtime_paid: overtime, overtime_rate_paid: otRate, sales_net: net, commission, hourly_pay: hourlyPay, overtime_pay: overtimePay,
+    platforms,
+    // every platform added up
+    all: {
+      hours: r2(hours + extra('hours_paid')), overtime: r2(overtime + extra('overtime_paid')),
+      sales_gross: r2(num(row.sales_gross, 0) + extra('sales_gross')), sales_net: r2(net + extra('sales_net')),
+      commission: r2(commission + extra('commission')), hourly_pay: r2(hourlyPay + extra('hourly_pay')), overtime_pay: r2(overtimePay + extra('overtime_pay')),
+    },
+    total,
+  };
 }
 
-/** The team's rates (Pay rates): hourly, commission and overtime (null = the hourly rate). */
-async function teamRates(orgId) {
-  const { data } = await supabaseAdmin.from('daily_check_config').select('key, value').eq('organisation_id', orgId).in('key', Object.values(RATE_KEYS));
-  const v = Object.fromEntries((data || []).map(c => [c.key, c.value]));
+// One other platform's line: its hours (the manager's, else the roster's), sales
+// (net is the platform's own figure), commission and pay.
+function lineTotals(l) {
+  const hours = num(l.hours, num(l.hours_auto, 0));
+  const overtime = num(l.overtime_hours, num(l.overtime_hours_auto, 0));
+  const otRate = num(l.overtime_rate, num(l.hourly_rate, 0));
+  const net = r2(num(l.sales_net, 0));
+  const commission = r2(net * num(l.commission_pct, 0) / 100);
+  const hourlyPay = r2(hours * num(l.hourly_rate, 0));
+  const overtimePay = r2(overtime * otRate);
   return {
+    hours_paid: hours, overtime_paid: overtime, hourly_rate: num(l.hourly_rate, 0), commission_pct: num(l.commission_pct, 0), overtime_rate_paid: otRate,
+    sales_gross: r2(num(l.sales_gross, 0)), sales_net: net, commission, hourly_pay: hourlyPay, overtime_pay: overtimePay, pay: r2(commission + hourlyPay + overtimePay),
+  };
+}
+
+/**
+ * The team's rates (Pay rates): hourly, commission and overtime (null = the hourly
+ * rate). For another platform: the team's rates for it, else the general ones.
+ */
+async function teamRates(orgId, platform = 'onlyfans') {
+  const own = rateKeys(platform);
+  const { data } = await supabaseAdmin.from('daily_check_config').select('key, value').eq('organisation_id', orgId)
+    .in('key', [...new Set([...Object.values(RATE_KEYS), ...Object.values(own)])]);
+  const v = Object.fromEntries((data || []).map(c => [c.key, c.value]));
+  const general = {
     hourly_rate: num(v[RATE_KEYS.hourly_rate], DEFAULT_RATE),
     commission_pct: num(v[RATE_KEYS.commission_pct], DEFAULT_COMMISSION),
     overtime_rate: num(v[RATE_KEYS.overtime_rate], null),
   };
+  if (platform === 'onlyfans') return general;
+  return Object.fromEntries(RATE_FIELDS.map(k => [k, num(v[own[k]], general[k])]));
+}
+
+// Everyone's own rates for another platform (chatter_platform_rates, migration 035).
+async function platformRates(orgId, platform) {
+  const [team, { data, error }] = await Promise.all([
+    teamRates(orgId, platform),
+    supabaseAdmin.from('chatter_platform_rates').select('chatter_id, hourly_rate, commission_pct, overtime_rate').eq('organisation_id', orgId).eq('platform', platform),
+  ]);
+  return { team, own: Object.fromEntries((data || []).map(r => [r.chatter_id, r])), ready: !error };
 }
 // A chatter's rates: their own, else the team's.
 const ratesFor = (c, team) => ({
@@ -208,6 +266,136 @@ async function salesFromCopy(orgId, period) {
     .map(s => ({ employee: s.employee_id, page: s.creators?.name || 'Other page', amount: Number(s.sales_amount) || 0, status: s.status }));
 }
 
+// ── Other platforms: Fanvue ─────────────────────────────────────────────────
+const FANVUE_SALES = new Set(['message', 'tip']);           // what a chatter sells in the chat
+const minOf = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+const amsClock = (iso) => infloww.toStoreTime(new Date(iso)).getTime();    // real UTC → the chats' Amsterdam clock
+const overlapMs = ([a, b], list) => list.reduce((sum, [c, d]) => sum + Math.max(0, Math.min(b, d) - Math.max(a, c)), 0);
+
+// A rostered shift (or part of one) on `date`, as [start, end) in the Amsterdam clock.
+function rosterInterval(date, slot, from, to) {
+  const [a, z] = R.windowIn(slot, from, to);
+  const start = Date.parse(`${date}T00:00:00Z`) + minOf(slot.start) * 60000;
+  return [start + a * 60000, start + z * 60000];
+}
+// What someone was paid for on OnlyFans (their shifts from the chats), as [start, end).
+function paidIntervals(shifts) {
+  return (shifts || []).map(x => {
+    const start = Date.parse(`${x.date}T00:00:00Z`) + minOf(x.from) * 60000;
+    if (x.whole) return [start, start + x.hours * H];
+    const a = ((minOf(x.first) - minOf(x.from)) + 1440) % 1440;           // from their first message
+    return [start + a * 60000, start + a * 60000 + x.hours * H];
+  });
+}
+
+/**
+ * Each person's Fanvue line for the period: hours from the Fanvue roster (minus
+ * time already paid on OnlyFans), and PPVs bought and tips credited to whoever was
+ * on that page's shift when the PPV was sent (or the tip came in), split between
+ * them. Returns { byChatter: { id: { hours, overtime, shifts, gross, net, refunded,
+ * pages } }, warnings }.
+ */
+async function fanvueLines(orgId, period, paidByChatter) {
+  const out = {}, warnings = [];
+  const pages = await R.loadPages(orgId, 'fanvue');
+  if (!pages.length) return { byChatter: out, warnings };
+  const pageIds = new Set(pages.map(p => p.id));
+  // from the day before: a night shift that started then still covers the first hours
+  const roster = await R.loadRoster(orgId, R.addDays(period.start, -1), period.end, 'fanvue');
+  if (!roster.ready) {
+    warnings.push('Fanvue has no shift times yet, so nobody\'s Fanvue hours or sales could be counted. Open Shifts with Fanvue picked once, then recalculate.');
+    return { byChatter: out, warnings };
+  }
+  const { data: accounts } = await supabaseAdmin.from('fanvue_accounts').select('id, creator_id').eq('organisation_id', orgId);
+  const accPage = Object.fromEntries((accounts || []).filter(a => pageIds.has(a.creator_id)).map(a => [a.id, a.creator_id]));
+  const accIds = Object.keys(accPage);
+  let earned = [];
+  const sentAt = {};
+  if (accIds.length) {
+    const from = Date.parse(`${period.start}T00:00:00Z`), to = Date.parse(`${R.addDays(period.end, 1)}T00:00:00Z`);
+    earned = (await all(() => supabaseAdmin.from('fanvue_earnings').select('account_id, transaction_order_id, source, paid_at, gross_cents, net_cents, message_uuid')
+      .in('account_id', accIds).gte('paid_at', new Date(from - 3 * H).toISOString()).lt('paid_at', new Date(to + 3 * H).toISOString())
+      .order('paid_at').order('transaction_order_id')))
+      .filter(x => { const t = amsClock(x.paid_at); return t >= from && t < to; });
+    // when each PPV was sent: the seller is whoever was on shift then
+    const uuids = [...new Set(earned.filter(x => x.message_uuid).map(x => x.message_uuid))];
+    for (let i = 0; i < uuids.length; i += 200) {
+      const { data } = await supabaseAdmin.from('fanvue_messages').select('uuid, sent_at').in('account_id', accIds).in('uuid', uuids.slice(i, i + 200));
+      for (const m of data || []) if (m.sent_at && !sentAt[m.uuid]) sentAt[m.uuid] = m.sent_at;
+    }
+  }
+  const core = fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChatter, today: todayAms() });
+  return { byChatter: core.byChatter, warnings: [...warnings, ...core.warnings] };
+}
+
+/**
+ * The counting behind fanvueLines, without the database (so it can be tested):
+ * the roster (slots, assignments, changes) for the period and the day before, the
+ * Fanvue pages, which account is which page, the period's earnings, when each PPV
+ * was sent, and what each person was paid for on OnlyFans.
+ */
+function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChatter, today }) {
+  const out = {}, warnings = [];
+  const pageIds = new Set(pages.map(p => p.id));
+  const pageName = Object.fromEntries(pages.map(p => [p.id, p.name]));
+  const slotById = Object.fromEntries(roster.slots.map(x => [x.id, x]));
+  const entries = [];
+  for (let d = R.addDays(period.start, -1); d <= period.end; d = R.addDays(d, 1)) {
+    for (const e of R.effectiveDay(d, roster.assignments, roster.changes).entries) {
+      const slot = slotById[e.shift_id];
+      const onPages = (e.creator_ids || []).filter(id => pageIds.has(id));
+      if (!slot || !onPages.length) continue;
+      const [start, end] = rosterInterval(d, slot, e.from, e.to);
+      entries.push({ date: d, chatter_id: e.chatter_id, slot, from: e.from, to: e.to, part: !!e.from, pages: onPages, start, end });
+    }
+  }
+  const line = (cid) => (out[cid] ||= { hours: 0, overtime: 0, shifts: [], gross: 0, net: 0, refunded: 0, pages: {} });
+
+  // hours: the shifts that started in the period, up to yesterday; each day's first
+  // whole shift is regular time, the rest overtime
+  const lastDay = period.end < today ? period.end : R.addDays(today, -1);
+  const byDay = {};
+  for (const e of entries) if (e.date >= period.start && e.date <= lastDay) (byDay[`${e.chatter_id}|${e.date}`] ||= []).push(e);
+  for (const list of Object.values(byDay)) {
+    list.sort((a, b) => a.start - b.start);
+    const lead = list.find(e => !e.part);
+    for (const e of list) {
+      const shared = overlapMs([e.start, e.end], paidByChatter[e.chatter_id] || []);
+      const hours = Math.max(0, Math.round(((e.end - e.start - shared) / H) * 2) / 2);
+      const overtime = e !== lead;
+      const x = line(e.chatter_id);
+      if (overtime) x.overtime += hours; else x.hours += hours;
+      x.shifts.push({
+        date: e.date, shift: e.slot.name, from: e.from || e.slot.start, to: e.to || e.slot.end, whole: !e.part, overtime, hours,
+        rostered: true, ...(shared ? { paid_on_onlyfans: r2(shared / H) } : {}),
+      });
+    }
+  }
+
+  // sales: PPVs bought and tips (refunds noted, as with Infloww)
+  const covered = entries.length ? [Math.min(...entries.map(e => e.start)), Math.max(...entries.map(e => e.end))] : [0, 0];
+  let nobody = 0;
+  for (const x of earned) {
+    const sale = FANVUE_SALES.has(x.source);
+    if (!sale && !((x.source === 'refund' || x.source === 'chargeback') && x.message_uuid)) continue;
+    const page = accPage[x.account_id];
+    // the PPV's send time, if the roster covers it; else when it was bought
+    const sent = x.message_uuid && sentAt[x.message_uuid] ? amsClock(sentAt[x.message_uuid]) : null;
+    const when = sent != null && sent >= covered[0] && sent < covered[1] ? sent : amsClock(x.paid_at);
+    const who = [...new Set(entries.filter(e => e.pages.includes(page) && when >= e.start && when < e.end).map(e => e.chatter_id))];
+    const gross = Math.abs(Number(x.gross_cents) || 0) / 100, net = Math.abs(Number(x.net_cents) || 0) / 100;
+    if (!who.length) { if (sale) nobody += gross; continue; }
+    for (const cid of who) {
+      const l = line(cid), share = 1 / who.length;
+      if (!sale) { l.refunded += gross * share; continue; }
+      l.gross += gross * share; l.net += net * share;
+      l.pages[pageName[page]] = (l.pages[pageName[page]] || 0) + gross * share;
+    }
+  }
+  if (nobody >= 1) warnings.push(`Fanvue: ${money(nobody)} in sales came in while nobody was rostered on that page, so it's on no report. Put the Fanvue team on the roster (Shifts, with Fanvue picked), then recalculate.`);
+  return { byChatter: out, warnings };
+}
+
 /**
  * Work out every chatter's pay for the period starting `start`: the rows to save
  * (without saving them) and the period's warnings. Reports already marked final
@@ -235,6 +423,10 @@ async function buildPeriod(orgId, start, userId = null) {
   const today = todayAms();
 
   const { byChatter: hours, perDay } = await hoursFromChats(orgId, period, slots, chatterOf);
+  // Fanvue: hours from its roster (minus time paid on OnlyFans), sales by who was on shift
+  const paid = Object.fromEntries(Object.entries(hours).map(([cid, h]) => [cid, paidIntervals(h.shifts)]));
+  const fv = await fanvueLines(orgId, period, paid);
+  const fvRates = fv.byChatter && Object.keys(fv.byChatter).length ? await platformRates(orgId, 'fanvue') : null;
 
   let sales, source = 'infloww';
   if (infloww.configured()) {
@@ -265,6 +457,7 @@ async function buildPeriod(orgId, start, userId = null) {
   const missing = [];
   for (let d = period.start; d <= lastDay; d = R.addDays(d, 1)) if (!perDay[d]) missing.push(d);
   if (missing.length) warnings.push(`No chat export uploaded for ${missing.map(fmtDay).join(', ')}: hours for ${missing.length === 1 ? 'that day' : 'those days'} can't be counted. Upload ${missing.length === 1 ? 'it' : 'them'} on the Reports page, then recalculate.`);
+  warnings.push(...fv.warnings);
   if (today <= period.end) warnings.push(`This period isn't over yet (it ends ${fmtDay(period.end)}), so the numbers will still change.`);
   else if (today === period.payday && Number(new Date().toLocaleString('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', hour12: false })) < 12) {
     warnings.push('Infloww can take a few hours to settle the last day\'s sales: recalculate later today to be safe.');
@@ -272,7 +465,7 @@ async function buildPeriod(orgId, start, userId = null) {
 
   // one row per chatter who worked or sold, plus anyone already in this period
   const prev = Object.fromEntries(existing.map(r => [r.chatter_id, r]));
-  const ids = new Set([...Object.keys(hours), ...Object.keys(sold), ...Object.keys(prev)]);
+  const ids = new Set([...Object.keys(hours), ...Object.keys(sold), ...Object.keys(fv.byChatter), ...Object.keys(prev)]);
   const chatterById = Object.fromEntries(chatters.map(c => [c.id, c]));
   const now = new Date().toISOString();
   const rows = [];
@@ -283,6 +476,19 @@ async function buildPeriod(orgId, start, userId = null) {
     const s = sold[cid] || { gross: 0, refunded: 0, pages: {} };
     const flags = [];
     if ((h.hours || h.overtime) && !accounts[cid]) flags.push('no_infloww_account');
+    // other platforms' lines; hours the manager typed in stay
+    const lines = {};
+    const f = fv.byChatter[cid], was = prev[cid]?.lines?.fanvue;
+    if (f || (was && (was.hours != null || was.overtime_hours != null))) {
+      const x = f || { hours: 0, overtime: 0, shifts: [], gross: 0, net: 0, refunded: 0, pages: {} };
+      const rates = fvRates ? ratesFor(fvRates.own[cid], fvRates.team) : ratesFor(null, await teamRates(orgId, 'fanvue'));
+      lines.fanvue = {
+        hours_auto: x.hours, overtime_hours_auto: x.overtime, hours: was?.hours ?? null, overtime_hours: was?.overtime_hours ?? null,
+        ...rates, sales_gross: r2(x.gross), sales_net: r2(x.net), refunded: r2(x.refunded),
+        pages: Object.entries(x.pages).map(([name, amount]) => ({ name, amount: r2(amount) })).filter(p => p.amount).sort((a, b) => b.amount - a.amount),
+        shifts: x.shifts, basis: 'roster',
+      };
+    }
     // worth a look against Infloww: full shifts with little chatting, and shifts cut short
     const short = h.shifts.filter(x => (x.whole && x.active_min < SHORT_SHIFT_MIN) || (!x.whole && !x.overtime));
     if (short.length) flags.push('short_shifts');
@@ -294,6 +500,7 @@ async function buildPeriod(orgId, start, userId = null) {
         pages: Object.entries(s.pages).map(([name, amount]) => ({ name, amount: r2(amount) })).filter(p => p.amount).sort((a, b) => b.amount - a.amount),
         shifts: h.shifts, flags, sales_source: source,
       },
+      lines,
       calculated_at: now, updated_at: now, created_by: prev[cid]?.created_by || userId,
     });
   }
@@ -302,10 +509,19 @@ async function buildPeriod(orgId, start, userId = null) {
 
 /** Calculate the period (buildPeriod) and save it; returns the saved period. */
 async function calculatePeriod(orgId, start, userId = null) {
-  const { period, rows, warnings, calculated_at } = await buildPeriod(orgId, start, userId);
+  const built = await buildPeriod(orgId, start, userId);
+  const { period, warnings, calculated_at } = built;
+  let { rows } = built;
   if (rows.length) {
     const save = (list) => supabaseAdmin.from('payroll_reports').upsert(list, { onConflict: 'organisation_id,period_start,chatter_id' });
     let { error } = await save(rows);
+    if (error && /\blines\b/.test(error.message)) {
+      // before migration 035 there's no room for other platforms: OnlyFans only
+      const fanvue = rows.some(r => Object.keys(r.lines || {}).length);
+      rows = rows.map(({ lines: _l, ...r }) => r);
+      ({ error } = await save(rows));
+      if (fanvue) warnings.push('Run database change 035 in Supabase to add Fanvue to the reports. Until then they cover OnlyFans only.');
+    }
     if (error && /overtime_/.test(error.message)) {
       // before migration 029 there's nowhere to keep overtime apart: it counts as ordinary hours
       ({ error } = await save(rows.map(({ overtime_hours_auto: ot, overtime_rate: _r, ...r }) => ({ ...r, hours_auto: r.hours_auto + ot }))));
@@ -323,36 +539,50 @@ async function calculatePeriod(orgId, start, userId = null) {
 /** A period's saved reports, with the money worked out, and its warnings. */
 async function loadPeriod(orgId, start) {
   const period = periodOf(start);
-  const [rows, { data: meta, error }, chatters] = await Promise.all([
+  const [rows, { data: meta, error }, chatters, ownOn] = await Promise.all([
     all(() => supabaseAdmin.from('payroll_reports').select('*').eq('organisation_id', orgId).eq('period_start', period.start).order('id')),
     supabaseAdmin.from('payroll_periods').select('warnings, calculated_at').eq('organisation_id', orgId).eq('period_start', period.start).maybeSingle(),
     all(() => supabaseAdmin.from('chatters').select('id, name, hourly_rate').eq('organisation_id', orgId).order('id')),
+    ownPlatformRates(orgId),
   ]);
   if (error) throw new Error(error.message);
-  const name = Object.fromEntries(chatters.map(c => [c.id, c.name]));
-  // "default rate": the chatter has no rate of their own yet (worked out now, so it's never stale)
-  const own = new Set(chatters.filter(c => c.hourly_rate != null).map(c => c.id));
-  const flagged = (r) => {
-    const flags = (r.details?.flags || []).filter(f => f !== 'default_rate');
-    return { ...r.details, flags: own.has(r.chatter_id) ? flags : ['default_rate', ...flags] };
-  };
+  const byId = Object.fromEntries(chatters.map(c => [c.id, c]));
   return {
     period: { ...period, running: todayAms() <= period.end },
     calculated_at: meta?.calculated_at || null,
     warnings: meta?.warnings || [],
-    rows: rows.map(r => ({ ...r, details: flagged(r), chatter_name: name[r.chatter_id] || '?', ...totals(r) }))
-      .sort((a, b) => a.chatter_name.localeCompare(b.chatter_name)),
+    rows: rows.map(r => present(r, byId[r.chatter_id], ownOn)).sort((a, b) => a.chatter_name.localeCompare(b.chatter_name)),
   };
 }
 
 /** One saved report as the page shows it (name, live "default rate" flag, the money). */
 async function viewRow(row) {
-  const { data: c } = await supabaseAdmin.from('chatters').select('name, hourly_rate').eq('id', row.chatter_id).maybeSingle();
-  const flags = (row.details?.flags || []).filter(f => f !== 'default_rate');
-  return {
-    ...row, chatter_name: c?.name || '?', ...totals(row),
-    details: { ...row.details, flags: c?.hourly_rate != null ? flags : ['default_rate', ...flags] },
-  };
+  const [{ data: c }, ownOn] = await Promise.all([
+    supabaseAdmin.from('chatters').select('name, hourly_rate').eq('id', row.chatter_id).maybeSingle(),
+    ownPlatformRates(row.organisation_id, row.chatter_id),
+  ]);
+  return present(row, c, ownOn);
+}
+
+// Who has an hourly rate of their own on another platform ("fanvue|<chatter id>");
+// nobody before migration 035.
+async function ownPlatformRates(orgId, chatterId = null) {
+  let q = supabaseAdmin.from('chatter_platform_rates').select('chatter_id, platform').eq('organisation_id', orgId).not('hourly_rate', 'is', null);
+  if (chatterId) q = q.eq('chatter_id', chatterId);
+  const { data } = await q;
+  return new Set((data || []).map(r => `${r.platform}|${r.chatter_id}`));
+}
+
+// A saved report as shown: the name, the money, whose rates each platform's part
+// uses (own_rates), and "default rate" when a platform they worked on has no rate
+// of theirs yet (worked out now, so it's never stale).
+function present(r, c, ownOn) {
+  const others = Object.keys(r.lines || {});
+  const own_rates = { onlyfans: c?.hourly_rate != null, ...Object.fromEntries(others.map(p => [p, ownOn.has(`${p}|${r.chatter_id}`)])) };
+  const onOnlyFans = !others.length || [r.hours_auto, r.overtime_hours_auto, r.hours, r.overtime_hours, r.sales_gross].some(v => num(v, 0) > 0);
+  const team = (onOnlyFans && !own_rates.onlyfans) || others.some(p => !own_rates[p]);
+  const flags = (r.details?.flags || []).filter(f => f !== 'default_rate');
+  return { ...r, chatter_name: c?.name || '?', own_rates, ...totals(r), details: { ...r.details, flags: team ? ['default_rate', ...flags] : flags } };
 }
 
 // ── Pay rates ───────────────────────────────────────────────────────────────
@@ -367,23 +597,53 @@ async function setConfig(orgId, key, value) {
 }
 
 /**
- * The team's rates and every active chatter's own (null = the team's). `overtime`
- * is false until migration 029 adds the overtime rate.
+ * A platform's pay rates: the team's and every active chatter's own (null = the
+ * team's). OnlyFans' live on chatters (`overtime` is false until migration 029 adds
+ * the overtime rate). Another platform's people's rates live in
+ * chatter_platform_rates (`ready` is false until migration 035), and its team rates
+ * may be empty: then the general ones (`general`) apply.
  */
-async function loadRates(orgId) {
-  const [team, chatters, { data: ign }] = await Promise.all([
-    teamRates(orgId),
+async function loadRates(orgId, platform = 'onlyfans') {
+  const [chatters, { data: ign }] = await Promise.all([
     all(() => supabaseAdmin.from('chatters').select('*').eq('organisation_id', orgId).order('id')),
     supabaseAdmin.from('daily_check_config').select('value').eq('organisation_id', orgId).eq('key', 'ignored_accounts').maybeSingle(),
   ]);
   const ignored = new Set(String(ign?.value || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean));
+  const people = chatters.filter(c => c.is_active !== false && !ignored.has(c.name.toLowerCase().trim())).sort((a, b) => a.name.localeCompare(b.name));
+  if (platform === 'onlyfans') {
+    return {
+      platform, ready: true, team: await teamRates(orgId),
+      overtime: !chatters.length || 'overtime_rate' in chatters[0],
+      chatters: people.map(c => ({ id: c.id, name: c.name, hourly_rate: num(c.hourly_rate, null), commission_pct: num(c.commission_pct, null), overtime_rate: num(c.overtime_rate, null) })),
+    };
+  }
+  const k = rateKeys(platform);
+  const [{ data: cfg }, general, own] = await Promise.all([
+    supabaseAdmin.from('daily_check_config').select('key, value').eq('organisation_id', orgId).in('key', Object.values(k)),
+    teamRates(orgId),
+    supabaseAdmin.from('chatter_platform_rates').select('chatter_id, hourly_rate, commission_pct, overtime_rate').eq('organisation_id', orgId).eq('platform', platform),
+  ]);
+  const v = Object.fromEntries((cfg || []).map(c => [c.key, c.value]));
+  const mine = Object.fromEntries((own.data || []).map(r => [r.chatter_id, r]));
   return {
-    team,
-    overtime: !chatters.length || 'overtime_rate' in chatters[0],
-    chatters: chatters.filter(c => c.is_active !== false && !ignored.has(c.name.toLowerCase().trim()))
-      .map(c => ({ id: c.id, name: c.name, hourly_rate: num(c.hourly_rate, null), commission_pct: num(c.commission_pct, null), overtime_rate: num(c.overtime_rate, null) }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    platform, ready: !own.error, overtime: true, general,
+    team: Object.fromEntries(RATE_FIELDS.map(f => [f, num(v[k[f]], null)])),
+    chatters: people.map(c => ({ id: c.id, name: c.name, ...Object.fromEntries(RATE_FIELDS.map(f => [f, num(mine[c.id]?.[f], null)])) })),
   };
+}
+
+/** Save one person's own rates for another platform (only the fields given change; all empty = none). */
+async function setPlatformRates(orgId, chatterId, platform, rates) {
+  const sent = Object.fromEntries(RATE_FIELDS.filter(f => rates[f] !== undefined).map(f => [f, rates[f]]));
+  if (!Object.keys(sent).length) return;
+  const { data: cur, error: e0 } = await supabaseAdmin.from('chatter_platform_rates').select('hourly_rate, commission_pct, overtime_rate')
+    .eq('chatter_id', chatterId).eq('platform', platform).maybeSingle();
+  if (e0) throw new Error(/chatter_platform_rates/.test(e0.message) ? 'Run database change 035 in Supabase to set rates for this platform' : e0.message);
+  const next = { ...Object.fromEntries(RATE_FIELDS.map(f => [f, cur?.[f] ?? null])), ...sent };
+  const { error } = RATE_FIELDS.every(f => next[f] == null)
+    ? await supabaseAdmin.from('chatter_platform_rates').delete().eq('chatter_id', chatterId).eq('platform', platform)
+    : await supabaseAdmin.from('chatter_platform_rates').upsert({ organisation_id: orgId, chatter_id: chatterId, platform, ...next, updated_at: new Date().toISOString() }, { onConflict: 'chatter_id,platform' });
+  if (error) throw new Error(error.message);
 }
 
 /**
@@ -391,7 +651,8 @@ async function loadRates(orgId) {
  * overtime_rate }, null = the team's), then bring draft reports onto them (final
  * reports keep the rates they were made with).
  */
-async function saveRates(orgId, { team, chatters = [] }) {
+async function saveRates(orgId, { platform = 'onlyfans', team, chatters = [] }) {
+  if (platform !== 'onlyfans') return saveOtherRates(orgId, platform, { team, chatters });
   const ready = (await loadRates(orgId)).overtime;
   if (team) for (const [k, key] of Object.entries(RATE_KEYS)) if (team[k] !== undefined && (ready || k !== 'overtime_rate')) await setConfig(orgId, key, team[k]);
   for (const c of chatters) {
@@ -417,7 +678,38 @@ async function saveRates(orgId, { team, chatters = [] }) {
   return loadRates(orgId);
 }
 
+// Another platform's rates: the team's (empty = the general ones) and each person's
+// own; then draft reports take them on that platform's line.
+async function saveOtherRates(orgId, platform, { team, chatters = [] }) {
+  const k = rateKeys(platform);
+  if (team) for (const f of RATE_FIELDS) if (team[f] !== undefined) await setConfig(orgId, k[f], team[f]);
+  for (const c of chatters) await setPlatformRates(orgId, c.id, platform, c);
+  await refreshDraftLines(orgId, platform);
+  return loadRates(orgId, platform);
+}
+
+// Draft reports with a line for `platform` get its current rates (final ones keep theirs).
+async function refreshDraftLines(orgId, platform) {
+  const { team, own } = await platformRates(orgId, platform);
+  let drafts;
+  try {
+    drafts = await all(() => supabaseAdmin.from('payroll_reports').select('id, chatter_id, lines').eq('organisation_id', orgId).eq('status', 'draft').order('id'));
+  } catch (e) {
+    if (/\blines\b/.test(e.message)) return;                  // before migration 035
+    throw e;
+  }
+  for (const r of drafts) {
+    const l = r.lines?.[platform];
+    if (!l) continue;
+    const want = ratesFor(own[r.chatter_id], team);
+    if (RATE_FIELDS.every(f => num(l[f], null) === want[f])) continue;
+    const { error } = await supabaseAdmin.from('payroll_reports').update({ lines: { ...r.lines, [platform]: { ...l, ...want } }, updated_at: new Date().toISOString() }).eq('id', r.id);
+    if (error) throw new Error(error.message);
+  }
+}
+
 module.exports = {
-  ANCHOR, PERIOD_DAYS, DEFAULT_RATE, DEFAULT_COMMISSION,
-  periodOf, isPeriodStart, recentPeriods, totals, buildPeriod, calculatePeriod, loadPeriod, viewRow, loadRates, saveRates, todayAms,
+  _test: { fanvueCore, paidIntervals, rosterInterval, present },
+  ANCHOR, PERIOD_DAYS, DEFAULT_RATE, DEFAULT_COMMISSION, RATE_FIELDS,
+  periodOf, isPeriodStart, recentPeriods, totals, buildPeriod, calculatePeriod, loadPeriod, viewRow, loadRates, saveRates, setPlatformRates, todayAms,
 };
