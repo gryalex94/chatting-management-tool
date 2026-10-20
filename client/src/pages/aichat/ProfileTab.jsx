@@ -22,12 +22,10 @@ const FIELDS = [
   ['heat', 'How spicy', 'Mild, Medium or Hot, and what that means for her.', 2],
   ['about', 'Her story', 'A few sentences: what she shares about her life.', 3],
   ['personality', 'Personality', '', 3],
-  ['style', 'How she writes', 'Message length, emojis, capitals, slang, the pet names she uses, how she keeps a chat going.', 4],
   ['likes', 'What she likes', '', 3],
   ['limits', 'Her limits', 'Things she won\'t do or talk about.', 2],
   ['facts', 'Things she has told fans about herself', 'One per line (her pet, her job, her city…). She keeps these the same with every fan.', 4],
   ['real_answer', 'If a fan asks whether she\'s real', 'She always says she\'s an AI character; this is how she puts it.', 2],
-  ['examples', 'How she really texts', 'Real messages from her chats, one per line: the AI copies their style, not the words. Empty: some of her real messages are used.', 6],
 ];
 const TYPING = [
   ['relaxed', 'Relaxed', 'a 60-letter message takes about 20 seconds'],
@@ -36,18 +34,20 @@ const TYPING = [
 ];
 const EMOJIS = [
   ['none', 'None'],
-  ['rarely', 'Rarely', 'about 1 reply in 4, like her real chats'],
+  ['rarely', 'Rarely', 'about 1 reply in 4'],
   ['sometimes', 'Sometimes', 'about half her replies'],
   ['often', 'Often', 'most replies'],
 ];
-const LISTS = ['facts', 'examples'];
+const LISTS = ['facts'];
 const toForm = (p) => Object.fromEntries(FIELDS.map(([k]) => [k, LISTS.includes(k) ? (p?.[k] || []).join('\n') : p?.[k] || '']));
 const fromForm = (f) => ({ ...f, ...Object.fromEntries(LISTS.map(k => [k, f[k].split('\n').map(s => s.trim()).filter(Boolean)])) });
 
 /**
- * Who she is, as the AI writes her: drafted by the AI from her own past
- * messages, then checked and saved by a manager. Next to it, the house rules
- * every reply keeps, which can't be switched off.
+ * Who she is, as the AI writes her: generated from a manager's description (or
+ * typed), with the facts she has told fans about herself read from her past
+ * chats, then checked and saved by a manager. How she chats comes from the
+ * agency's analysis of ~35k chats, not her own Fanvue chats. Next to it, the
+ * house rules every reply keeps, which can't be switched off.
  */
 export default function ProfileTab({ page, writers, ready, onSaved }) {
   const [data, setData] = useState(null);
@@ -55,13 +55,14 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
   const [writer, setWriter] = useState('');
   const [typing, setTyping] = useState('normal');
   const [emojis, setEmojis] = useState('rarely');
-  const [drafted, setDrafted] = useState(null);       // { read, cost, model } after a draft, until saved
+  const [timezone, setTimezone] = useState('');
+  const [drafted, setDrafted] = useState(null);       // { read, cost, model, added | generated } after facts or a generated profile, until saved
   const [busy, setBusy] = useState('');
   const [generating, setGenerating] = useState(false);  // the "Generate from a description" window
 
   useEffect(() => {
     api.get(`/api/ai-chat/pages/${page.creator_id}/profile`).then(r => {
-      setData(r.data); setForm(toForm(r.data.profile)); setWriter(r.data.writer); setTyping(r.data.typing || 'normal'); setEmojis(r.data.emojis || 'rarely');
+      setData(r.data); setForm(toForm(r.data.profile)); setWriter(r.data.writer); setTyping(r.data.typing || 'normal'); setEmojis(r.data.emojis || 'rarely'); setTimezone(r.data.timezone);
     }).catch(e => setData({ error: errMsg(e, 'Could not load her profile') }));
   }, [page.creator_id]);
 
@@ -69,25 +70,30 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
   if (data.error) return <p className='text-sm text-muted-foreground'>{data.error}</p>;
 
   const saved = toForm(data.profile);
-  const dirty = !!drafted || writer !== data.writer || typing !== (data.typing || 'normal') || emojis !== (data.emojis || 'rarely') || FIELDS.some(([k]) => form[k] !== saved[k]);
+  const dirty = !!drafted || writer !== data.writer || typing !== (data.typing || 'normal') || emojis !== (data.emojis || 'rarely') || timezone !== data.timezone || FIELDS.some(([k]) => form[k] !== saved[k]);
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
 
+  // the facts she told fans about herself, added to the form (nothing else changes)
   const draft = async () => {
-    if (data.profile?.name && !window.confirm('Replace what\'s in the form with a fresh draft from her messages? Nothing is saved until you press Save.')) return;
     setBusy('draft');
     try {
       const { data: d } = await api.post(`/api/ai-chat/pages/${page.creator_id}/profile/draft`);
-      setForm(toForm(d.profile));
-      setDrafted({ read: d.read, cost: d.cost, model: d.model });
-      toast.success('Drafted: check it, then save');
-    } catch (e) { toast.error(errMsg(e, 'Could not draft her profile')); }
+      const found = toForm(d.profile);
+      setForm(f => {
+        const have = f.facts.split('\n').map(x => x.trim()).filter(Boolean);
+        const more = found.facts.split('\n').map(x => x.trim()).filter(x => x && !have.some(h => h.toLowerCase() === x.toLowerCase()));
+        return { ...f, name: f.name || found.name, age: f.age || found.age, from: f.from || found.from, facts: [...have, ...more].join('\n') };
+      });
+      setDrafted({ read: d.read, cost: d.cost, model: d.model, added: d.added });
+      toast.success(d.added ? `Added ${d.added} fact${d.added === 1 ? '' : 's'}: check them, then save` : 'No new facts found');
+    } catch (e) { toast.error(errMsg(e, 'Could not read her facts')); }
     finally { setBusy(''); }
   };
   const save = async () => {
     setBusy('save');
     try {
-      const { data: d } = await api.put(`/api/ai-chat/pages/${page.creator_id}/profile`, { profile: fromForm(form), writer, typing, emojis, drafted: !!drafted });
-      setData(d); setForm(toForm(d.profile)); setWriter(d.writer); setTyping(d.typing || 'normal'); setEmojis(d.emojis || 'rarely'); setDrafted(null);
+      const { data: d } = await api.put(`/api/ai-chat/pages/${page.creator_id}/profile`, { profile: fromForm(form), writer, typing, emojis, timezone, drafted: !!drafted });
+      setData(d); setForm(toForm(d.profile)); setWriter(d.writer); setTyping(d.typing || 'normal'); setEmojis(d.emojis || 'rarely'); setTimezone(d.timezone); setDrafted(null);
       toast.success('Profile saved');
       onSaved?.();
     } catch (e) { toast.error(errMsg(e, 'Could not save')); }
@@ -101,14 +107,14 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
           <div className='text-sm'>
             <p className='font-medium'>{data.page.name} <span className='font-normal text-muted-foreground'>@{data.page.handle}</span></p>
             <p className='text-xs text-muted-foreground'>
-              {drafted ? `${drafted.generated ? `Generated by ${drafted.model}${drafted.read ? `, consistent with ${drafted.read} of her messages` : ''}` : `Drafted by ${drafted.model} from ${drafted.read} of her messages`} (${cost(drafted.cost)}). Check it, change what's wrong, then save.`
-                : data.updated_at ? `Saved ${dayTime(data.updated_at)}.` : 'No profile yet: let the AI draft one from her own messages, then check it.'}
+              {drafted ? `${drafted.generated ? `Generated by ${drafted.model}${drafted.read ? `, consistent with ${drafted.read} of her messages` : ''}` : `Facts read by ${drafted.model} from ${drafted.read} of her messages: ${drafted.added || 'no'} new`} (${cost(drafted.cost)}). Check it, change what's wrong, then save.`
+                : data.updated_at ? `Saved ${dayTime(data.updated_at)}.` : 'No profile yet: generate one from a description, then check it.'}
             </p>
           </div>
           <div className='flex flex-wrap gap-2'>
             <Button variant='outline' onClick={() => setGenerating(true)} disabled={!!busy || !ready.writer || !ready.tables}><WandSparkles />Generate from a description</Button>
             <Button variant='outline' onClick={draft} disabled={!!busy || !ready.writer || !ready.tables}>
-              {busy === 'draft' ? <><Loader2 className='animate-spin' />Reading her messages…</> : <><Sparkles />Draft from her messages</>}
+              {busy === 'draft' ? <><Loader2 className='animate-spin' />Reading her chats…</> : <><Sparkles />Facts from her chats</>}
             </Button>
           </div>
         </div>
@@ -154,6 +160,14 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
             <span className='text-xs text-muted-foreground'>{emojis === 'none' ? 'Never.' : `At most one per reply, in ${EMOJIS.find(e => e[0] === emojis)?.[2]}.`}</span>
           </div>
           <div className='grid gap-1.5'>
+            <Label>Her time zone</Label>
+            <Select value={timezone} onValueChange={setTimezone}>
+              <SelectTrigger className='w-56' aria-label='Her time zone'><SelectValue /></SelectTrigger>
+              <SelectContent>{data.time_zones.map(([id, label]) => <SelectItem key={id} value={id}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+            <span className='text-xs text-muted-foreground'>The time she lives by in the chat (morning, late night…).</span>
+          </div>
+          <div className='grid gap-1.5'>
             <Label>Writes her replies</Label>
             <Select value={writer} onValueChange={setWriter}>
               <SelectTrigger className='w-64' aria-label='Writer'><SelectValue /></SelectTrigger>
@@ -173,7 +187,7 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
         </div>
         <div className='flex flex-col gap-2 rounded-lg border p-4'>
           <p className='text-sm font-medium'>How she chats</p>
-          <p className='text-xs text-muted-foreground'>From the Playbook, without the selling parts (she doesn&apos;t sell yet).</p>
+          <p className='text-xs text-muted-foreground'>From the agency&apos;s analysis of ~35k chats: what the chats that went well had in common, and the costliest mistakes. Each reply also gets a few real examples from those chats.</p>
           <ul className='list-disc space-y-1.5 ps-4 text-sm'>{data.chat_guide.map((r, i) => <li key={i}>{r}</li>)}</ul>
         </div>
       </div>

@@ -4,7 +4,10 @@
  *    fan comes first (her profile, the house rules, how she chats) so providers can
  *    reuse it; then this fan's card, the story so far and the chat itself.
  *  - memoryPrompt: update what she remembers about a fan from new messages.
- *  - profilePrompt: draft her profile from her own past messages.
+ *  - profilePrompt: the facts she has told fans about herself, from her past chats.
+ * How she chats comes from the agency's Oct 2026 analysis of ~35k chats (the chat
+ * guide, the game plan, the example library); never from her own Fanvue chats,
+ * which weren't good chatting.
  * Everything here is pure (no database, no network), so it can be tested as is.
  */
 
@@ -14,7 +17,7 @@ const { mediaNote, emptyBody } = require('./notes');
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
   ['vibe', 'Vibe'], ['heat', 'How spicy'], ['about', 'Her story'],
-  ['personality', 'Personality'], ['style', 'How she writes'], ['likes', 'What she likes'],
+  ['personality', 'Personality'], ['likes', 'What she likes'],
   ['limits', 'Her limits'], ['real_answer', 'If someone asks whether she is real'],
 ];
 
@@ -29,7 +32,6 @@ const GENERATE_OPTIONS = {
     { id: 'medium', label: 'Medium', hint: 'gets sexy and descriptive when he leads, building it up slowly' },
     { id: 'hot', label: 'Hot', hint: 'very open about sex and explicit when he wants it, still keeping every house rule' },
   ],
-  styles: ['Casual and lowercase, lots of emojis', 'Casual, some emojis', 'Neat and proper, few emojis'],
 };
 const FACT_KINDS = ['about', 'likes', 'avoid', 'promise', 'her'];
 
@@ -42,33 +44,47 @@ const HOUSE_RULES = [
   'You can\'t send photos, videos or voice notes here. Never promise any; if he asks, tease and keep chatting.',
   'Write in English only.',
   'Never make up facts about him. Use what you know; if you\'re not sure, ask him.',
+  'Where you live is only what your profile says: never mention any other city, country or time zone.',
   'Stay consistent with your profile and with what you have told him before.',
   'If he talks about hurting himself or seems in real trouble, be kind and serious, don\'t flirt, and fill in "handover".',
 ];
 
-// How she chats (from the agency's Playbook, the parts that aren't about selling).
-// Her team's real messages (Oct 2026): median 7 words, 1 in 6 with an emoji, no
-// dashes or *stars*. The AI's own habits (long, clever, emoji-heavy) are the
-// opposite, so these say it plainly.
+// How she chats: what the dialogues that went well had in common in the agency's
+// Oct 2026 analysis of ~35k chats, and its costliest mistakes (robotic replies,
+// ignoring his question, too explicit too soon, being pushy). Not her own Fanvue
+// chats. The AI's own habits (long, clever, emoji-heavy, "heyy", always a
+// question, sexual too fast) are the opposite, so these say it plainly.
 const CHAT_GUIDE = [
-  'Text like a real girl on her phone: short and simple. Usually one message of 3 to 12 words; sometimes two, rarely three.',
-  'Everyday words only. No clever wordplay, no poetic or dramatic lines, no big words.',
-  'Emojis are rare: most of your messages have none, and never more than one in a reply.',
-  'No dashes (— or –), no ~, no *stars* around words, no lists, no formal phrases.',
-  'Answer what he said first. Then keep it going, but not always with a question: sometimes a reaction, a tease or a bit about your day.',
-  'If you are already chatting, don\'t greet him again.',
-  'Get to know him and use it: his name, his day, things he told you before.',
-  'Match his energy and pace. Don\'t be needy or pushy.',
-  'When it gets flirty or hot, build it up step by step and follow his lead; don\'t jump ahead.',
-  'After a hot moment, be warm and personal.',
-  'Vary your words. Never repeat a line you have already sent him.',
+  'Answer what he said first. If he asks something, answer it plainly before anything else.',
+  'Sound like a real girl texting, not a script: react to his words, build on what he tells you, use his own words back.',
+  'Short and simple: usually one message under 15 words; two now and then, three rarely. Everyday words, no clever or poetic lines.',
+  'Warm up first: get to know him and have a real chat before anything sexual. The chats that sold best had a long, friendly warm-up.',
+  'Follow his lead on how sexual it gets (see "Right now"). Tease and hint rather than describe: teasing worked far better than going explicit too soon.',
+  'If he jokes, joke back. If he pulls back or says it\'s going fast, laugh it off and go back to normal talk.',
+  'Don\'t bring up your body or looks unless he does.',
+  'Not every reply needs a question: about half the time react, tease or share a bit of your day instead.',
+  'Vary how you start. Don\'t open with "hehe", "mmm" or "hey" (your worst habit), never open two replies the same way, and once you are chatting don\'t greet him again.',
+  'Emojis are rare: most replies have none, never more than one. No dashes (— or –), no ~, no *stars*, no lists.',
+  'Use his name only if it is in the chat or your notes, and never invent things you did or talked about together.',
+  'Don\'t be needy or pushy. After a hot moment, be warm and personal.',
+  'Never repeat a line you have already sent him.',
 ];
 
+// How sexual a message is, as the situation picker rates it (0 to 3).
+const LEVELS = ['friendly (no flirting at all)', 'flirty (compliments, light teasing)', 'suggestive (hints and innuendo, nothing explicit)', 'explicit'];
+
 const clean = (s) => String(s ?? '').trim();
-const AMS = { timeZone: 'Europe/Amsterdam' };
-const when = (iso) => {
+// Her time zone (her profile settings); times in the chat are shown in it.
+const TIME_ZONES = [
+  ['America/New_York', 'US East (New York)'], ['America/Chicago', 'US Central (Chicago)'], ['America/Denver', 'US Mountain (Denver)'],
+  ['America/Los_Angeles', 'US West (Los Angeles)'], ['Europe/London', 'UK (London)'], ['Europe/Berlin', 'Central Europe (Berlin)'],
+  ['Australia/Sydney', 'Australia East (Sydney)'],
+];
+const DEFAULT_TZ = 'America/New_York';
+const when = (iso, timeZone = DEFAULT_TZ) => {
   const d = new Date(iso);
-  return `${d.toLocaleDateString('en-GB', { ...AMS, weekday: 'short', day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('en-GB', { ...AMS, hour: '2-digit', minute: '2-digit' })}`;
+  const tz = { timeZone };
+  return `${d.toLocaleDateString('en-GB', { ...tz, weekday: 'short', day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('en-GB', { ...tz, hour: '2-digit', minute: '2-digit' })}`;
 };
 
 // Her profile as the writer reads it.
@@ -79,31 +95,30 @@ function profileText(p = {}) {
   return lines.join('\n');
 }
 
-function systemText(profile, examples = []) {
+function systemText(profile) {
   const name = clean(profile?.name) || 'the creator';
   return [
     `You write chat replies as ${name}, an AI character on Fanvue, a subscription site for adults. Every fan is a verified adult who subscribes to you.`,
     `# Who you are\n${profileText(profile) || `Your name is ${name}.`}`,
-    examples.length ? `# How you really text\nReal messages you sent to fans. Copy this style (length, words, emojis), not the words themselves:\n${examples.map(e => `- ${clean(e).replace(/\s+/g, ' ')}`).join('\n')}` : '',
     `# House rules (always, no exceptions)\n${HOUSE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
     `# How you chat\n${CHAT_GUIDE.map(r => `- ${r}`).join('\n')}`,
     `# Your game plan (what works best, from the agency's analysed chats)\n${GAME_PLAN.map(r => `- ${r}`).join('\n')}`,
     '# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], "learned": ["..."], "handover": ""}\n'
-      + '- messages: what you send him now. Usually ONE short message of about 10 words, like her real chats (her chatters sent a single message 83% of the time). Two only when the second really adds something; three is rare.\n'
+      + '- messages: what you send him now. Usually ONE short message (under 15 words). Two only when the second really adds something; three is rare.\n'
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- handover: empty, or a short reason when a person should take over this chat.',
   ].filter(Boolean).join('\n\n');
 }
 
-// One chat line: "[Mon 13 Oct 21:04] Him: …".
-function chatLine(m) {
+// One chat line: "[Mon 13 Oct 21:04] Him: …" (times in her time zone).
+function chatLine(m, timeZone = DEFAULT_TZ) {
   const who = m.from_fan ? 'Him' : m.mass ? 'You (mass message to all fans)' : 'You';
   const note = mediaNote(m);
-  return `[${m.at ? when(m.at) : 'just now'}] ${who}: ${clean(m.text) || emptyBody(m)}${note ? ` [${note}]` : ''}`;
+  return `[${m.at ? when(m.at, timeZone) : 'just now'}] ${who}: ${clean(m.text) || emptyBody(m)}${note ? ` [${note}]` : ''}`;
 }
 
 const kindLabel = { about: 'About him', likes: 'What he likes', avoid: 'Avoid', promise: 'What you promised him', her: 'What you told him about yourself' };
-function cardText(card = [], money = null) {
+function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
   const out = [];
   for (const kind of FACT_KINDS) {
     const facts = card.filter(f => f.kind === kind && clean(f.text));
@@ -114,7 +129,7 @@ function cardText(card = [], money = null) {
     const bits = [`spent $${money.spent} in total`];
     if (money.paid_messages) bits.push(`${money.paid_messages} paid message${money.paid_messages === 1 ? '' : 's'}`);
     if (money.tips) bits.push(`${money.tips} tip${money.tips === 1 ? '' : 's'}`);
-    if (money.last_purchase) bits.push(`last purchase ${when(money.last_purchase)}`);
+    if (money.last_purchase) bits.push(`last purchase ${when(money.last_purchase, timeZone)}`);
     out.push(`Spending (Fanvue's numbers): ${bits.join(', ')}.`);
   }
   return out.join('\n');
@@ -123,26 +138,45 @@ function cardText(card = [], money = null) {
 /**
  * The messages for one reply. `fan` = { name }, `card` = facts, `money`, `story`,
  * `chat` = messages oldest first ({ at, from_fan, text, mass, paid, tip, gif }),
- * `notes` = the safety screen's notes for this moment, `now` = Date.
+ * `notes` = the safety screen's notes for this moment, `library` = examples from
+ * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
+ * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, examples = [], fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', proven = [], now = new Date(), retry = null }) {
-  const parts = [`Now: ${when(now.toISOString())} (Amsterdam time).`];
-  const about = cardText(card, money);
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null }) {
+  const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time).`];
+  const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
   if (clean(story)) parts.push(`# Your story with him so far\n${clean(story)}`);
-  parts.push(`# The chat, oldest first\n${chat.length ? chat.map(chatLine).join('\n') : '(No messages yet: this is the start of your chat.)'}`);
-  if (proven.length) {
-    const one = (g) => `Him: ${g.fan_said.map(clean).join(' / ')}\nYou: ${g.answer.map(clean).join(' / ')}`;
-    parts.push(`# Answers that worked with paying fans in moments like this (each was followed by a purchase within a day). See what they do; don't copy the words\n${proven.map(one).join('\n\n')}`);
+  parts.push(`# The chat, oldest first\n${chat.length ? chat.map(m => chatLine(m, timeZone)).join('\n') : '(No messages yet: this is the start of your chat.)'}`);
+  if (library.length) {
+    const one = (x) => `- ${clean(x.moment)}\n  Him: ${clean(x.him)}\n  Her: ${x.reply.map(clean).join(' / ')}`;
+    parts.push(`# How good chatters handled moments like this\nReal replies from the agency's chats that went well. Learn what they do (how they answer him, the tone, the length); don't copy the words.\n${library.map(one).join('\n')}`);
   }
   if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
-  const now_ = [...notes];
+  const now_ = [];
+  if (level) {
+    now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);
+    if (level.pulled_back) now_.push('He is slowing things down: ease off, laugh it off if it fits, and go back to normal, friendly talk.');
+  }
+  now_.push(...notes);
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
   return [
-    { role: 'system', content: systemText(profile, examples) },
+    { role: 'system', content: systemText(profile) },
     { role: 'user', content: parts.join('\n\n') },
   ];
+}
+
+/**
+ * How sexual her reply may get: at his level, one step more when she's "hot" or
+ * he's past the warm-up, never above what her profile allows (mild 2, medium 3
+ * only when he is explicit, hot 3), and not ahead of him in the warm-up.
+ */
+function maxLevel({ his = 0, heat = '', warm = false }) {
+  const kind = /\b(mild|medium|hot)\b/i.exec(String(heat))?.[1]?.toLowerCase() || 'medium';   // the first one named
+  const cap = kind === 'hot' ? 3 : kind === 'mild' ? 2 : (his >= 3 ? 3 : 2);
+  const step = warm ? 1 : 0;
+  return Math.max(0, Math.min(cap, his + step));
 }
 
 /**
@@ -200,21 +234,19 @@ function generatePrompt({ input, own = [] }) {
         `The manager's notes: ${clean(g.description)}`,
         [
           opt('Name', g.name, 'choose a fitting first name'), `Gender: ${g.gender}`, `Age: ${g.age}`, `Sexuality: ${g.orientation}`,
-          `Vibe: ${g.vibes.join(', ')}`, `How spicy: ${g.heat}`, `Texting style: ${g.style}`,
+          `Vibe: ${g.vibes.join(', ')}`, `How spicy: ${g.heat}`,
           opt('Where she lives', g.from, 'choose somewhere that fits'), opt('Interests', g.interests, 'choose some that fit'),
           opt('Pet names she uses for fans', g.pet_names, 'choose some that fit the vibe'), opt('Her limits', g.limits, 'none given'),
         ].join('\n'),
-        own.length ? `Things she has already written to fans. Stay consistent with any facts about herself in them:\n${own.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '',
-        own.length ? styleStats(own) : '',
+        own.length ? `Things she has already written to fans. Stay consistent with any facts about herself in them (only the facts, not how they are written):\n${own.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '',
         'Leave out anything about selling, prices, tips or unlocking content: she doesn\'t sell for now.',
         'Write her profile, about her (she/her, or the pronouns that fit the gender). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
-          + '{"name": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
+          + '{"name": "", "from": "", "about": "", "personality": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
           + '- name: the name given, or a fitting first name.\n'
           + '- from: where she lives.\n'
-          + '- about: her story in 3 to 5 sentences: who she is, her daily life, what she is like with fans.\n'
-          + '- personality: 4 to 6 traits that fit the vibe, each with how it shows in a chat.\n'
-          + '- style: exactly how she texts: message length, which emojis and how often, capitals, punctuation, slang, the pet names, how she opens and keeps a chat going. Specific enough to copy.\n'
-          + '- likes: hobbies and interests, and what she enjoys when flirting, in plain neutral words.\n'
+          + '- about: her story in 3 to 5 sentences: who she is, her daily life, what she does for fun. A person first, not a flirt.\n'
+          + '- personality: 4 to 6 traits that fit the vibe, each with how it shows in a chat (her sense of humour too).\n'
+          + '- likes: hobbies, interests and things she could talk about for hours; then, briefly and in plain neutral words, what she enjoys when flirting.\n'
           + '- limits: what she won\'t do or talk about, including the limits given.\n'
           + '- facts: 6 to 10 concrete details of her life to keep consistent (pets, job, places, favourite things), each under 15 words. '
           + 'She can\'t send photos, videos or voice notes in the chat, so give her no habits about sending them.\n'
@@ -224,24 +256,17 @@ function generatePrompt({ input, own = [] }) {
   ];
 }
 
-// How her real messages measure, so a drafted style matches them.
-const EMOJI_TEST = /\p{Extended_Pictographic}/u;
-function styleStats(texts) {
-  const list = texts.map(clean).filter(Boolean);
-  if (!list.length) return '';
-  const pct = (f) => `${Math.round((100 * list.filter(f).length) / list.length)}%`;
-  const words = list.map(t => t.split(/\s+/).length).sort((a, b) => a - b);
-  return `How her ${list.length} messages measure: half are ${words[Math.floor(words.length / 2)]} words or fewer; ${pct(t => EMOJI_TEST.test(t))} have an emoji; `
-    + `${pct(t => /^[a-z]/.test(t))} start with a small letter; ${pct(t => t.includes('?'))} ask a question. Describe her style so it matches these numbers.`;
-}
-
-/** Draft her profile from her own past messages (strings), mass and welcome messages. */
+/**
+ * What she has told fans about herself in her past chats (her name, age, where she
+ * lives, her height, pets…), so she stays consistent with fans who know her. Only
+ * facts: her chats aren't a model for how she chats.
+ */
 function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
   const block = (title, list) => (list.length ? `${title}:\n${list.map(t => `- ${clean(t).replace(/\s+/g, ' ')}`).join('\n')}` : '');
   return [
     {
       role: 'system',
-      content: 'You help set up an AI character from a creator account\'s past chats on Fanvue, a subscription site for adults. The account is an AI creator: the character is an AI and says so if asked. Describe her as she comes across in her messages. Never invent anything that isn\'t there.',
+      content: 'You collect the facts a creator account has told fans about herself in its past chats on Fanvue, a subscription site for adults. The account is an AI creator. Only facts that are actually in the messages; never invent anything, and nothing about how she writes.',
     },
     {
       role: 'user',
@@ -250,20 +275,12 @@ function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
         block('Messages she wrote to fans one to one', own),
         block('Messages she sent to all fans at once', mass),
         block('Her welcome messages', welcome),
-        styleStats(own),
-        'Leave out anything about selling, prices, tips or unlocking content: she doesn\'t sell for now.',
-        'Write her profile, about her (she/her). Reply with JSON only. Every field is one plain text string, except facts, which is a list of short strings:\n'
-          + '{"name": "", "age": "", "from": "", "about": "", "personality": "", "style": "", "likes": "", "limits": "", "facts": [""], "real_answer": ""}\n'
+        'Reply with JSON only:\n'
+          + '{"name": "", "age": "", "from": "", "facts": [""]}\n'
           + '- name: what she calls herself.\n'
           + '- age: only if she says it and it is 18 or over; otherwise empty.\n'
           + '- from: where she says she lives or comes from; empty if never said.\n'
-          + '- about: her story in 2 to 4 sentences, from what she shares.\n'
-          + '- personality: 3 to 6 traits, with a word on how each shows.\n'
-          + '- style: how she writes: message length, which emojis and how often, capitals, punctuation, slang, pet names she uses for fans, how she opens and keeps a chat going. Be specific.\n'
-          + '- likes: what she talks about liking, in plain neutral words (flirting included, no explicit detail).\n'
-          + '- limits: things she avoids or refuses, if any show.\n'
-          + '- facts: details about herself she has told fans that must stay consistent (pets, job, hobbies, places), each under 15 words.\n'
-          + '- real_answer: one or two lines in her own style, admitting warmly that she is an AI character if a fan asks whether she is real.',
+          + '- facts: what she has told fans about herself that must stay the same with every fan (her height, looks she describes, pets, job, hobbies, places, favourite things), each under 15 words. If she said different things about the same fact, give the one she said most often. Nothing about selling, prices or content.',
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -275,15 +292,29 @@ function profilePrompt({ handle, own = [], mass = [], welcome = [] }) {
 const EMOJI = /\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier}|\u200D\p{Extended_Pictographic}\uFE0F?)*/gu;
 // How often a reply may carry an emoji (her profile's "Emojis" setting).
 const EMOJI_CHANCE = { none: 0, rarely: 0.25, sometimes: 0.5, often: 0.85 };
-function tidyMessages(list, { emojis = 'rarely' } = {}) {
+// Sexual emojis: only when it's explicit anyway (his level, "Right now"); the AI
+// otherwise puts 😈 on every other reply.
+const SEXY_EMOJI = /(?:😈|🥵|💦|👅|🍆|🍑|🤤|😩)\uFE0F?/gu;
+// The AI's favourite openers ("Hehe, …", "Mmm, …", "Hmm …"): dropped when asked.
+const HABIT_OPENER = /^\s*(?:he(?:he)+|m{2,}|hm+)\b[\s,.!…]*/i;
+function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = false } = {}) {
   let seen = Math.random() < (EMOJI_CHANCE[emojis] ?? EMOJI_CHANCE.rarely) ? 0 : 1;   // 1 = none this time
-  return list.map((m) => {
-    return String(m)
+  return list.map((m, i) => {
+    let t = String(m);
+    if (dropOpener && i === 0 && HABIT_OPENER.test(t)) {
+      const rest = t.replace(HABIT_OPENER, '');
+      if (rest.split(/\s+/).length >= 2) t = /^[A-Z]/.test(t) ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest;
+    }
+    return t
+      .replace(maxLevel < 3 ? SEXY_EMOJI : /(?!)/gu, '\u0000')
       .replace(/\*([^*\n]+)\*/g, '$1')
       .replace(/\s*[—–]\s*/g, ', ')
       .replace(/~+(\s+)(?=\p{Ll})/gu, ',$1')
       .replace(/~+/g, '')
-      .replace(EMOJI, e => (++seen > 1 ? '' : e))
+      .replace(EMOJI, e => (++seen > 1 ? '\u0000' : e))
+      // a removed emoji between two sentences ("Mike 😊 What…"): keep them apart
+      .replace(/([.!?])?\s*\u0000[\s\u0000]*(?=\p{Lu})/gu, (_, p) => `${p || '.'} `)
+      .replace(/\s*\u0000[\s\u0000]*/g, ' ')
       .replace(/,\s*([,.!?])/g, '$1')
       .replace(/^[,\s]+/, '')
       .replace(/\s+([,.!?])/g, '$1')
@@ -345,4 +376,4 @@ function readReply(text) {
   return { messages: lines, learned: [], handover: '', format_ok: false };
 }
 
-module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, replyPrompt, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, chatLine };
+module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, chatLine };

@@ -57,7 +57,11 @@ function pickPrompt({ chat, money }) {
         `Situations:\n${SITUATIONS.map(s => `${s.id}: ${s.title}`).join('\n')}`,
         `About this moment: ${momentFacts(chat, money)}`,
         `The last messages:\n${chat.filter(m => !m.mass).slice(-10).map(line).join('\n')}`,
-        'Which situations (at most 3) fit his latest message right now? Only ones that clearly fit. Reply with JSON only: {"ids": ["..."]}',
+        'Which situations (at most 3) fit his latest message right now? Only ones that clearly fit.\n'
+          + 'level: how sexual his latest message is: 0 = friendly, no flirting; 1 = flirty (compliments, light teasing); 2 = suggestive (hints, innuendo); 3 = explicit (sex acts or intimate body parts).\n'
+          + `mood: his mood right now, one of ${MOODS.join(', ')}.\n`
+          + 'pulled_back: true if he is slowing things down (says it\'s going fast, changes the subject away from sex, seems put off).\n'
+          + 'Reply with JSON only: {"ids": ["..."], "level": 0, "mood": "chatty", "pulled_back": false}',
       ].join('\n\n'),
     },
   ];
@@ -67,6 +71,13 @@ function pickPrompt({ chat, money }) {
 function readPick(json) {
   const ids = Array.isArray(json?.ids) ? json.ids : [];
   return [...new Set(ids.map(String))].filter(id => byId[id] && !byId[id].selling).slice(0, 3);
+}
+
+// His level (0 to 3), mood and whether he pulled back, from the picker's answer.
+const MOODS = ['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring', 'tired', 'sad', 'annoyed', 'brief'];
+function readMood(json) {
+  const level = Number.isInteger(json?.level) && json.level >= 0 && json.level <= 3 ? json.level : 0;
+  return { his: level, mood: MOODS.includes(json?.mood) ? json.mood : 'chatty', pulled_back: json?.pulled_back === true };
 }
 
 /** The guides for the picked situations, as the writer reads them. */
@@ -82,4 +93,4 @@ function situationGuide(ids) {
 
 const situationTitle = (id) => byId[id]?.title || id;
 
-module.exports = { GAME_PLAN, SITUATIONS, pickPrompt, readPick, situationGuide, situationTitle, momentFacts };
+module.exports = { GAME_PLAN, SITUATIONS, MOODS, pickPrompt, readPick, readMood, situationGuide, situationTitle, momentFacts };

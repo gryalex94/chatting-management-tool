@@ -1,6 +1,6 @@
 /**
- * OpenRouter: one account and key for many AI models (Mistral, Venice's
- * uncensored model, roleplay models…). The AI chat (utils/aiChat.js) uses it to
+ * OpenRouter: one account and key for many AI models (Mistral, roleplay
+ * models…). The AI chat (utils/aiChat.js) uses it to
  * write replies, keep each fan's memory and draft the creator's profile. Text in,
  * text out: it has no way to reach Fanvue. Models are only served by providers
  * that don't keep or train on what's sent.
@@ -17,19 +17,19 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const WRITERS = [
   { id: 'mistralai/mistral-large-2512', label: 'Mistral Large 3', price: [0.5, 1.5] },
   { id: 'mistralai/ministral-8b-2512', label: 'Ministral 8B (fits your PC)', price: [0.15, 0.15] },
-  { id: 'cognitivecomputations/dolphin-mistral-24b-venice-edition', label: 'Venice uncensored', price: [0.2, 0.9] },
   { id: 'thedrummer/cydonia-24b-v4.1', label: 'Cydonia 24B (roleplay)', price: [0.3, 0.5] },
   { id: 'sao10k/l3.1-euryale-70b', label: 'Euryale 70B (roleplay)', price: [0.85, 0.85] },
 ];
 // Mistral Large 3 writes best. On OpenRouter's shared capacity it was often busy,
 // so the agency's own Mistral key is connected in OpenRouter (19 Oct 2026); the
-// background jobs still fall back to Venice or Cydonia when it is.
+// background jobs still fall back to Euryale or Cydonia when it is.
 const DEFAULT_WRITER = WRITERS[0].id;
 // For work in the background (her profile, fan memory): when the chosen writer is
 // busy, OpenRouter moves on to these.
-const BACKUPS = ['cognitivecomputations/dolphin-mistral-24b-venice-edition', 'thedrummer/cydonia-24b-v4.1'];
+const BACKUPS = ['sao10k/l3.1-euryale-70b', 'thedrummer/cydonia-24b-v4.1'];   // Venice was dropped: a third of its blind-test replies made no sense
 const backupsFor = (model) => BACKUPS.filter(id => id !== model);
 const writerLabel = (id) => WRITERS.find(w => w.id === id)?.label || id;
+const isOffered = (id) => WRITERS.some(w => w.id === id);
 const isModelId = (id) => typeof id === 'string' && /^[a-z0-9][\w.-]*\/[\w.:-]+$/i.test(id) && id.length <= 100;
 
 // How long to wait before trying a busy writer again. OpenRouter shares each
@@ -87,4 +87,4 @@ async function chat({ model, messages, maxTokens = 600, temperature = 0.8, timeo
   }
 }
 
-module.exports = { configured, chat, WRITERS, DEFAULT_WRITER, writerLabel, isModelId, backupsFor };
+module.exports = { configured, chat, WRITERS, DEFAULT_WRITER, writerLabel, isModelId, isOffered, backupsFor };

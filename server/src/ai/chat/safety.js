@@ -75,6 +75,8 @@ const CONTACT = [
 const CLAIMS_HUMAN = /\b(?:i'?m|im|i\s+am)\s+(?:a\s+)?(?:real(?!ly)\b|human|not\s+(?:an?\s+)?(?:ai|a\.i\.|bot|robot|fake|program))|\bnot\s+(?:an?\s+)?(?:ai|a\.i\.|bot|robot)\b|\breal\s+(?:girl|woman|person|human)\b|\bflesh\s+and\s+blood\b/i;
 const SELLS = /\$\s?\d|\b\d+\s?(?:usd|dollars?|bucks|euros?)\b|\bppv\b|\bunlock\w*\b|\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips?\b|\bpay\s+(?:me|for)\b|\bbuy\s+(?:it|this|my|me)\b|\bvault\b|\b(?:content|ppv|surprise|pics?|videos?)\s+i\s+(?:sent|left|made)\b|\bopen(?:ed)?\s+(?:it|my|the|what)\s+(?:\w+\s+)?(?:content|surprise|pics?|videos?|message|i\s+sent)\b/i;
 const PROMISES_MEDIA = /\b(?:i'?ll|i\s+will|gonna|going\s+to|let\s+me|i\s+can|i'?m\s+(?:sending|recording))\s+(?:\w+\s+){0,3}?(?:send|show|record|film|shoot|snap)\b(?:\s+\w+){0,4}?\s+(?:pics?|pictures?|photos?|videos?|vids?|selfies?|clips?|voice\s+(?:notes?|messages?))\b|\b(?:here'?s|sending\s+you)\s+(?:a\s+)?(?:pic|picture|photo|video|selfie)\b/i;
+// Teasing content she can't send: "let me show you a little taste", "something spicy waiting for you".
+const PROMISES_CONTENT = /\b(?:show|send|give)\s+you\s+(?:just\s+)?(?:a\s+)?(?:little\s+|small\s+|quick\s+)?(?:taste|peek|preview|sneak\s+peek)\b|\b(?:something|some(?:thing)?s?|things?)\s+(?:\w+\s+){0,2}(?:waiting|ready)\s+for\s+you\b|\bwanna\s+see\s+(?:more|what\s+i'?m)\b/i;
 const MEETING = new RegExp(`\\b(?:${NOT_GREETING}meet(?:\\s+up|\\s+you|\\s+irl|\\s+in\\s+person)|come\\s+over|my\\s+place|your\\s+place|in\\s+person|irl|hotel|my\\s+address|grab\\s+(?:a\\s+)?(?:drink|coffee|dinner))\\b`, 'i');
 const MAX_MESSAGES = 3;
 const MAX_CHARS = 400;
@@ -87,7 +89,20 @@ const normText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
  */
 // The writer's answer format leaking into a message: {"messages": [" … "]}.
 const LOOKS_LIKE_CODE = /^\s*[{[]\s*"|"\s*[\]}]|"(?:messages|learned|handover)"|"\w+"\s*:\s*[[{"]/;
-function checkReply(messages, { recent = [] } = {}) {
+// Openers the AI leans on: greeting again mid-chat, and the same first word as her
+// last messages ("hehe… hehe… hehe…"). Repeated letters count as one (mmm = mm).
+const GREETS = /^\s*(?:he+y+|hi+|hello+)\b/i;
+const TICS = new Set(['hehe', 'haha', 'm', 'hm', 'aw', 'oh', 'ok', 'lol', 'well', 'so']);
+const firstWord = (t) => ((String(t).toLowerCase().match(/^[\p{L}]+/u) || [''])[0]).replace(/(.)\1+/g, '$1');
+
+// How sexual a reply is, roughly (0 friendly … 3 explicit), to hold it to his level.
+// Only suggestive and explicit are held in code; pet names like "babe" are just warmth.
+const EXPLICIT = /\b(?:cock|dick|pussy|cum(?:ming)?|fuck\w*|tits|clit|blowjob|deepthroat|orgasm|naked|nude|horny)\b|🍆|💦/i;
+const SUGGESTIVE = /\b(?:naughty|wet|hard for|strip\w*|undress\w*|lingerie|what i'?m wearing|in bed with|kinky|spicy|turn(?:s|ed)? (?:me|you) on|sexy|dirty)\b|😈|🥵|🍑|👅/i;
+const FLIRTY = /\b(?:cutie|handsome|gorgeous|tease|teasing|flirt\w*|kiss\w*|crush)\b|😘|😏|😉|😍/i;
+const replyLevel = (t) => (EXPLICIT.test(t) ? 3 : SUGGESTIVE.test(t) ? 2 : FLIRTY.test(t) ? 1 : 0);
+
+function checkReply(messages, { recent = [], chatting = false, maxLevel = 3 } = {}) {
   const list = (messages || []).map(m => String(m || '').trim()).filter(Boolean);
   if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'] };
   const all = list.join('\n');
@@ -96,10 +111,16 @@ function checkReply(messages, { recent = [] } = {}) {
   for (const [re, what] of CONTACT) if (re.test(all)) block.push(`It contains ${what}: she only chats on Fanvue.`);
   if (has(CLAIMS_HUMAN, all)) block.push('It says or suggests she is a real person. She is an AI character.');
   if (has(SELLS, all)) block.push('It sells, names a price or asks for a tip. Selling is off for now.');
-  if (has(PROMISES_MEDIA, all)) block.push('It promises a photo, video or voice note. She can\'t send any.');
+  if (has(PROMISES_MEDIA, all) || has(PROMISES_CONTENT, all)) block.push('It promises or teases a photo, video or content. She can\'t send any (and doesn\'t sell yet).');
   if (list.length > MAX_MESSAGES) block.push(`It has ${list.length} messages; the most is ${MAX_MESSAGES}.`);
   if (list.some(m => m.length > MAX_CHARS)) block.push('A message is too long for a chat.');
   if (list.some(m => LOOKS_LIKE_CODE.test(m))) block.push('It came out as code (brackets, quotes or "messages"), not a chat message.');
+  if (chatting && GREETS.test(list[0])) block.push('It greets him again, but you are already chatting.');
+  const opener = firstWord(list[0]);
+  if (TICS.has(opener) && recent.slice(-3).some(r => firstWord(r) === opener)) {
+    block.push(`It starts with "${list[0].split(/\s|,/)[0]}" again, like your last messages: start differently.`);
+  }
+  if (replyLevel(all) >= 2 && replyLevel(all) > maxLevel) block.push(`It is more sexual than he is right now: keep it ${['friendly, no flirting', 'flirty at most, nothing sexual', 'suggestive at most, nothing explicit'][maxLevel]}.`);
   const seen = new Set(recent.map(normText).filter(t => t.length >= 12));
   if (list.some(m => seen.has(normText(m)))) block.push('It repeats something she already sent him.');
   if (has(MEETING, all)) review.push('It talks about meeting in person.');
@@ -119,4 +140,4 @@ function personaProblems(text) {
     : [];
 }
 
-module.exports = { screenFan, checkReply, personaProblems, MAX_MESSAGES };
+module.exports = { screenFan, checkReply, personaProblems, replyLevel, MAX_MESSAGES };

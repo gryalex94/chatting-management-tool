@@ -76,13 +76,26 @@ async function reviewReply({ fanTexts = [], messages = [], flags = [] }) {
 
 /**
  * The blind test: which of the replies to the same moment (A, B and maybe C) is
- * best? It isn't told who wrote any of them. `fan` = what was known about him
- * then. Returns { better: 'A' | 'B' | 'C' | 'tie' | 'none', reason, declined, usage }.
+ * best? It isn't told who wrote any of them. It judges by what the agency's
+ * analysis of ~35k chats found works, and its list of costly mistakes; not by
+ * how her old chats sounded. `fan` = what was known about him then.
+ * Returns { better: 'A' | 'B' | 'C' | 'tie' | 'none', reason, declined, usage }.
  */
+const MISTAKES = [
+  'ignores what he said or asked, or answers something else',
+  'robotic, generic or scripted; could be sent to anyone',
+  'more sexual than he is, or explicit too soon (teasing beats describing)',
+  'pushy, needy or selling (prices, PPVs, "did you open what I sent")',
+  'repeats itself or her earlier lines; the same opener again ("heyy", "hehe", "mmm")',
+  'makes things up (a name he never gave, shared history, facts about him)',
+  'doesn\'t make sense in the chat, or is awkwardly worded',
+  'greets him again mid-chat, or ignores a joke he made',
+  'claims to be a real person, agrees to meet, or shares contact details',
+];
 async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) {
   const letters = ['A', 'B', 'C'].slice(0, options.length);
   const said = (list) => list.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n');
-  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.style && `how she texts: ${String(profile.style).slice(0, 300)}`].filter(Boolean).join('; ');
+  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`].filter(Boolean).join('; ');
   const him = fan ? `About him then: ${fan.standing_text ? `${fan.standing_text} ` : ''}${fan.spent_before ? `He had spent $${fan.spent_before} with her` : 'He had not spent anything yet'}; ${fan.messages_before} messages in the chat so far.\n\n` : '';
   const line = (m) => {
     const note = mediaNote(m);
@@ -94,9 +107,10 @@ async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) 
     `The creator: ${who || 'unknown'}\n\n${him}`
       + `The chat so far (oldest first):\n${chat.map(line).join('\n')}\n\n`
       + letters.map((l, i) => `Reply ${l}:\n${said(options[i])}`).join('\n\n') + '\n\n'
-      + 'Which reply is most likely to keep him engaged and wanting more, so he keeps chatting and spending? It should answer what he said, sound like a real person texting, fit her and the moment, and not be repetitive, needy or pushy. '
-      + 'Length is not quality: a short, natural reply is often the best one in a chat. A reply that claims to be human, agrees to meet or shares contact details loses. '
-      + `Answer ${letters.join(', ')}; "tie" if the best ones are about equally good; "none" if none of them is good. Give the reason in one short sentence.`,
+      + 'Judge like the agency\'s best chatter would. The best reply answers what he actually said, sounds like a real girl texting (natural, specific to him, building on his words), matches his mood and how sexual he is (at most a small step further, and only once they are past the warm-up), and keeps the chat going without pushing.\n'
+      + `Costly mistakes (from the analysis of ~35k chats):\n${MISTAKES.map(x => `- ${x}`).join('\n')}\n`
+      + 'A reply with a costly mistake loses to one without. Length is not quality, and flirting is not automatically better: a friendly, fitting answer beats a flirty one that ignores him. '
+      + `Answer ${letters.join(', ')}; "tie" if the best ones are about equally good; "none" if every reply has a costly mistake. Give the reason in one short sentence, naming the mistake if there is one.`,
     DUEL_SCHEMA, 'medium');
   if (r.declined) return { declined: true, better: null, reason: 'Claude declined to judge this one.', usage: r.usage };
   return { better: r.answer.better, reason: String(r.answer.reason || ''), usage: r.usage };

@@ -28,20 +28,33 @@ function Bubble({ fromFan, children, meta, tone }) {
         fromFan ? 'rounded-bl-sm bg-muted' : 'rounded-br-sm bg-primary text-primary-foreground', tone)}>
         {children}
       </div>
-      {meta && <span className='px-1 text-[11px] text-muted-foreground'>{meta}</span>}
+      {meta && <span className={cn('max-w-[85%] whitespace-pre-line px-1 text-[11px] text-muted-foreground', !fromFan && 'text-right')}>{meta}</span>}
     </div>
   );
 }
 
-// What the AI read for a reply: "40 of 1,946 messages, the story so far, 12 notes about him, his spending".
+// What the AI read for a reply: "40 of 1,946 messages, the story so far, 12 notes about him, his spending",
+// how sexual he was and how far she could go, and how many examples from good chats it had.
+const LEVEL = ['friendly', 'flirty', 'suggestive', 'explicit'];
 const readLine = (u) => {
   if (!u) return '';
   const bits = [u.long ? `the last ${u.messages} of ${u.of.toLocaleString()} messages` : `the whole chat (${u.of} messages)`];
   if (u.story) bits.push('the story so far');
   if (u.facts) bits.push(`${u.facts} note${u.facts === 1 ? '' : 's'} about him`);
   if (u.money) bits.push('his spending');
-  return `The AI read ${bits.join(', ')}.`;
+  const level = u.level ? ` He seemed ${u.level.mood}, ${LEVEL[u.level.his]}${u.level.pulled_back ? ' and slowing down' : ''}: she could go up to ${LEVEL[u.level.max]}.` : '';
+  const examples = u.examples ? ` ${u.examples} examples from the agency's good chats.` : '';
+  return `The AI read ${bits.join(', ')}.${level}${examples}`;
 };
+// Under a kept reply: which writer, the checks, the cost, what it would remember.
+const keptNote = (result, used) => [
+  `kept · ${result.label}`, STATUS[result.status]?.label?.toLowerCase(), cost(result.cost),
+  result.learned?.length ? `would remember: ${result.learned.map(l => l.note).join(' · ')}` : null,
+].filter(Boolean).join(' · ') + (used ? `\n${readLine(used)}` : '');
+// Her reply as messages in the practice chat; the details go under the last one.
+const keptMessages = (result, used) => result.replies.map((r, i, all) => ({
+  from: 'her', text: r.creator_message, label: result.label, note: i === all.length - 1 ? keptNote(result, used) : null,
+}));
 
 // When each of her messages starts and finishes being typed, counted from when he
 // wrote (`startAt`); played back as it would happen, unless skipped.
@@ -215,7 +228,7 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
     if (last && !last.kept && last.at === test.length) {
       const first = (last.results || []).find(r => ['ok', 'check'].includes(r.status) && r.replies.length);
       if (first) {
-        next = [...next, ...first.replies.map(r => ({ from: 'her', text: r.creator_message, label: first.label }))];
+        next = [...next, ...keptMessages(first, last.used)];
         setRounds(rs => rs.map(r => (r === last ? { ...r, kept: first.model } : r)));
       }
     }
@@ -225,14 +238,15 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
     ask(next);
   };
   const keep = (round, result) => {
-    setTest(t => [...t, ...result.replies.map(r => ({ from: 'her', text: r.creator_message, label: result.label }))]);
+    setTest(t => [...t, ...keptMessages(result, round.used)]);
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
   };
   // keep the newest message in view while her messages arrive one by one
   const toBottom = useCallback(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, []);
   const toggleModel = (id) => setModels(m => (m.includes(id) ? (m.length > 1 ? m.filter(x => x !== id) : m) : m.length < 3 ? [...m, id] : m));
 
-  const roundsAt = (n) => rounds.filter(r => r.at === n).map((round, i) => (
+  // a kept reply shows once, as her message in the chat (details under it), so its card goes
+  const roundsAt = (n) => rounds.filter(r => r.at === n && !r.kept).map((round, i) => (
     <div key={`r${n}-${i}`} className='flex flex-col gap-2'>
       {round.screen && ['stop', 'handover'].includes(round.screen.action) ? <Stopped screen={round.screen} /> : (
         <>
@@ -323,7 +337,7 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
           {roundsAt(0)}
           {test.map((m, i) => (
             <div key={`t${i}`} className='flex flex-col gap-2'>
-              <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : `kept · ${m.label || 'AI'}`}>{m.text}</Bubble>
+              <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}>{m.text}</Bubble>
               {roundsAt(i + 1)}
             </div>
           ))}

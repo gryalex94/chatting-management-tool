@@ -26,7 +26,6 @@ function startFrom(current, o) {
     description: '', name: current.name || '', from: current.from || '', interests: '', pet_names: '', limits: '',
     gender: pick(current.gender, o.genders, o.genders[0]),
     orientation: pick(current.orientation, o.orientations, o.orientations[0]),
-    style: o.styles[1],
     vibes: String(current.vibe || '').split(',').map(v => v.trim()).filter(v => o.vibes.includes(v)).slice(0, MAX_VIBES),
     heat: (o.heats.find(h => String(current.heat || '').startsWith(h.label)) || o.heats[1]).id,
     age: age >= 18 ? String(age) : '23',
@@ -36,7 +35,7 @@ function startFrom(current, o) {
 
 /**
  * "Generate from a description": a few words about her plus the essentials
- * (gender, age, sexuality, vibe, how spicy, texting style), and the AI writes her
+ * (gender, age, sexuality, vibe, how spicy), and the AI writes her
  * whole profile into the form. Nothing is saved until the manager presses Save.
  */
 export default function GenerateDialog({ page, options, current, onClose, onGenerated }) {
@@ -107,7 +106,6 @@ export default function GenerateDialog({ page, options, current, onClose, onGene
               <Err text={errors.age} />
             </div>
             {choice('orientation', options.orientations, 'Sexuality')}
-            {choice('style', options.styles, 'Texting style')}
             <div className='grid content-start gap-1.5'>
               <Label htmlFor='gen-from'>Where she lives</Label>
               <Input id='gen-from' value={g.from} onChange={set('from')} placeholder='The AI picks' />

@@ -29,15 +29,15 @@ router.get('/usage', async (req, res) => {
   try { res.json(await A.usage(org(req))); } catch (e) { fail(res, e, 'load the AI costs'); }
 });
 
-// GET/PUT /api/ai-chat/pages/:creatorId/profile — her profile { profile, writer, typing, emojis, drafted }.
+// GET/PUT /api/ai-chat/pages/:creatorId/profile — her profile { profile, writer, typing, emojis, timezone, drafted }.
 router.get('/pages/:creatorId/profile', async (req, res) => {
   try { res.json(await A.getProfile(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her profile'); }
 });
 router.put('/pages/:creatorId/profile', async (req, res) => {
   try {
-    const { profile, writer, typing, emojis, drafted } = req.body || {};
+    const { profile, writer, typing, emojis, timezone, drafted } = req.body || {};
     if (!profile || typeof profile !== 'object') return res.status(400).json({ error: 'Fill in her profile' });
-    res.json(await A.saveProfile(org(req), req.params.creatorId, { profile, writer, typing, emojis, drafted: !!drafted }, req.user.id));
+    res.json(await A.saveProfile(org(req), req.params.creatorId, { profile, writer, typing, emojis, timezone, drafted: !!drafted }, req.user.id));
   } catch (e) { fail(res, e, 'save her profile'); }
 });
 

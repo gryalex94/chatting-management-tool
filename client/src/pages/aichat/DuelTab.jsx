@@ -90,11 +90,12 @@ function Context({ duel }) {
  * The blind test: real moments from her chats (mostly with fans who pay) where a
  * chatter answered a fan, with two AI writers' answers to the same moment, shown
  * as A, B and C. The manager picks the best one, or none, without knowing who
- * wrote which; Claude judges them too. Her chatters' answers that were followed
- * by a purchase are the gold standard ("proven answers"); the AI learns from them.
+ * wrote which; Claude judges them too, by the mistakes the agency's analysis of
+ * ~35k chats found costly. Her chatters are the baseline to beat: her Fanvue chats
+ * weren't good chatting, so the AI learns from the agency's good chats instead.
  */
 export default function DuelTab({ page, ready, onSpent }) {
-  const [ov, setOv] = useState(null);                 // { ready, v2, proven_answers, batches, job }
+  const [ov, setOv] = useState(null);                 // { ready, v2, examples, batches, job }
   const [batch, setBatch] = useState(null);
   const [view, setView] = useState('judge');
   const [duel, setDuel] = useState(null);             // the moment being judged
@@ -150,7 +151,7 @@ export default function DuelTab({ page, ready, onSpent }) {
     return (
       <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm'>
         <CircleAlert className='mt-0.5 size-4 shrink-0 text-warn' />
-        <span>Run database change {ov.ready ? '038 (proven answers)' : '037 (AI blind test), then 038'} in Supabase first.</span>
+        <span>Run database change {ov.ready ? '038 (three answers per moment)' : '037 (AI blind test), then 038'} in Supabase first.</span>
       </div>
     );
   }
@@ -165,8 +166,8 @@ export default function DuelTab({ page, ready, onSpent }) {
           <span>
             Real moments from her chats, mostly with fans who pay. For each: her chatter&apos;s real answer and two AI answers to the same
             moment, as A, B and C. Pick the best one, or none, without knowing who wrote which; Claude judges them too.
-            Her chatters&apos; answers that were followed by a purchase are the gold standard ({ov.proven_answers ? `${ov.proven_answers} proven answers` : 'built when a test starts'});
-            the AI learns from them. About $0.20 per 100 moments.
+            Her chatters are the baseline to beat; the AI learns from the agency&apos;s good chats instead
+            ({ov.examples ? `${ov.examples.toLocaleString()} examples` : 'examples not loaded yet'}). About $0.20 per 100 moments.
           </span>
         </div>
         <div className='flex items-end gap-2'>
@@ -183,9 +184,9 @@ export default function DuelTab({ page, ready, onSpent }) {
       {job?.running && (
         <p className='flex items-center gap-2 text-sm text-muted-foreground'>
           <Loader2 className='size-4 animate-spin' />
-          {job.phase === 'gold'
-            ? `Collecting proven answers: ${job.gold_done} of ${job.gold_total || '…'}`
-            : `${job.writers?.join(' and ') || 'The AI'} answering the moments: ${job.done} of ${job.total} (${cost(job.cost)} so far). You can start judging as they come in.`}
+          {job.total
+            ? `${job.writers?.join(' and ') || 'The AI'} answering the moments: ${job.done} of ${job.total} (${cost(job.cost)} so far). You can start judging as they come in.`
+            : 'Finding moments in her chats…'}
         </p>
       )}
       {job && !job.running && job.last_error && <p className='text-sm text-warn'>{job.failed ? `${job.failed} moment${job.failed === 1 ? '' : 's'} couldn't be answered: ` : ''}{job.last_error}</p>}
@@ -253,14 +254,14 @@ export default function DuelTab({ page, ready, onSpent }) {
               </div>
               <div className='grid gap-3 lg:grid-cols-2'>
                 <div className='flex flex-col gap-1 rounded-lg border p-4 text-sm'>
-                  <span className='font-medium'>Against the gold standard</span>
+                  <span className='font-medium'>Where her chatter sold</span>
                   {res.proven.n ? (
                     <>
                       <span className='text-xs text-muted-foreground'>{moments(res.proven.n)} where her chatter&apos;s answer was followed by a purchase within a day.</span>
-                      <span>You picked an AI answer over that proven answer in {pct(res.proven.you.ai + res.proven.you.ai2, res.proven.you.n)} of them ({res.proven.you.n} judged).</span>
+                      <span>You picked an AI answer over her chatter&apos;s in {pct(res.proven.you.ai + res.proven.you.ai2, res.proven.you.n)} of them ({res.proven.you.n} judged).</span>
                       <span>Claude: {pct(res.proven.claude.ai + res.proven.claude.ai2, res.proven.claude.n)}.</span>
                     </>
-                  ) : <span className='text-xs text-muted-foreground'>No proven moments in this test (tests from before proven answers don&apos;t have them).</span>}
+                  ) : <span className='text-xs text-muted-foreground'>No moments followed by a purchase in this test.</span>}
                 </div>
                 <div className='flex flex-col gap-1 rounded-lg border p-4 text-xs text-muted-foreground'>
                   <span className='text-sm text-foreground'>Reality check on Claude</span>
@@ -292,7 +293,7 @@ export default function DuelTab({ page, ready, onSpent }) {
                   <div key={d.id} className='flex flex-col gap-2 rounded-lg border p-3'>
                     <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
                       <span>{dayTime(d.moment_at)}</span>
-                      {d.proven && <Badge variant='outline' className='border-good/40 font-normal text-good'>proven: a purchase followed</Badge>}
+                      {d.proven && <Badge variant='outline' className='border-good/40 font-normal text-good'>a purchase followed</Badge>}
                       {d.fan_context.spent_before != null && <span>{d.fan_context.spent_before ? `he had spent ${dollars(d.fan_context.spent_before)}` : 'no spending yet'}</span>}
                       {d.fan_context.standing && <span>{d.fan_context.standing}</span>}
                       {d.situations.map(t => <Badge key={t} variant='outline' className='font-normal'>{t}</Badge>)}

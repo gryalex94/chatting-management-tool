@@ -1,20 +1,19 @@
 /**
  * The AI chat's blind test (database changes 037 and 038): does the AI beat her
  * chatters, especially where the money is?
- *  - Proven answers (ai_gold): what her chatters answered in moments that were
- *    followed by a purchase within a day. They are the gold standard, and the AI
- *    learns from them (utils/aiChat.js → provenExamples). Built at the start of a
- *    test, each tagged with its Playbook situations.
  *  - Moments: a fan wrote and her chatter typed the answer within the hour (not
  *    Fanvue's AI writer, nothing paid or about prices, nothing the safety screen
  *    would stop). About 80% come from chats with fans who paid, half of those
- *    from proven moments.
+ *    moments followed by a purchase within a day ("sold" moments).
+ *  - Her chatters are the baseline to beat, not the standard: her Fanvue chats
+ *    weren't good chatting. The AI learns from the agency's analysis of ~35k
+ *    chats instead (the Playbook and the example library, utils/aiChat.js).
  *  - For each moment two AI writers answer from what her chatter knew then: the
  *    chat up to that moment (mass messages, photos and PPVs with whether he had
  *    bought them yet), what he had spent and whether he was subscribed. No fan
- *    notes: they were built from later messages; no proven answers from the same
- *    fan. The three answers are shown as A, B and C in random order. A manager
- *    picks the best (or none) without knowing who wrote which; Claude does too.
+ *    notes: they were built from later messages. The three answers are shown as
+ *    A, B and C in random order. A manager picks the best (or none) without
+ *    knowing who wrote which; Claude does too, by the analysis's list of mistakes.
  */
 const { supabaseAdmin } = require('./supabase');
 const A = require('./aiChat');
@@ -35,7 +34,7 @@ const OUTCOME_WITHIN = 24 * 3600_000;     // he wrote back / bought within a day
 const PER_PAYING_FAN = 8;                // moments per fan, at most: few fans pay, so more of theirs
 const PER_FAN = 3;
 const PAYING_SHARE = 0.8;                 // of the moments, from chats with fans who paid
-const VENICE = 'cognitivecomputations/dolphin-mistral-24b-venice-edition';
+const SECOND = 'thedrummer/cydonia-24b-v4.1';           // the second writer to compare with (Venice made no sense; Euryale was flat)
 const MISTRAL = 'mistralai/mistral-large-2512';
 const LETTERS = ['A', 'B', 'C'];
 const MASS_LABEL = {
@@ -134,51 +133,14 @@ function sample(pool, n) {
   return shuffle([...proven, ...otherPaying, ...rest, ...extra]);
 }
 
-// The fan's own name words (to keep proven answers that name him out of the library).
-async function fanNames(accountId) {
-  const people = await E.all(() => supabaseAdmin.from('fanvue_fans').select('fan_uuid, handle, display_name, nickname').eq('account_id', accountId).order('fan_uuid'));
-  return Object.fromEntries(people.map(p => [p.fan_uuid, new Set([p.handle, p.display_name, p.nickname]
-    .flatMap(v => String(v || '').toLowerCase().split(/\s+/)).filter(w => w.length >= 3))]));
-}
-const namesHim = (set, texts) => texts.join(' ').toLowerCase().split(/[^\p{L}\p{N}_.-]+/u).some(w => set?.has(w));
-
-/** Add the proven moments that aren't in the library yet, each tagged with its situations. */
-async function buildGold(orgId, creatorId, accountId, pool, job) {
-  const { data: have, error } = await supabaseAdmin.from('ai_gold').select('fan_uuid, moment_at').eq('account_id', accountId).limit(5000);
-  if (error) throw new A.AiChatError(tableMissing(error, 'ai_gold') ? NOT_READY_V2 : error.message, 409);
-  const done = new Set(have.map(g => `${g.fan_uuid}|${iso(g.moment_at)}`));
-  const who = await fanNames(accountId);
-  const todo = pool.filter(m => m.outcome.bought && m.outcome.replied && !done.has(`${m.fan_uuid}|${iso(m.at)}`) && !namesHim(who[m.fan_uuid], [...m.human, ...m.latest]));
-  job.gold_total = todo.length;
-  const queue = [...todo];
-  const worker = async () => {
-    while (queue.length) {
-      const m = queue.shift();
-      try {
-        const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, E.windowFor(E.asOf(m.context, m.at)).messages, m.money);
-        job.cost += plan.cost;
-        const { error: e } = await supabaseAdmin.from('ai_gold').upsert({
-          account_id: accountId, organisation_id: orgId, fan_uuid: m.fan_uuid, moment_at: m.at,
-          fan_said: m.latest, answer: m.human, situations: plan.ids, outcome: m.outcome,
-        }, { onConflict: 'account_id,fan_uuid,moment_at' });
-        if (e) throw new Error(e.message);
-      } catch (e) { console.error('[ai-duels] proven answer:', e.message); }
-      finally { job.gold_done += 1; }
-    }
-  };
-  await Promise.all([worker(), worker(), worker(), worker()]);
-  E.forgetGold(accountId);
-}
-
 // One moment: two AI answers, Claude's blind vote, saved. Returns what it cost.
-async function oneDuel({ orgId, creatorId, accountId, persona, examples, writers, batch, m }) {
+async function oneDuel({ orgId, creatorId, accountId, persona, writers, batch, m }) {
   const chat = E.asOf(m.context, m.at);          // what he had bought by then, not later
   const win = E.windowFor(chat);
-  const plan = await E.pickSituations(orgId, creatorId, m.fan_uuid, win.messages, m.money);
-  const proven = await E.provenExamples(accountId, plan.ids, { excludeFan: m.fan_uuid });
+  const { plan, level, library } = await E.briefing({ orgId, creatorId, fanUuid: m.fan_uuid, persona, chat: win.messages, money: m.money });
   const base = {
-    profile: persona.profile, examples, fan: {}, card: [], money: m.money, story: '', chat: win.messages,
-    notes: screenFan(m.latest).notes, situations: strategy.situationGuide(plan.ids), proven, now: new Date(m.at),
+    profile: persona.profile, fan: {}, card: [], money: m.money, story: '', chat: win.messages, notes: screenFan(m.latest).notes,
+    situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone, now: new Date(m.at),
   };
   const recentHer = chat.filter(x => !x.from_fan && !x.mass).slice(-8).map(x => x.text);
   const answers = await Promise.all(writers.map(model => E.writeOne({
@@ -194,7 +156,7 @@ async function oneDuel({ orgId, creatorId, accountId, persona, examples, writers
   ]);
   let vote = null, reason = null;
   try {
-    const j = await judgeDuel({ profile: persona.profile, chat: win.messages.slice(-16), options: options.map(o => o.text), fan: m.fan_context });
+    const j = await judgeDuel({ profile: persona.profile, chat: win.messages, options: options.map(o => o.text), fan: m.fan_context });
     cost += j.usage.cost;
     await E.logUsage(orgId, 'check', CHECK_MODEL, j.usage, { creatorId, fanUuid: m.fan_uuid });
     vote = j.declined ? null : j.better;
@@ -218,37 +180,30 @@ const duelJob = (creatorId) => jobs.get(creatorId) || null;
 async function startDuels(orgId, creatorId, count = 100) {
   if (jobs.get(creatorId)?.running) return jobs.get(creatorId);
   if (!or.configured()) throw new A.AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
-  const [d1, d2] = await Promise.all([
-    supabaseAdmin.from('ai_duels').select('id, options').limit(1),
-    supabaseAdmin.from('ai_gold').select('account_id').limit(1),
-  ]);
+  const d1 = await supabaseAdmin.from('ai_duels').select('id, options').limit(1);
   if (d1.error) throw new A.AiChatError(/options/.test(d1.error.message) ? NOT_READY_V2 : NOT_READY, 409);
-  if (d2.error) throw new A.AiChatError(NOT_READY_V2, 409);
   const { account } = await E.pageAccount(orgId, creatorId);
   const persona = await E.loadPersona(orgId, creatorId);
   if (!String(persona?.profile?.name || '').trim()) throw new A.AiChatError('Set up her profile first (Her profile)', 409);
-  const main = persona.settings?.writer || or.DEFAULT_WRITER;
-  const writers = [main, main === VENICE ? MISTRAL : VENICE];
+  const main = or.isOffered(persona.settings?.writer) ? persona.settings.writer : or.DEFAULT_WRITER;
+  const writers = [main, main === SECOND ? MISTRAL : SECOND];
   const batch = new Date().toISOString();
   const job = {
-    running: true, phase: 'gold', batch, total: 0, done: 0, failed: 0, gold_total: 0, gold_done: 0, cost: 0,
+    running: true, phase: 'answers', batch, total: 0, done: 0, failed: 0, cost: 0,
     writers: writers.map(or.writerLabel), last_error: null, finished_at: null,
   };
   jobs.set(creatorId, job);
   (async () => {
     try {
       const pool = await findMoments(account.id);
-      await buildGold(orgId, creatorId, account.id, pool, job);
       const chosen = sample(pool, Math.min(150, Math.max(20, Number(count) || 100)));
       if (chosen.length < 5) throw new Error('There are too few moments in her chats where a chatter answered a fan');
-      const examples = persona.profile.examples?.length ? persona.profile.examples : await E.styleExamples(account.id);
-      job.phase = 'answers';
       job.total = chosen.length;
       const queue = [...chosen];
       const worker = async () => {
         while (queue.length) {
           const m = queue.shift();
-          try { job.cost += await oneDuel({ orgId, creatorId, accountId: account.id, persona, examples, writers, batch, m }); }
+          try { job.cost += await oneDuel({ orgId, creatorId, accountId: account.id, persona, writers, batch, m }); }
           catch (e) { job.failed += 1; job.last_error = e.message; console.error('[ai-duels]', e.message); }
           finally { job.done += 1; }
         }
@@ -281,10 +236,10 @@ const pickedBy = (vote, opts) => (!vote ? null : vote === 'tie' || vote === 'non
 
 /** The test runs so far (newest first), the proven answers and the running test. */
 async function overview(orgId, creatorId) {
-  const { account } = await E.pageAccount(orgId, creatorId);
-  const [{ data, error }, gold] = await Promise.all([
+  await E.pageAccount(orgId, creatorId);
+  const [{ data, error }, lib] = await Promise.all([
     supabaseAdmin.from('ai_duels').select('batch, user_vote').eq('organisation_id', orgId).eq('creator_id', creatorId).order('batch', { ascending: false }).limit(5000),
-    supabaseAdmin.from('ai_gold').select('fan_uuid', { count: 'exact', head: true }).eq('account_id', account.id),
+    supabaseAdmin.from('ai_examples').select('id', { count: 'exact', head: true }).eq('organisation_id', orgId),
   ]);
   if (error) {
     if (tableMissing(error)) return { ready: false, v2: false, batches: [], job: duelJob(creatorId) };
@@ -297,9 +252,9 @@ async function overview(orgId, creatorId) {
     b.total += 1;
     if (r.user_vote) b.voted += 1;
   }
-  // a head-only count doesn't report a missing table: ask for a row to be sure
-  const { error: goldError } = await supabaseAdmin.from('ai_gold').select('fan_uuid').limit(1);
-  return { ready: true, v2: !goldError, proven_answers: goldError ? null : gold.count ?? 0, batches: Object.values(by), job: duelJob(creatorId) };
+  // database change 038 (three answers per moment)
+  const { error: v2Error } = await supabaseAdmin.from('ai_duels').select('options').limit(1);
+  return { ready: true, v2: !v2Error, examples: lib.error ? 0 : lib.count ?? 0, batches: Object.values(by), job: duelJob(creatorId) };
 }
 
 /** The next moment to judge in a run: who he is, the whole chat up to then, the answers (blind). */
