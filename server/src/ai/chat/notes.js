@@ -36,7 +36,8 @@ function mediaNote(m) {
     if (md.price) {
       const name = md.title ? ` "${md.title}"` : '';
       if (md.status) {                                       // the practice room: what he did with it
-        const how = md.status === 'bought' ? `he bought it${md.speed === 'slow' ? ' after a while' : ' right away'}` : md.status === 'not_bought' ? 'he didn\'t buy it' : 'he hasn\'t opened it yet';
+        const how = md.status === 'bought' ? `he bought it${md.speed === 'slow' ? ' after a while' : ' right away'}` : md.status === 'not_bought' ? 'he didn\'t buy it'
+          : md.status === 'ignored' ? 'he saw it and hasn\'t opened it' : 'he hasn\'t opened it yet';
         return `PPV $${md.price}${name}: ${what}, ${how}`;
       }
       const bought = md.bought_at || m.paid_at;

@@ -138,13 +138,14 @@ async function oneDuel({ orgId, creatorId, accountId, persona, writers, batch, m
   const chat = E.asOf(m.context, m.at);          // what he had bought by then, not later
   const win = E.windowFor(chat);
   const { plan, level, library } = await E.briefing({ orgId, creatorId, fanUuid: m.fan_uuid, persona, chat: win.messages, money: m.money });
+  const voice = E.voiceFor({ chat: win.messages, latest: m.latest });
   const base = {
     profile: persona.profile, fan: {}, card: [], money: m.money, story: '', chat: win.messages, notes: screenFan(m.latest).notes,
-    situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone, now: new Date(m.at),
+    situations: strategy.situationGuide(plan.ids), library, level, voice, timeZone: persona.settings?.timezone, now: new Date(m.at),
   };
   const recentHer = chat.filter(x => !x.from_fan && !x.mass).slice(-8).map(x => x.text);
   const answers = await Promise.all(writers.map(model => E.writeOne({
-    orgId, creatorId, fanUuid: m.fan_uuid, model, base, latest: m.latest, recentHer, speed: 'normal', emojis: persona.settings?.emojis || 'rarely',
+    orgId, creatorId, fanUuid: m.fan_uuid, model, base, latest: m.latest, recentHer, voice, speed: 'normal', emojis: persona.settings?.emojis || 'rarely',
   })));
   let cost = plan.cost + answers.reduce((s, r) => s + (r.cost || 0), 0);
   const texts = answers.map(r => (r.replies || []).map(x => x.creator_message).filter(Boolean));

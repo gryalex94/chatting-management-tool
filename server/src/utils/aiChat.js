@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
-const { screenFan, checkReply, personaProblems } = require('../ai/chat/safety');
+const { screenFan, checkReply, personaProblems, replyLevel, questionsIn } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
@@ -609,8 +609,10 @@ async function suggestContent(orgId, creatorId) {
           + 'Make sellable PPV items from it. Reply with compact JSON only (no line breaks or indentation): {"items": [{"assets": ["a12", "a15"], "title": "", "kind": "photos | video | bundle", "nudity": "dressed | lingerie | implied | topless | nude | explicit", "focus": "", "outfit": "", "setting": "", "action": "", "tags": [""], "description": "", "price": 20, "min_price": 16, "series": "", "step": 0, "notes": ""}]}\n'
           + '- Photos: put photos that share the outfit or the scene together, 2 to 5 per set; a photo stands alone only if nothing else is like it. Each video is its own item (kind "video"). Use every asset at most once. Leave out anything she isn\'t in (a room, an object).\n'
           + '- A folder made for sexting (its name says so) becomes ONE ordered series: set "series" to the folder name and give every item in it its own step 1, 2, 3… (no two with the same step), from the most teasing to the most explicit, 2 to 4 photos per step. Other items: series "" and step 0.\n'
-          + '- description: exactly what is in it, precise and specific (outfit, what is shown, pose, setting, what happens, how long a video is in seconds), and what is NOT in it when a fan might expect it (no toys, no other people, no nudity…). Two or three plain sentences.\n'
-          + '- nudity: the most she shows in it: explicit = sex acts or toys; nude = fully nude; topless; implied = nude but covered; lingerie; dressed.\n'
+          + '- title: plain words for exactly what he will see: what she wears (or topless / nude), where, what she does. Never a fancier or spicier word than the descriptions use: underwear or a crop top is not lingerie, a thong is not nude, hands between her legs is not masturbating, a plush toy is not a toy.\n'
+          + '- description: exactly what is in it, precise and specific (outfit, what is shown, pose, setting, what happens, how long a video is in seconds), and what is NOT in it when a fan might expect it (no toys, no other people, no nudity…). Two or three plain sentences. If the photos differ (one nude, one in a thong), say which is which.\n'
+          + '- nudity: the most she shows in it. dressed = clothes on (crop tops, shorts, cleavage); lingerie = only underwear or lingerie, nothing bare; implied = nude but her breasts and crotch are covered (hands, a sheet, stickers); topless = breasts bare, bottom covered; nude = fully nude; explicit = sex acts, touching herself, toys, or a man with her.\n'
+          + '- tags: only what the descriptions say is there (no "nudes" or "lingerie" on a dressed set).\n'
           + '- price in dollars: from how it sold (what was bought, at what price) and the rule "start low, raise step by step": teasing photo sets $10–20, nude sets $20–35, explicit $30–60, short videos by how explicit they are; a series rises step by step. min_price: about 80% of the price.\n'
           + '- notes: when to offer it (e.g. "a light first offer", "only after he bought something").',
       },
@@ -718,20 +720,26 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
   const sell = content.length > 0;
   const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell });
+  // her last PPV in this practice chat: none new while it waits for him (unless he wants something else)
+  const waiting = lastPpv(convo);
+  const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status, open: false }));
+  if (waiting && offered.length) offered[offered.length - 1].open = waiting.open;
+  // why no PPV can go out right now (then she mustn't promise one either)
+  const noOffer = !sell ? '' : !level.warm ? 'you are still in the warm-up, so get to know him first.'
+    : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : '';
+  const voice = voiceFor({ chat: convo, fan, latest, followUp });
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })].filter(Boolean),
-    situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
+    situations: strategy.situationGuide(plan.ids), library, level, voice, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
     selling: sell, content: sell ? C.contentText(content) : '', sales,
   };
-  // the PPVs already in this practice chat: no repeats, and none while one is unopened
-  const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status }));
 
-  // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
+  // 3. each writer drafts; every draft is checked, and rewritten if it breaks a rule or sounds off
   const speed = persona.settings?.typing || 'normal';
   const emojis = persona.settings?.emojis || 'rarely';
   const results = await Promise.all(writers.map(model => writeOne({
-    orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis, sell: sell ? { items: content, offered } : null,
+    orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sell ? { items: content, offered } : null,
   })));
   return {
     screen, results,
@@ -740,6 +748,64 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
       selling: sell, phase, sales: sales.length, follow_up: !!followUp,
     },
+  };
+}
+
+// ── How she sounds: her last replies, his name, whether to ask anything ───────
+// Her replies in a chat (her messages in a row are one reply; mass messages left
+// out), each as one text, oldest first.
+function herReplies(chat) {
+  const out = [];
+  let cur = null;
+  for (const m of chat) {
+    if (m.mass) continue;
+    if (m.from_fan) { cur = null; continue; }
+    if (!cur) { cur = []; out.push(cur); }
+    if (clean(m.text)) cur.push(clean(m.text));
+  }
+  return out.map(r => r.join('\n')).filter(Boolean);
+}
+
+// His name: the one we know, or one he gave ("I'm mike") that she has called him.
+const NOT_NAMES = new Set('alone home here back fine good great ok okay tired horny hard bored busy single married free ready sure sorry new done down up in out at on so just not still really very also from with about into a the gonna going trying looking'.split(' '));
+function hisNames(chat, fan = {}) {
+  const names = new Set();
+  if (clean(fan.name)) names.add(clean(fan.name).split(/\s+/)[0]);
+  const hers = chat.filter(m => !m.from_fan && !m.mass).map(m => clean(m.text)).join('\n');
+  for (const m of chat.filter(x => x.from_fan)) {
+    for (const x of String(m.text || '').matchAll(/\b(?:my name(?:'s| is)|name'?s|call me|i'?m|im|i am|it'?s)\s+([A-Za-z]{2,15})\b/gi)) {
+      const w = x[1].charAt(0).toUpperCase() + x[1].slice(1).toLowerCase();
+      if (!NOT_NAMES.has(w.toLowerCase()) && new RegExp(`[^.!?\\n]\\s${w}\\b`).test(hers)) names.add(w);
+    }
+  }
+  return [...names];
+}
+
+// When her reply shouldn't ask him anything: he said yes or chose, he said what he
+// wants, or she has asked a lot lately. '' = one question is fine.
+const SAID_YES = /^\W*(?:yes+|yeah+|yep|ya+s*|sure|ok(?:ay)?|of course|absolutely|definitely|why not|both|all of (?:it|them)|all at once|go (?:on|ahead)|do it|please|let'?s go|i do|i am|i'?m in|keep going|more)\b/i;
+const WANTS = /\b(?:i\s+(?:want|wanna|need|would\s+love)|i'?d\s+love|wanna|let'?s|show\s+me|send\s+me|give\s+me|surprise\s+me|make\s+me|tell\s+me|keep\s+going|i'?m\s+(?:about\s+to|so\s+close|close\s+to))\b/i;
+function noQuestionWhy({ recent = [], latest = [] }) {
+  const said = latest.join(' ');
+  const lastAsked = recent.length > 0 && recent[recent.length - 1].includes('?');
+  if (lastAsked && SAID_YES.test(said) && said.split(/\s+/).length <= 8) return 'he just answered your question: do what he chose or said yes to, don\'t ask again.';
+  if (WANTS.test(said)) return 'he told you what he wants: say yes, react or lead.';
+  if (recent.slice(-3).filter(r => r.includes('?')).length >= 2) return 'you asked him something in your last replies; this time react, tease or tell him something instead.';
+  return '';
+}
+
+/**
+ * What her reply's voice is checked against (safety.voiceProblems) and told
+ * (prompts.replyPrompt): her last replies, his recent words and name, and
+ * whether to ask anything. `latest` = his newest messages.
+ */
+function voiceFor({ chat, fan = {}, latest = [], followUp = false }) {
+  const recent = herReplies(chat).slice(-6);
+  return {
+    recent, names: hisNames(chat, fan),
+    his: chat.filter(m => m.from_fan).slice(-6).map(m => clean(m.text)).join('\n'),
+    noQuestion: followUp ? '' : noQuestionWhy({ recent, latest }),
+    openers: recent.slice(-4).map(r => r.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '')).filter(Boolean),
   };
 }
 
@@ -766,6 +832,7 @@ function sellingNotes({ sell, level, ids, content, said = '', aboutLastPpv = fal
 }
 
 // A PPV in the practice chat, as the writer reads it (like a real one from Fanvue).
+const PPV_STATUSES = ['bought', 'not_bought', 'ignored'];
 function practicePpv(p, content) {
   const id = Number(String(p.item || '').replace(/^c/i, ''));
   const it = content.find(x => x.id === id) || {};
@@ -774,7 +841,7 @@ function practicePpv(p, content) {
   return {
     item: `c${id}`, title: clean(it.title || p.title).slice(0, 80), price: Number(p.price) || Number(it.price) || null,
     photos: kind === 'video' ? 0 : kind === 'bundle' ? Math.max(1, amount - 2) : amount || 1, videos: kind === 'video' ? 1 : kind === 'bundle' ? 2 : 0, other: 0,
-    status: ['bought', 'not_bought'].includes(p.status) ? p.status : 'pending', speed: p.speed === 'slow' ? 'slow' : 'fast', bought_at: null,
+    status: PPV_STATUSES.includes(p.status) ? p.status : 'pending', speed: p.speed === 'slow' ? 'slow' : 'fast', bought_at: null,
     series: it.series || null, step: it.step || null, next: it.series ? content.find(x => x.series === it.series && x.step === it.step + 1)?.title || null : null,
     inside: it.description ? `${C.what(it)}: ${it.description}` : null,
   };
@@ -782,35 +849,67 @@ function practicePpv(p, content) {
 
 // He asks about a PPV she sent: "what's in it?", "is it nude?", "how long is it?"…
 const ASKS_ABOUT_IT = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this)\b|does\s+(?:it|that)\b|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
+// He wants something other than the PPV waiting for him: "something more interesting", "not that one".
+const WANTS_OTHER = /\b(?:something|anything)\s+(?:else|more|better|different|hotter|spicier|naughtier|nastier|dirtier|crazier)\b|\bnot\s+(?:that|this)(?:\s+one)?\b|\bshow\s+me\s+more\b|\bmore\s+(?:interesting|explicit|naked|nude)\b|\bsurprise\s+me\b|\bwhat\s+else\b/i;
+
+/**
+ * Her last PPV in a practice chat and what came after it: `herAfter` = her replies
+ * since, `hisAfter` = all he wrote since, `hisLatest` = what he wrote since her last
+ * reply; `open` = no new PPV until he reacts (unopened, and he doesn't want
+ * something else; or he ignores it and she hasn't mentioned it yet). Null if none.
+ */
+function lastPpv(convo) {
+  const i = convo.map(m => !!m.media?.item).lastIndexOf(true);
+  if (i < 0) return null;
+  const p = convo[i].media;
+  const after = convo.slice(i + 1).filter(m => !m.mass);
+  const herAfter = herReplies(after).length;
+  const hisAfter = after.filter(m => m.from_fan).map(m => clean(m.text)).join(' ');
+  let k = after.length;
+  while (k > 0 && after[k - 1].from_fan) k -= 1;
+  const hisLatest = after.slice(k).map(m => clean(m.text)).join(' ');
+  const wantsOther = WANTS_OTHER.test(hisAfter);
+  const open = (p.status === 'pending' && !wantsOther) || (p.status === 'ignored' && !herAfter);
+  return { i, p, herAfter, hisAfter, hisLatest, wantsOther, open };
+}
 
 // Whether his latest messages ask about the PPV she sent last (still unopened).
 function asksAboutLastPpv(convo) {
-  const i = convo.map(m => !!m.media?.item).lastIndexOf(true);
-  if (i < 0 || convo[i].media.status !== 'pending' || convo.slice(i + 1).some(m => !m.from_fan && !m.mass)) return false;
-  return ASKS_ABOUT_IT.test(convo.slice(i + 1).filter(m => m.from_fan).map(m => m.text).join(' '));
+  const s = lastPpv(convo);
+  return !!s && ['pending', 'ignored'].includes(s.p.status) && ASKS_ABOUT_IT.test(s.hisLatest);
 }
 
 // What just happened with her last PPV (practice), and what she should do about it.
 function ppvNotes(convo, followUp) {
-  const i = convo.map(m => !!m.media?.item).lastIndexOf(true);
-  const herAfter = i >= 0 && convo.slice(i + 1).some(m => !m.from_fan && !m.mass);
-  const hisAfter = i >= 0 && convo.slice(i + 1).some(m => m.from_fan);
-  const p = i >= 0 ? convo[i].media : null;
+  const s = lastPpv(convo);
   const out = [];
-  if (p && !herAfter) {
+  if (s) {
+    const { p, herAfter, hisAfter, hisLatest } = s;
     const name = `"${p.title}"`;
-    if (p.status === 'bought') {
+    if (p.status === 'bought' && !herAfter) {
       out.push(`He just bought your PPV ${name}${p.speed === 'slow' ? ' after a while' : ' right away'}. React to it: ask what he liked, keep the mood going${p.speed === 'slow' ? '' : ', and while he\'s into it tease the next step'}.`);
       if (p.series) out.push(p.next ? `It was step ${p.step} of your "${p.series}" sexting sequence; the next step is "${p.next}", when he wants more.` : `That was the last step of your "${p.series}" sexting sequence.`);
+    } else if (p.status === 'bought' && p.series && p.next) {
+      out.push(`Your "${p.series}" sexting sequence goes on with step ${p.step + 1}, "${p.next}", when he wants more.`);
+    } else if (p.status === 'not_bought' && !herAfter) {
+      out.push(`He didn't buy your PPV ${name}. Don't beg or resend it; find out what's in the way, or keep chatting and try something else later.`);
+    } else if (p.status === 'ignored') {
+      out.push(herAfter
+        ? `He isn't opening your PPV ${name} for now. Don't bring it up again: keep the chat going, and when it fits offer a different item (closer to what he wants, or cheaper).`
+        : `He saw your PPV ${name} and hasn't opened it. Mention it once, lightly and playfully (no begging), then keep the chat going.`);
+    } else if (p.status === 'pending') {
+      if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
+      else if (hisLatest && ASKS_ABOUT_IT.test(hisLatest) && p.inside) out.push(`He asks about your PPV ${name}. Answer his question first, truthfully and plainly, from what's really in it: ${p.inside} Then you can tease. Don't send another PPV now.`);
+      else if (s.wantsOther) out.push(`He wants something more than your PPV ${name} (he hasn't opened it). Offer a different item from your list that fits what he wants now: attach it as a PPV, don't just promise it.`);
+      else if (hisAfter) {
+        out.push(herAfter
+          ? `Your PPV ${name} is still unopened. Keep the mood going without pushing it; if he asks for more, remind him once that it's waiting for him. Don't send or promise anything new until he opens it.`
+          : `Your PPV ${name} is still unopened. If he wants more, that's where it starts: point him to it playfully, in your own words, and keep the mood going. Don't send or promise anything new until he opens it.`);
+      } else out.push(`Your PPV ${name} is still unopened: don't send another one now.`);
     }
-    else if (p.status === 'not_bought') out.push(`He didn't buy your PPV ${name}. Don't beg or resend it; find out what's in the way, or keep chatting and try something else later.`);
-    else if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
-    else if (hisAfter && ASKS_ABOUT_IT.test(convo.slice(i + 1).filter(m => m.from_fan).map(m => m.text).join(' ')) && p.inside) {
-      out.push(`He asks about your PPV ${name}. Answer his question first, truthfully and plainly, from what's really in it: ${p.inside} Then you can tease. Don't send another PPV now.`);
-    } else out.push(`Your PPV ${name} is still unopened: don't send another one now (you can talk about it, or answer him without offering anything).`);
   }
-  if (followUp && !(p && !herAfter)) out.push('He hasn\'t replied for a while. Write one short, light follow-up to get him talking again; don\'t be pushy or needy.');
-  if (followUp && p && !herAfter && p.status !== 'pending') out.push('He hasn\'t written anything since: you write first.');
+  if (followUp && !(s && !s.herAfter)) out.push('He hasn\'t replied for a while. Write one short, light follow-up to get him talking again; don\'t be pushy or needy.');
+  if (followUp && s && !s.herAfter && ['bought', 'not_bought'].includes(s.p.status)) out.push('He hasn\'t written anything since: you write first.');
   return out;
 }
 
@@ -828,16 +927,20 @@ async function screenLatest(orgId, creatorId, fanUuid, latest) {
 }
 
 // ── The briefing: situations, his level, examples from the agency's good chats ──
-// Her replies before this many of her own messages are the warm-up: she follows
-// him and doesn't lead (the analysis: a longer warm-up sold far better).
+// Her messages before this many are the warm-up: no PPV yet, and she follows him
+// rather than leads (the analysis: a longer warm-up sold far better).
 const WARM_UP = 6;
+// Her replies since he got sexual before she matches him (1) and leads (2), even in
+// the warm-up: with a direct fan, stalling and asking questions loses him.
+const MATCH_AFTER = 1;
+const LEAD_AFTER = 2;
 // Situations that say who he is rather than what he's doing.
 const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower', 'loyalty_play', 'time_waster']);
 
 /**
  * What one reply needs besides the chat: the Playbook situations and his level and
- * mood (the picker), how sexual her reply may get, and examples from the agency's
- * good chats that fit. `chat` = the messages the writer reads.
+ * mood (the picker), how sexual her reply may get and whether she leads, and
+ * examples from the agency's good chats that fit. `chat` = the messages the writer reads.
  */
 async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false }) {
   const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling);
@@ -846,19 +949,30 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
   if (extraIds.length) plan.ids = strategy.readPick({ ids: [...extraIds, ...plan.ids.filter(id => !WHO_HE_IS.has(id))] }, { selling });
   const { his, mood, pulled_back } = plan.mood;
   const warm = chat.filter(m => !m.from_fan && !m.mass).length >= WARM_UP;
-  const max = P.maxLevel({ his, heat: persona?.profile?.heat, warm: warm && !pulled_back });
-  const level = { his, mood, pulled_back, max };
+  // how many of her replies since he first got sexual (his words, checked in code)
+  const hotAt = chat.findIndex(m => m.from_fan && replyLevel(m.text) >= 2);
+  const since = hotAt < 0 ? 0 : herReplies(chat.slice(hotAt)).length;
+  const hot = his >= 2 && !pulled_back;
+  const lead = !pulled_back && (warm || (hot && since >= LEAD_AFTER));
+  const match = hot && since >= MATCH_AFTER;
+  const max = P.maxLevel({ his, heat: persona?.profile?.heat, lead, match });
+  const level = { his, mood, pulled_back, max, lead, match };
   let last = chat.length;
   while (last > 0 && chat[last - 1].from_fan) last -= 1;
   const said = chat.slice(last).map(m => m.text).join(' ');               // his latest message(s)
   const library = await libraryExamples(orgId, { ids: plan.ids, his, max, mood, said });
-  // selling: which moment it is (making an offer, after a buy, after a no) and examples of it
+  // selling: which moment it is (making an offer, a PPV waiting for him, after a buy,
+  // after a no) and examples of it
   let phase = null;
   if (selling) {
     const i = chat.map(m => !!(m.media?.price && !m.from_fan)).lastIndexOf(true);
-    const herAfter = i >= 0 && chat.slice(i + 1).some(m => !m.from_fan && !m.mass);
-    const status = i >= 0 ? chat[i].media.status || (chat[i].media.bought_at ? 'bought' : 'not_bought') : null;
-    if (status && !herAfter) phase = status === 'bought' ? 'after_buy' : 'no_buy';
+    const p = i >= 0 ? chat[i].media : null;
+    const status = p ? p.status || (p.bought_at ? 'bought' : 'not_bought') : null;
+    const after = i >= 0 ? chat.slice(i + 1).filter(m => !m.mass) : [];
+    const herAfter = after.some(m => !m.from_fan);
+    const hisAfter = after.filter(m => m.from_fan).map(m => m.text).join(' ');
+    if ((status === 'pending' && !WANTS_OTHER.test(hisAfter)) || (status === 'ignored' && !herAfter)) phase = 'waiting';
+    else if (['bought', 'not_bought'].includes(status) && !herAfter) phase = status === 'bought' ? 'after_buy' : 'no_buy';
     else if (warm && his >= 2 && !pulled_back) phase = 'offer';
   }
   const sales = phase ? await sellingExamples(orgId, { phase, ids: plan.ids, his, max, mood, said }) : [];
@@ -868,19 +982,25 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
 /**
  * Selling examples from the agency's chats for this phase: two that worked and one
  * that didn't (offer: bought / not bought; after a buy: bought the next one or
- * not; after a no: sold or kept him / lost him).
+ * not; after a no, or while a PPV waits for him: sold or kept him / lost him).
  */
 const PHASES = {
   offer: { kind: 'offer', good: ['bought_fast', 'bought'], bad: ['not_bought'] },
   after_buy: { kind: 'after_buy', good: ['bought_next', 'no_next_offer'], bad: ['next_not_bought'] },
   no_buy: { kind: 'turning', good: ['sold', 'kept_him'], bad: ['lost'] },
+  waiting: {
+    kind: 'turning', good: ['sold', 'kept_him'], bad: ['lost'],
+    situations: ['fan_stalling', 'agreed_no_buy', 'quiet_after_ppv', 'ppv_ignored', 'second_ppv_ignored', 'asks_whats_in_ppv', 'wants_preview', 'wants_to_see_before_paying'],
+  },
 };
 async function sellingExamples(orgId, { phase, ids = [], his = 0, max = 0, mood = null, said = '' }) {
   const P_ = PHASES[phase];
   if (!P_) return [];
   const want = new Set(ids);
   const his_ = wordsOf(said);
-  const rows = (await libraryRows(orgId)).filter(r => r.kind === P_.kind && Math.abs(r.his_level - his) <= 1 && r.her_level <= Math.min(3, max + 1));
+  let rows = (await libraryRows(orgId)).filter(r => r.kind === P_.kind && r.her_level <= Math.min(3, max + 1));
+  const only = P_.situations ? rows.filter(r => P_.situations.includes(r.situation)) : [];
+  rows = only.length >= 6 ? only : rows.filter(r => Math.abs(r.his_level - his) <= 1);
   const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
   const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + Math.random() * 1.5;
   const best = (outcomes, n) => rows.filter(r => outcomes.includes(r.outcome)).map(r => [score(r), r]).sort((a, b) => b[0] - a[0]).slice(0, n).map(([, r]) => r);
@@ -939,67 +1059,92 @@ async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = 
   }
 }
 
-async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis, sell = null }) {
+/**
+ * One writer's reply: drafted, tidied in code, checked (rules, then how it
+ * sounds), and rewritten with the reasons, up to 3 drafts in all:
+ *  - a draft that breaks a rule is rewritten; if only its PPV keeps breaking a
+ *    selling rule, the last draft is written without a PPV (and promises none);
+ *  - a draft that keeps the rules but sounds off (questions, the same opener or
+ *    phrase again, an assistant's words) is rewritten once; then the newest draft
+ *    that keeps the rules is shown, with what still sounds off as a note.
+ * `voice` = what her voice is checked against (voiceFor).
+ */
+async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice = null, speed, emojis, sell = null }) {
   const started = Date.now();
   const out = { model, label: or.writerLabel(model), cost: 0 };
+  const recent = voice?.recent || recentHer;
+  const maxLevel = base.level?.max ?? 3;
   try {
-    let retry = null, draft, verdict, problems = [], review = null, first = null, offerProblemSeen = null;
-    // one rewrite if a draft breaks a rule; two when only the PPV offer was wrong (wrong item, not truthful)
-    let tries = 2;
-    for (let attempt = 0; attempt < tries; attempt += 1) {
-      const res = await or.chat({ model, maxTokens: 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry }) });
+    let retry = null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
+      const res = await or.chat({ model, maxTokens: 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
+      drafts += 1;
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
-      draft = P.readReply(res.text);
+      const draft = P.readReply(res.text);
+      if (noPpv) draft.ppv = null;
       // a PPV she attached: is it in her list, and allowed right now?
       let offerProblem = null;
-      offerProblemSeen = null;
       draft.offer = null;
       if (sell && draft.ppv) {
         const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm });
-        if (o.problem) { offerProblem = o.problem; offerProblemSeen = o.problem; } else draft.offer = o;
+        if (o.problem) offerProblem = o.problem; else draft.offer = o;
       }
-      // her habit openers ("hehe", "mmm"): kept only now and then, never twice in a row
-      const dropOpener = recentHer.some(r => /^\s*(?:he(?:he)+|m{2,}|hm+)\b/i.test(r)) || Math.random() < 0.6;
-      draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel: base.level?.max ?? 3, dropOpener, recent: recentHer });
+      // her habit openers, his name said again, an emoji she just used: tidied in code;
+      // questions she shouldn't ask turned into statements or left out where that reads well
+      draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
+      if (voice) draft.messages = P.dropSentences(draft.messages, { his: voice.his, noOffer: draft.ppv ? '' : noPpv || base.noOffer || '' });
+      const asks = voice ? questionsIn(draft.messages, voice.his) : 0;
+      if (voice && ((voice.noQuestion && asks) || asks > 1)) draft.messages = P.unQuestion(draft.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
       if (draft.handover) return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started };
-      const c = checkReply(draft.messages, { recent: recentHer, chatting: recentHer.length > 0, maxLevel: base.level?.max ?? 3, selling: !!sell, offering: !!draft.offer });
-      if (offerProblem) { c.verdict = 'block'; c.problems = [offerProblem, ...c.problems]; }
+      const c = checkReply(draft.messages, {
+        recent: recentHer, chatting: recentHer.length > 0, maxLevel, selling: !!sell, offering: !!draft.offer,
+        noOffer: draft.offer || draft.ppv ? '' : noPpv || base.noOffer || '', voice,
+      });
+      let verdict = c.verdict, problems = [...c.problems], review = null;
+      if (offerProblem) { verdict = 'block'; problems = [offerProblem, ...problems]; }
       // a PPV that passed the code checks: Claude checks it's truthful about what's inside
-      if (draft.offer && c.verdict !== 'block') {
+      if (draft.offer && verdict !== 'block') {
         const r = await reviewOffer({ fanTexts: latest, messages: draft.messages, item: { ...draft.offer.item, what: C.what(draft.offer.item), seen: C.seenText(draft.offer.item) } });
         out.cost += r.usage.cost;
         await logUsage(orgId, 'check', CHECK_MODEL, r.usage, { creatorId, fanUuid });
-        if (!r.ok) { c.verdict = 'block'; c.problems = [...r.problems.map(x => `Offer: ${x}`), ...c.problems]; }
+        if (!r.ok) { verdict = 'block'; problems = [...r.problems.map(x => `Offer: ${x}`), ...problems]; }
       }
-      verdict = c.verdict; problems = c.problems; review = null;
       if (verdict === 'review') {
-        const r = await reviewReply({ fanTexts: latest, messages: draft.messages, flags: c.problems });
+        const r = await reviewReply({ fanTexts: latest, messages: draft.messages, flags: problems });
         out.cost += r.usage.cost;
         await logUsage(orgId, 'check', CHECK_MODEL, r.usage, { creatorId, fanUuid });
         review = { ok: r.ok, problems: r.problems, declined: !!r.declined };
         verdict = r.ok ? 'ok' : r.declined ? 'person' : 'block';
         problems = r.ok ? [] : r.problems;
       }
-      if (verdict === 'block' && attempt === 0 && problems.length && problems.every(x => /^Offer: /.test(x) || x === offerProblemSeen)) tries = 3;
-      // last try and only the PPV was wrong: send her text without it, if the text itself is fine
-      if (verdict === 'block' && attempt === tries - 1 && draft.ppv && problems.every(x => /^Offer: /.test(x) || x === offerProblemSeen)) {
-        const plain = checkReply(draft.messages, { recent: recentHer, chatting: recentHer.length > 0, maxLevel: base.level?.max ?? 3, selling: !!sell, offering: false });
-        if (plain.verdict !== 'block') {
-          draft.offer = null; verdict = plain.verdict === 'review' ? 'ok' : plain.verdict;
-          problems = ['The PPV was left out: it broke a selling rule.'];
-        }
+      const now = { draft, verdict, problems, review, style: [...(c.style || [])] };
+      // a set much tamer than where the chat is (a dressed set when he's explicit), outside a sexting sequence
+      if (draft.offer && !draft.offer.item.series && C.levelOf(draft.offer.item) <= (base.level?.his ?? 0) - 2) {
+        now.style.push(`The PPV "${draft.offer.item.title}" is much tamer than where the chat is: offer something closer to what he wants.`);
       }
-      if (verdict !== 'block' || attempt === tries - 1) break;
-      first = problems;
-      retry = problems.join(' ');
+      last = now;
+      if (verdict !== 'block') kept = now;
+      if (!first) first = verdict === 'block' ? problems : now.style;
+      // done: a draft that keeps the rules and sounds right (or was rewritten once already)
+      if (kept && (attempt > 0 || !now.style.length)) break;
+      // only the PPV keeps breaking a selling rule: the next draft goes without one
+      if (verdict === 'block' && attempt >= 1 && problems.every(x => /^Offer: /.test(x) || x === offerProblem)) {
+        noPpv = problems.map(x => x.replace(/^Offer: /, '')).join(' ');
+      }
+      retry = [...(verdict === 'block' ? problems : []), ...now.style].join(' ');
     }
+    const pick = kept || last;
+    const { draft } = pick;
+    const notes = [...pick.problems];
+    if (noPpv && pick === kept && !draft.offer) notes.push(`Written again without a PPV: ${noPpv}`);
     return {
       ...out,
-      status: verdict === 'ok' ? 'ok' : verdict === 'person' ? 'check' : 'blocked',
+      status: pick.verdict === 'ok' ? 'ok' : pick.verdict === 'person' ? 'check' : 'blocked',
       replies: draft.messages.map(m => ({ creator_message: m })),
       // the PPV on her last message (only when the reply passed)
-      ppv: verdict !== 'block' && draft.offer ? {
+      ppv: pick.verdict !== 'block' && draft.offer ? {
         item: `c${draft.offer.item.id}`, price: draft.offer.price, title: draft.offer.item.title, kind: draft.offer.item.kind, amount: draft.offer.item.amount,
         minutes: draft.offer.item.minutes, what: C.what(draft.offer.item), description: draft.offer.item.description,
         series: draft.offer.item.series || null, step: draft.offer.item.step || null, asset_ids: draft.offer.item.asset_ids || [],
@@ -1007,7 +1152,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // one message at a time, at her typing speed (never all in the same second)
       timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
       learned: draft.learned.map(t => ({ note: t })),
-      problems, review, retried: !!first, first_problems: first || [], format_ok: draft.format_ok,
+      problems: notes, style: pick.style, review: pick.review, retried: drafts > 1, drafts, first_problems: drafts > 1 ? first || [] : [], format_ok: draft.format_ok,
       ms: Date.now() - started,
     };
   } catch (e) {
@@ -1036,7 +1181,7 @@ async function usage(orgId) {
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
-  _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
+  _test: { windowFor, moneyOf, cleanProfile, cleanFacts, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
-  _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
+  _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
 };

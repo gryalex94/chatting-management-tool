@@ -10,7 +10,7 @@
  *  - checkOffer: is the PPV the writer attached allowed right now?
  */
 const NUDITY = ['dressed', 'lingerie', 'implied', 'topless', 'nude', 'explicit'];
-const NUDITY_LABEL = { dressed: 'fully dressed', lingerie: 'lingerie', implied: 'nude but covered', topless: 'topless', nude: 'fully nude', explicit: 'explicit' };
+const NUDITY_LABEL = { dressed: 'fully dressed', lingerie: 'in underwear or lingerie', implied: 'nude but covered', topless: 'topless', nude: 'fully nude', explicit: 'explicit' };
 const NUDITY_LEVEL = { dressed: 1, lingerie: 2, implied: 2, topless: 3, nude: 3, explicit: 3 };
 // fetish content is at least suggestive even when she is dressed
 const FETISH = /\b(?:feet|foot|soles|toes|giantess|smother\w*|worship|dominat\w*|crush\w*|trampl\w*)\b/i;
@@ -120,15 +120,16 @@ function contentText(items) {
 
 /**
  * Whether the PPV the writer attached may go out now. `ppv` = { item: "c12", price },
- * `items` = her content, `offered` = the PPVs already in this chat ({ id, status }),
- * `level` = { his, max }, `warm` = past the warm-up. Returns { item, price } or { problem }.
+ * `items` = her content, `offered` = the PPVs already in this chat ({ id, status,
+ * open }: open = still waiting for him, so no new one yet), `level` = { his, max },
+ * `warm` = past the warm-up. Returns { item, price } or { problem }.
  */
 function checkOffer({ ppv, items, offered = [], level, warm }) {
   const id = Number(String(ppv?.item || '').replace(/^c/i, ''));
   const item = items.find(it => it.id === id && it.active !== false);
   if (!item) return { problem: 'It attached content that isn\'t in her content list. Only offer what\'s in the list; if nothing fits, say so and offer the closest item.' };
   if (!warm) return { problem: 'It offered a PPV during the warm-up. Get to know him first; offer something only once you have been chatting a while.' };
-  if (offered.some(o => o.status === 'pending')) return { problem: 'Her last PPV is still unopened. Don\'t send another one until he reacts to it.' };
+  if (offered.some(o => o.open)) return { problem: 'Her last PPV is still unopened. Don\'t send another one until he reacts to it: point him to that one.' };
   if (offered.some(o => o.id === item.id)) return { problem: `He already got "${item.title}". Don't send the same item twice; pick another one or talk about that one.` };
   if (item.series) {
     // a sexting sequence: step by step, the next one only after he bought the last

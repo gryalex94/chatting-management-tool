@@ -13,6 +13,7 @@
 
 const { GAME_PLAN } = require('./strategy');
 const { mediaNote, emptyBody } = require('./notes');
+const { isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW } = require('./safety');
 
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
@@ -61,7 +62,7 @@ const SELLING_GUIDE = [
   'Only offer after a real warm-up and some building up, never in the first messages. A few lines of flirting or sexting first sold far better than none.',
   'Before the first offer, check softly that he\'s ready ("are you alone?", "in bed already?").',
   'Pick the item that fits what he wants and how far the chat has gone. Tease it truthfully in your own words: what\'s in it, not every detail; use his words back.',
-  'Start low: the first offer from your cheaper items. After a quick buy go one or two steps up; after a slow buy stay at a similar price. Never start high and drop.',
+  'Start low: the first offer from your cheaper items that fit where the chat is (when he is explicit and wants more, not a dressed or teasing set). After a quick buy go one or two steps up; after a slow buy stay at a similar price. Never start high and drop.',
   'If he asks for something you don\'t have, say so once, clearly, then name the closest item you do have. Never invent content.',
   'After a buy: react to it, ask what he liked, keep the mood going, and while he\'s still into it tease the next step.',
   'If he doesn\'t buy or goes quiet: one light, playful follow-up, no begging or spamming. If the price is the problem, a small personal discount (never below the lowest price) or a smaller item.',
@@ -74,22 +75,25 @@ const SELLING_GUIDE = [
 // Oct 2026 analysis of ~35k chats, and its costliest mistakes (robotic replies,
 // ignoring his question, too explicit too soon, being pushy). Not her own Fanvue
 // chats. The AI's own habits (long, clever, emoji-heavy, "heyy", always a
-// question, sexual too fast) are the opposite, so these say it plainly.
+// question, an assistant's words, the same shape every time, sexual too fast or
+// stalling when he is direct) are the opposite, so these say it plainly. The
+// worst of them are also checked in code (safety.voiceProblems).
 const CHAT_GUIDE = [
   'Answer what he said first. If he asks something, answer it plainly before anything else.',
-  'Sound like a real girl texting, not a script: react to his words, build on what he tells you, use his own words back.',
-  'Short and simple: usually one message under 15 words; two now and then, three rarely. Everyday words, no clever or poetic lines.',
-  'Warm up first: get to know him and have a real chat before anything sexual. The chats that sold best had a long, friendly warm-up.',
+  'Sound like a real girl texting, not a script: react to his words and build on what he tells you. Pick up one word or detail of his; never repeat his sentence back to him.',
+  'Short and simple: usually one message under 15 words; two now and then, three rarely. Everyday texting words, never an assistant\'s or an office\'s ("agenda", "plans for the day", "I must say", "indeed", "trips me up", "I like your honesty"), no clever or poetic lines.',
+  'Talk to him, not about him: never "someone\'s eager", "aren\'t they?" or "I like a man who…".',
+  'Questions: at most one per reply, and many replies have none: react, tease or tell him something about you instead. When he has told you what he wants, or said yes to something, don\'t ask again: do it, say yes or lead.',
+  'Warm up first: get to know him and have a real chat before anything sexual. The chats that sold best had a long, friendly warm-up. But if he gets sexual first, don\'t stall or play coy: say yes in your own playful way and tease (see "Right now").',
   'Follow his lead on how sexual it gets (see "Right now"). Tease and hint rather than describe: teasing worked far better than going explicit too soon.',
   'If he jokes, joke back. If he pulls back or says it\'s going fast, laugh it off and go back to normal talk.',
   'Don\'t bring up your body or looks unless he does.',
-  'Not every reply needs a question: about half the time react, tease or share a bit of your day instead.',
-  'Vary how you start. Don\'t open with "hehe", "mmm" or "hey" (your worst habit), never open two replies the same way, and once you are chatting don\'t greet him again.',
-  'Emojis are rare: most replies have none, never more than one. No dashes (— or –), no ~, no *stars*, no lists.',
-  'Use his name only if it is in the chat or your notes, and never invent things you did or talked about together.',
+  'You only know your own time. Don\'t guess his time of day or what he is doing ("up early", "up late") unless he told you.',
+  'Vary how you start. Don\'t open with "hehe", "mmm" or "hey" (your worst habit), never start two replies the same way or reuse a phrase you already sent him, and once you are chatting don\'t greet him again.',
+  'Emojis are rare: most replies have none, never more than one, never the same one twice in a row. No dashes (— or –), no ~, no *stars*, no lists.',
+  'Use his name rarely (at most once every few replies), only if it is in the chat or your notes, and never invent things you did or talked about together.',
   'Don\'t be needy or pushy. After a hot moment, be warm and personal.',
-  'When he is into it and you are past the warm-up, lead: say what you would do, build it up step by step, instead of asking him what he wants again and again.',
-  'Never repeat a line you have already sent him.',
+  'When he is into it and you are past the warm-up, lead: say what you are doing or would do, one step at a time like a little story, instead of asking him what he wants again and again.',
 ];
 
 // How sexual a message is, as the situation picker rates it (0 to 3).
@@ -166,8 +170,8 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
-  const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time).`];
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
+  const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
   if (clean(story)) parts.push(`# Your story with him so far\n${clean(story)}`);
@@ -187,8 +191,11 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (level) {
     now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);
     if (level.pulled_back) now_.push('He is slowing things down: ease off, laugh it off if it fits, and go back to normal, friendly talk.');
-    else if (level.his >= 2 && level.max >= 2 && level.warm) now_.push('He is into it: take the lead now. Say what you would do and build it up step by step; don\'t just ask him what he wants.');
+    else if (level.his >= 2 && level.max >= 2 && level.lead) now_.push('He is into it: take the lead now. Say what you are doing or would do, one step at a time; don\'t ask him what he wants.');
+    else if (level.his >= 2) now_.push('He got sexual first. Don\'t stall or play coy: say yes in your own playful way and tease (hint, don\'t describe yet). Don\'t comment on how eager or direct he is.');
   }
+  if (voice?.noQuestion) now_.push(`No question in this reply: ${voice.noQuestion}`);
+  if (voice?.openers?.length) now_.push(`Don't start like your last replies did (${voice.openers.map(o => `"${o}…"`).join(', ')}) and don't reuse their phrases.`);
   now_.push(...notes);
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
@@ -199,16 +206,19 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
 }
 
 /**
- * How sexual her reply may get: at his level, one step more once past the
- * warm-up, never above what her profile allows (mild 2, medium 3 only when he is
- * explicit, hot 3). In the warm-up she follows him and stays at teasing at most.
+ * How sexual her reply may get, never above what her profile allows (mild 2,
+ * medium 3 only when he is explicit, hot 3):
+ *  - lead (past the warm-up, or he has been sexual for a couple of her replies):
+ *    at his level, one step more at most;
+ *  - match (he got sexual and she has answered once): at his level, no more;
+ *  - otherwise she follows him and stays at teasing at most (too explicit too
+ *    soon sold least in the agency's chats).
  */
-function maxLevel({ his = 0, heat = '', warm = false }) {
+function maxLevel({ his = 0, heat = '', lead = false, match = false }) {
   const kind = /\b(mild|medium|hot)\b/i.exec(String(heat))?.[1]?.toLowerCase() || 'medium';   // the first one named
   const cap = kind === 'hot' ? 3 : kind === 'mild' ? 2 : (his >= 3 ? 3 : 2);
-  const step = warm ? 1 : 0;
-  // the warm-up: teasing at most, however far he goes (too explicit too soon sold least)
-  return Math.max(0, Math.min(warm ? cap : Math.min(cap, 2), his + step));
+  if (lead) return Math.max(0, Math.min(cap, his + 1));
+  return Math.max(0, Math.min(match ? cap : Math.min(cap, 2), his));
 }
 
 /**
@@ -327,8 +337,8 @@ const EMOJI_CHANCE = { none: 0, rarely: 0.25, sometimes: 0.5, often: 0.85 };
 // Sexual emojis: only when it's explicit anyway (his level, "Right now"); the AI
 // otherwise puts 😈 on every other reply.
 const SEXY_EMOJI = /(?:😈|🥵|💦|👅|🍆|🍑|🤤|😩)\uFE0F?/gu;
-// The AI's favourite openers ("Hehe, …", "Mmm, …", "Hmm …"): dropped when asked,
-// and so is any first word she opened her last replies with ("Oh… Oh… Oh…").
+// The AI's favourite openers ("Hehe, …", "Mmm, …", "Hmm …"): always dropped, and
+// so is any first word she opened her last replies with ("Oh… Oh… Oh…").
 const HABIT_OPENER = /^\s*(?:he(?:he)+|m{2,}|hm+)\b[\s,.!…]*/i;
 const firstWord = (t) => ((String(t).toLowerCase().match(/^[\p{L}]+/u) || [''])[0]).replace(/(.)\1+/g, '$1');
 const dropFirst = (t, re) => {
@@ -336,13 +346,42 @@ const dropFirst = (t, re) => {
   if (rest.split(/\s+/).length < 2) return t;
   return /^[A-Z]/.test(t) ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest;
 };
-function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = false, recent = [] } = {}) {
+const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// "Sounds like someone's ready", "someone needs attention": said to him instead.
+const PRESENT = { needs: 'need', wants: 'want', seems: 'seem', sounds: 'sound', knows: 'know', likes: 'like', loves: 'love', has: 'have', got: 'got', can: 'can' };
+const toHim = (t) => t
+  .replace(/\bsomeone['’]s\s+got\b/gi, 'you\'ve got')
+  .replace(/\bsomeone(?:['’]s|\s+is)\b(?!\s+(?:else|like))/gi, 'you\'re')
+  .replace(/\bsomeone\s+(needs|wants|seems|sounds|knows|likes|loves|has|got|can)\b/gi, (_, v) => `you ${PRESENT[v.toLowerCase()]}`)
+  .replace(/(^|[.!?…]\s+)you/g, (_, p) => `${p}You`);
+// His name said to him ("Mike, …", "…, Mike?", "tell me, Mike, do you…"): left out
+// when she used it in her last few replies (a name in every reply sounds scripted).
+function dropName(t, name) {
+  const n = escRe(name);
+  const out = t
+    .replace(new RegExp(`^\\s*${n}\\s*[,!.…]+\\s*`, 'i'), '')
+    .replace(new RegExp(`,\\s*${n}\\s*,`, 'gi'), ',')
+    .replace(new RegExp(`[,\\s]+${n}(?=\\s*[.!?…]|\\s*$)`, 'gi'), '');
+  if (out === t || out.trim().split(/\s+/).length < 2) return t;
+  return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+}
+const emojisIn = (t) => String(t).match(EMOJI) || [];
+/**
+ * Her messages tidied in code. `recent` = her last replies (newest last), each one
+ * reply as one text; `names` = his name(s), left out when she used one lately.
+ */
+function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = true, recent = [], names = [] } = {}) {
   let seen = Math.random() < (EMOJI_CHANCE[emojis] ?? EMOJI_CHANCE.rarely) ? 0 : 1;   // 1 = none this time
   const used = new Set(recent.slice(-3).map(firstWord).filter(w => ['oh', 'hehe', 'haha', 'm', 'hm', 'aw', 'well', 'so', 'ok', 'lol'].includes(w)));
+  // never the same emoji as in her last replies
+  const lately = new Set(recent.slice(-3).flatMap(emojisIn).map(e => e.replace(/️/g, '')));
+  const namesLately = names.filter(n => recent.slice(-3).some(r => new RegExp(`\\b${escRe(n)}\\b`, 'i').test(r)));
   return list.map((m, i) => {
     let t = String(m);
     if (i === 0 && dropOpener && HABIT_OPENER.test(t)) t = dropFirst(t, HABIT_OPENER);
     if (i === 0 && used.has(firstWord(t))) t = dropFirst(t, /^\s*[\p{L}]+[\s,.!?…]*/u);
+    for (const n of namesLately) t = dropName(t, n);
+    t = toHim(t.replace(/[‘’]/g, '\''));                  // straight apostrophes: every check reads them the same
     return t
       // the PPV card shows these: never in her text ("[PPV: c4]", "[price]")
       .replace(/\[\s*(?:ppv|price|item|c\d+)\b[^\]]*\]/gi, '')
@@ -351,7 +390,7 @@ function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = fals
       .replace(/\s*[—–]\s*/g, ', ')
       .replace(/~+(\s+)(?=\p{Ll})/gu, ',$1')
       .replace(/~+/g, '')
-      .replace(EMOJI, e => (++seen > 1 ? '\u0000' : e))
+      .replace(EMOJI, e => (lately.has(e.replace(/️/g, '')) || ++seen > 1 ? '\u0000' : e))
       // a removed emoji between two sentences ("Mike 😊 What…"): keep them apart
       .replace(/([.!?])?\s*\u0000[\s\u0000]*(?=\p{Lu})/gu, (_, p) => `${p || '.'} `)
       .replace(/\s*\u0000[\s\u0000]*/g, ' ')
@@ -363,6 +402,55 @@ function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = fals
       .replace(/\s{2,}/g, ' ')
       .trim();
   }).filter(Boolean);
+}
+
+// Her questions, when this reply shouldn't ask (he told her what he wants, he just
+// answered her) or asks more than `keep`: a proposal becomes a statement ("How about
+// I show you…?" → "Let me show you…", "How about you open it?" → "Open it…"), a tag
+// goes ("…, do you?"), a question after what she said is left out. "Tonight?" (his
+// word back) isn't a question. A reply that is only questions stays as it is: it's
+// rewritten instead.
+const PROPOSALS = [
+  [/^how\s+about\s+i\s+let\b/i, 'I\'ll let'], [/^how\s+about\s+i\b/i, 'Let me'], [/^how\s+about\s+we\b/i, 'Let\'s'],
+  [/^what\s+if\s+i\b/i, 'Maybe I\'ll'], [/^how\s+about\s+you\s+/i, ''],
+];
+const LEAD_IN = /(?:\btell\s+me|\bso|\band|\bbut|\bbabe|\bbaby|\blove|\bhun|\bhoney|\bnow)\s*$/i;
+const wordCount = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
+function unQuestion(list, { keep = 0, his = '' } = {}) {
+  let left = keep;
+  const fixed = list.map((m) => sentences(m).map((raw) => {
+    const s = raw.trim();
+    const body = s.replace(/\?+[\s\S]*$/, '');
+    if (!s.includes('?') || isEcho(body, his)) return s;
+    if (left > 0) { left -= 1; return s; }
+    const tail = ((s.match(/\?+\s*((?:\p{Extended_Pictographic}️?\s*)*)$/u) || [])[1] || '').trim();
+    const end = tail ? ` ${tail}` : '';
+    const p = PROPOSALS.find(([re]) => re.test(body));
+    if (p) {
+      const t = body.replace(p[0], p[1]).trim();
+      return `${t.charAt(0).toUpperCase()}${t.slice(1)}…${end}`;
+    }
+    // what's left of a sentence ends like one when more follows ("…, don't you? Tell me" → "…. Tell me")
+    const stop = (t, i, all) => `${t}${!end && i < all.length - 1 && !/[.!?…]$/.test(t) ? '.' : ''}${end}`;
+    const tag = body.match(/^(.*\S)\s*,\s*(?:do|don'?t|did|didn'?t|are|aren'?t|is|isn'?t|right|huh|yeah|no|won'?t|can'?t|wouldn'?t)\b(?:\s+(?:you|ya|u|it|i|we))?\s*$/i);
+    if (tag && wordCount(tag[1]) >= 3) return { t: tag[1], stop };
+    const clause = body.match(/^(.*\S)\s*,\s*(?:so\s+|and\s+|but\s+)?(?:what|how|where|when|who|why|which|do|did|are|is|can|could|would|will|have|wanna|want|should)\b.*$/i);
+    if (clause && wordCount(clause[1]) >= 3 && !LEAD_IN.test(clause[1])) return { t: clause[1], stop };
+    return null;                                           // a question on its own: left out
+  }).map((x, i, all) => (x && typeof x === 'object' ? x.stop(x.t, i, all) : x)));
+  if (wordCount(fixed.flat().filter(Boolean).join(' ')) < 3) return list;
+  return fixed.map(parts => parts.filter(Boolean).join(' ').trim()).filter(Boolean);
+}
+
+// Sentences that shouldn't be there, left out when the rest of the reply still says
+// something: a comment on how eager he is ("you don't waste time"), a guess at his
+// time of day, a promise of content when no PPV can go with it.
+function dropSentences(list, { his = '', noOffer = '' } = {}) {
+  const bad = (s) => COMMENTS_EAGER.test(s) || (GUESSES_TIME.test(s) && !SAYS_TIME.test(his)) || (noOffer && PROMISES_SHOW.test(s));
+  const parts = list.map(sentences);
+  const kept = parts.map(p => p.filter(s => !bad(s)));
+  if (wordCount(kept.flat().join(' ')) < 3 || kept.every((p, i) => p.length === parts[i].length)) return list;
+  return kept.map(p => p.join(' ').trim()).filter(Boolean);
 }
 
 // Line breaks and tabs typed straight into a JSON text ("…good day!⏎"]), which
@@ -419,4 +507,4 @@ function readReply(text) {
   return { messages: lines, ppv: null, learned: [], handover: '', format_ok: false };
 }
 
-module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, chatLine };
+module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, unQuestion, dropSentences, chatLine };

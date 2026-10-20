@@ -45,10 +45,10 @@ const readLine = (u) => {
   if (u.story) bits.push('the story so far');
   if (u.facts) bits.push(`${u.facts} note${u.facts === 1 ? '' : 's'} about him`);
   if (u.money) bits.push('his spending');
-  const level = u.level ? ` He seemed ${u.level.mood}, ${LEVEL[u.level.his]}${u.level.pulled_back ? ' and slowing down' : ''}: she could go up to ${LEVEL[u.level.max]}.` : '';
+  const level = u.level ? ` He seemed ${u.level.mood}, ${LEVEL[u.level.his]}${u.level.pulled_back ? ' and slowing down' : ''}: she could go up to ${LEVEL[u.level.max]}${u.level.lead && u.level.his >= 2 ? ' and lead' : ''}.` : '';
   const examples = u.examples ? ` ${u.examples} examples from the agency's good chats.` : '';
   const type = u.fan_type ? ` Treated him as: ${u.fan_type.toLowerCase()}.` : '';
-  const phase = { offer: 'time to offer', after_buy: 'after a buy', no_buy: 'after a no' }[u.phase];
+  const phase = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[u.phase];
   const selling = u.selling ? ` Selling${phase ? `: ${phase}` : ''}${u.sales ? `, ${u.sales} selling examples` : ''}.` : '';
   return `The AI read ${bits.join(', ')}.${type}${level}${examples}${selling}`;
 };
@@ -64,14 +64,14 @@ const keptMessages = (result, used) => result.replies.map((r, i, all) => ({
 }));
 
 // A PPV she sent: price, what it is, exactly what's inside, and what he did with it.
-const PPV_STATUS = { pending: 'Not opened yet', bought: 'He bought it', not_bought: 'He didn\'t buy it' };
+const PPV_STATUS = { pending: 'Not opened yet', bought: 'He bought it', not_bought: 'He didn\'t buy it', ignored: 'He saw it and isn\'t opening it' };
 function PpvCard({ ppv, creatorId, children }) {
   return (
     <div className='flex max-w-[85%] flex-col gap-1 self-end rounded-xl border border-dashed border-warn/50 bg-warn/5 px-3 py-2 text-xs'>
       <span className='flex items-center gap-1.5 font-medium'><Lock className='size-3.5 text-warn' />PPV ${ppv.price} · {ppv.series ? `${ppv.series}, step ${ppv.step}: ` : ''}{ppv.title} · {ppv.what}</span>
       {creatorId && ppv.asset_ids?.length > 0 && <Thumbs creatorId={creatorId} ids={ppv.asset_ids} />}
       <span className='text-muted-foreground'>{ppv.description}</span>
-      {ppv.status && <span className={cn('font-medium', ppv.status === 'bought' ? 'text-good' : ppv.status === 'not_bought' ? 'text-bad' : 'text-muted-foreground')}>
+      {ppv.status && <span className={cn('font-medium', ppv.status === 'bought' ? 'text-good' : ppv.status === 'not_bought' ? 'text-bad' : ppv.status === 'ignored' ? 'text-warn' : 'text-muted-foreground')}>
         {PPV_STATUS[ppv.status]}{ppv.status === 'bought' ? (ppv.speed === 'slow' ? ' after a while' : ' right away') : ''}
       </span>}
       {children}
@@ -125,7 +125,7 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId }) {
         <span className='font-medium'>{result.label}</span>
         <Badge variant='outline' className={cn('font-normal', s.tone)}>{s.label}</Badge>
         <span className='text-muted-foreground'>{cost(result.cost)} · {(result.ms / 1000).toFixed(1)} s</span>
-        {result.retried && <span className='text-muted-foreground'>· rewritten once</span>}
+        {result.retried && <span className='text-muted-foreground'>· rewritten{result.drafts > 2 ? ` ${result.drafts - 1} times` : ' once'}</span>}
       </div>
       {result.status === 'error' ? <p className='text-sm text-bad'>{result.error}</p> : (
         <div className='flex flex-col gap-1.5'>
@@ -148,6 +148,9 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId }) {
       )}
       {result.retried && result.first_problems?.length > 0 && (
         <p className='text-xs text-muted-foreground'>First draft turned down: {result.first_problems.join(' ')}</p>
+      )}
+      {result.style?.length > 0 && result.status !== 'error' && (
+        <p className='text-xs text-warn'>Could sound better: {result.style.join(' ')}</p>
       )}
       {result.review && <p className='text-xs text-muted-foreground'>Claude checked it: {result.review.ok ? 'fine' : result.review.declined ? 'declined to look' : 'not fine'}.</p>}
       {result.format_ok === false && <p className='text-xs text-muted-foreground'>This writer didn&apos;t answer in the format asked, so its whole answer is shown.</p>}
@@ -394,11 +397,18 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
               <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}>{m.text}</Bubble>
               {m.ppv && (
                 <PpvCard ppv={m.ppv} creatorId={page.creator_id}>
-                  {i === lastPpvAt && m.ppv.status === 'pending' && !busy && (
-                    <div className='mt-1 flex flex-wrap gap-1.5'>
-                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'fast')}>Bought right away</Button>
-                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'slow')}>Bought after a while</Button>
-                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'not_bought')}>Didn&apos;t buy</Button>
+                  {i === lastPpvAt && ['pending', 'ignored'].includes(m.ppv.status) && !busy && (
+                    <div className='mt-1 flex flex-col gap-1'>
+                      {/* he wrote past it: what did he do with it? (the AI treats it as still unopened until you say) */}
+                      {m.ppv.status === 'pending' && test.slice(i + 1).some(x => x.from === 'fan') && (
+                        <span className='font-medium text-warn'>He wrote after it: did he open it?</span>
+                      )}
+                      <div className='flex flex-wrap gap-1.5'>
+                        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'fast')}>Bought right away</Button>
+                        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'slow')}>Bought after a while</Button>
+                        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'not_bought')}>Didn&apos;t buy</Button>
+                        {m.ppv.status === 'pending' && <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'ignored')}>Ignores it</Button>}
+                      </div>
                     </div>
                   )}
                 </PpvCard>

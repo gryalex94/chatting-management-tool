@@ -8,7 +8,10 @@
  *    note for the writer ("he asks if you're real").
  *  - checkReply: every reply before anyone sees it — contact details, claiming to
  *    be human, minors, selling (off for now), promising photos, repeating herself.
- *    Doubtful ones ("I wish we could meet") are passed to Claude to judge.
+ *    Doubtful ones ("I wish we could meet") are passed to Claude to judge. It also
+ *    lists how the reply sounds (voiceProblems: too many questions, the same
+ *    opener or phrase again, an assistant's words): not rules, so such a draft is
+ *    rewritten once and then shown with a note.
  * Both return plain-language reasons, shown as they are in the tool.
  */
 
@@ -33,6 +36,8 @@ const WANTS_STOP = /\b(?:stop\s+(?:texting|messaging|writing|sending)|leave\s+me
 const WANTS_MEDIA = /\b(?:send\s+(?:me\s+)?(?:a\s+|some\s+|more\s+)?(?:pic|pics|picture|pictures|photo|photos|video|videos|vid|vids|selfie|nudes?|voice\s+(?:note|message))|show\s+me\s+(?:your|ur|some))\b/i;
 
 const has = (re, s) => re.test(String(s || ''));
+// Curly apostrophes and quotes ("I’m", “…”) read as straight ones, so every check sees them.
+const straight = (s) => String(s || '').replace(/[‘’ʼ`]/g, '\'').replace(/[“”]/g, '"');
 
 /**
  * The fan's latest message(s), before any AI sees them. Returns
@@ -40,7 +45,7 @@ const has = (re, s) => re.test(String(s || ''));
  * stop / handover mean no AI writes a reply; review means Claude decides first.
  */
 function screenFan(texts) {
-  const all = texts.map(t => String(t || '')).join('\n');
+  const all = straight(texts.map(t => String(t || '')).join('\n'));
   if (has(MINOR_WORDS, all)) {
     return { action: 'stop', reasons: ['His message points to someone under 18. It never goes to the AI; a person should look at this chat.'], notes: [] };
   }
@@ -89,6 +94,8 @@ const normText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
  */
 // The writer's answer format leaking into a message: {"messages": [" … "]}.
 const LOOKS_LIKE_CODE = /^\s*[{[]\s*"|"\s*[\]}]|"(?:messages|learned|handover)"|"\w+"\s*:\s*[[{"]/;
+// Asking him over to another app ("add me on…", "my snap").
+const INVITES = /\b(?:add|find|follow|message|dm|text|hit|chat\s+with)\s+me\s+(?:up\s+)?(?:on|at|over)\b|\bmy\s+(?:snap\w*|insta\w*|telegram|whats\s?app|kik|discord|twitter|tiktok|reddit|onlyfans|fansly|ig)\b/i;
 // Greeting him again mid-chat (a repeated first word is dropped in prompts.tidyMessages).
 const GREETS = /^\s*(?:he+y+|hi+|hello+)\b/i;
 
@@ -101,21 +108,29 @@ const replyLevel = (t) => (EXPLICIT.test(t) ? 3 : SUGGESTIVE.test(t) ? 2 : FLIRT
 
 // Asking for money outside a PPV: never, selling or not.
 const ASKS_MONEY = /\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips?\b|\bpay\s+me\b|\b(?:cash\s?app|venmo|paypal|zelle)\b/i;
-// What only a real person could say: she's an AI creator, her content isn't made live.
-const LIVE_CLAIM = /\b(?:just|literally)\s+(?:took|shot|filmed|recorded|made)\s+(?:this|it|these)\b|\b(?:taking|filming|recording|shooting)\s+(?:it|this|one|them|a\s+\w+)\s+(?:right\s+)?now\b|\block(?:ing)?\s+the\s+door\b|\bmade\s+(?:it|this)\s+(?:right\s+now|live)\b/i;
+// Her content isn't made live: no "just took this", "filming it right now". (Setting
+// the scene in a sexting story, "let me close the curtains", is fine: it's her character.)
+const LIVE_CLAIM = /\b(?:just|literally)\s+(?:took|shot|filmed|recorded|made)\s+(?:this|it|these)\b|\b(?:taking|filming|recording|shooting)\s+(?:it|this|one|them|a\s+\w+)\s+(?:right\s+)?now\b|\bmade\s+(?:it|this)\s+(?:right\s+now|live)\b/i;
+// Promising to show or send him something ("how about I show you…", "something I've
+// been saving"): only with a PPV attached, or when one could follow.
+const PROMISES_SHOW = /\b(?:how\s+about\s+i\s+(?:show|send|give)|let\s+me\s+(?:show|send|give)\s+you|i'?ll\s+(?:show|send|give)\s+you|i\s+(?:can|could|will|wanna|want\s+to)\s+(?:show|send)\s+you|want\s+me\s+to\s+(?:show|send)|wanna\s+see\s+(?:it|more|something|what)|(?:got|have)\s+(?:something|a\s+surprise)\s+(?:special\s+|naughty\s+|hot\s+)?(?:for|just\s+for)\s+you|something\s+i'?ve\s+been\s+saving|(?:show|give)\s+you\s+(?:exactly\s+)?(?:how|what)\s+(?:i|you)\b|wait\s+(?:till|until|'?til)\s+you\s+see|what\s+else\s+i'?(?:ve|\s+have)?\s*got|i\s+(?:have|'?ve\s+got)\s+(?:more|something\s+else)\s+(?:for\s+you|coming))/i;
 
 /**
  * A drafted reply against the house rules. `selling`: she may sell through a PPV;
  * `offering`: this reply carries one (then price and content talk is its caption,
- * and the caption may be one step spicier than the chat).
+ * and the caption may be one step spicier than the chat); `noOffer`: why no PPV can
+ * go out now (then she mustn't promise one either). `voice`: what her reply is
+ * checked against for how it sounds (see voiceProblems); returned as `style`.
  */
-function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, selling = false, offering = false } = {}) {
+function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, selling = false, offering = false, noOffer = '', voice = null } = {}) {
   const list = (messages || []).map(m => String(m || '').trim()).filter(Boolean);
-  if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'] };
-  const all = list.join('\n');
+  if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'], style: [] };
+  const all = straight(list.join('\n'));
   const block = [], review = [];
   if (has(UNDER_18, all) || has(MINOR_WORDS, all)) block.push('It mentions someone under 18.');
-  for (const [re, what] of CONTACT) if (re.test(all)) block.push(`It contains ${what}: she only chats on Fanvue.`);
+  // an app or site he named himself ("saw you on reddit") may be said back, as long as she doesn't invite him there
+  const named = (re) => voice?.his && re.test(straight(voice.his)) && !INVITES.test(all);
+  for (const [re, what] of CONTACT) if (re.test(all) && !(what === 'another app or site' && named(re))) block.push(`It contains ${what}: she only chats on Fanvue.`);
   if (has(CLAIMS_HUMAN, all)) block.push('It says or suggests she is a real person. She is an AI character.');
   if (has(ASKS_MONEY, all)) block.push('It asks for a tip or money. She only sells through a PPV.');
   else if (!selling && has(SELLS, all)) block.push('It sells, names a price or asks for a tip. Selling is off for now.');
@@ -124,7 +139,8 @@ function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, sel
     : has(PROMISES_MEDIA, all) || has(PROMISES_CONTENT, all)) {
     block.push(selling ? 'It promises a voice note. She can\'t send any.' : 'It promises or teases a photo, video or content. She can\'t send any (and doesn\'t sell yet).');
   }
-  if (has(LIVE_CLAIM, all)) block.push('It says she is making or filming something right now, or something only a real person could do. She is an AI character.');
+  if (has(LIVE_CLAIM, all)) block.push('It says she is making or filming something right now. Her content is already made.');
+  if (selling && !offering && noOffer && has(PROMISES_SHOW, all)) block.push(`It promises to show or send him something, but no PPV can go with it now: ${noOffer}`);
   if (list.length > MAX_MESSAGES) block.push(`It has ${list.length} messages; the most is ${MAX_MESSAGES}.`);
   if (list.some(m => m.length > MAX_CHARS)) block.push('A message is too long for a chat.');
   if (list.some(m => LOOKS_LIKE_CODE.test(m))) block.push('It came out as code (brackets, quotes or "messages"), not a chat message.');
@@ -134,9 +150,94 @@ function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, sel
   if (list.some(m => seen.has(normText(m)))) block.push('It repeats something she already sent him.');
   if (has(MEETING, all)) review.push('It talks about meeting in person.');
   if (has(DOUBTFUL_WORDS, all)) review.push('It mentions children, school or family.');
-  if (block.length) return { verdict: 'block', problems: [...block, ...review] };
-  if (review.length) return { verdict: 'review', problems: review };
-  return { verdict: 'ok', problems: [] };
+  const style = voice ? voiceProblems(list, voice) : [];
+  if (block.length) return { verdict: 'block', problems: [...block, ...review], style };
+  if (review.length) return { verdict: 'review', problems: review, style };
+  return { verdict: 'ok', problems: [], style };
+}
+
+// ── How she sounds ───────────────────────────────────────────────────────────
+// Words of an assistant or an office, not a girl texting: [pattern, what it is].
+const STIFF = [
+  [/\bagenda\b/i, '"agenda"'],
+  [/\bplans?\s+for\s+(?:the|your)\s+day\b|\bwhat\s+are\s+your\s+plans\s+for\b/i, '"plans for the day"'],
+  [/\btrip(?:s|ping)?\s+me\s+up\b/i, '"trips me up"'],
+  [/\bi\s+must\s+say\b|\bindeed\b|\bdelightful\b|\bintriguing\b|\bfascinating\b|\bquite\s+the\b|\bmy,?\s+my\b|\bwell,?\s+well\b|\bwhilst\b|\bembark\b/i, 'an assistant\'s words'],
+  [/\bi\s+(?:like|love|appreciate)\s+(?:your|the)\s+honesty\b/i, '"I like your honesty"'],
+  [/\bsomeone(?!\s+(?:else|like\s+you|special))(?:'?s|\s+(?:is|needs|wants|seems|sounds|got|has|knows|likes|loves|can'?t|'?s\s+got))\b/i, '"someone\'s eager" (talk to him, not about him)'],
+  [/\b(?:aren'?t|isn'?t|don'?t|doesn'?t)\s+(?:they|he)\s*\?/i, '"aren\'t they?" (talk to him, not about him)'],
+  [/\bi\s+(?:like|love|adore)\s+(?:a\s+)?(?:man|guy|men|guys|boy|boys)\s+who\b|\b(?:man|guy)\s+(?:who\s+)?knows\s+what\s+he\s+wants\b/i, '"I like a man who…"'],
+  [/\b(?:so|now)\s+tell\s+me\b|(?:^|[\n.!?…]\s*)tell\s+me\s*,/im, '"so tell me…"'],
+];
+// Commenting on how eager or direct he is instead of answering him (the AI's way of stalling).
+const COMMENTS_EAGER = /\byou\s+(?:don'?t|do\s+not)\s+waste\s+(?:any\s+)?time\b|\bwasting\s+no\s+time\b|\b(?:how|so)\s+(?:eager|direct|impatient|forward|bold|straightforward)\s+you\s+are\b|\byou'?re\s+(?:so\s+|very\s+|really\s+|quite\s+)?(?:eager|direct|impatient|forward|straightforward)\b|\bstraight\s+to\s+the\s+point\b|\bcut(?:ting)?\s+(?:right\s+)?to\s+the\s+chase\b|\bnot\s+(?:shy|one\s+to\s+beat\s+around)\b|\bi\s+(?:like|love)\s+(?:how|that)\s+you(?:'re|\s+are)?\s+(?:not\s+shy|so\s+eager|direct|ready|eager)\b/i;
+// Guessing his time of day ("what's keeping you up this early?") when he didn't say it.
+const GUESSES_TIME = /\b(?:this|so)\s+(?:early|late)\b|\bup\s+(?:so\s+)?(?:early|late)\b|\bkeep(?:s|ing)?\s+you\s+up\b|\bthis\s+(?:morning|afternoon|evening)\b|\bstart\s+(?:the|your)\s+day\b/i;
+const SAYS_TIME = /\b(?:early|late|morning|night|tonight|sleep\w*|awake|bed|tired|insomnia|\d{1,2}\s*(?:am|pm)|o'?clock|time\s+zone)\b/i;
+const PET_PHRASE = /\bgood\s+(?:boy|girl)\b/i;
+const STOPW = new Set('i im ive id ill you youre your me my mine the a an and or but to of in on at for with from about it its is are was be been am this that these those so do does dont did just like really very what whats how when where who why can cant will would could should have has had not no yes yeah oh ok okay well get got go going want wanna gonna know think one some more much too now then here there they them we us he him she her his babe baby'.split(' '));
+const wordsOf = (t) => String(t).toLowerCase().replace(/[’']/g, '').match(/[a-z0-9]+/g) || [];
+// runs of n words that say something (not only little words like "do you want to")
+function runs(t, n) {
+  const w = wordsOf(t), out = new Set();
+  for (let i = 0; i + n <= w.length; i++) {
+    const g = w.slice(i, i + n);
+    if (g.some(x => x.length >= 4 && !STOPW.has(x))) out.add(g.join(' '));
+  }
+  return out;
+}
+const opening = (t) => wordsOf(t).slice(0, 2).join(' ');
+
+// "Tonight?", "Special treatment?", "You want hotter?": his own words back with a
+// question mark. A reaction, not a question to him (but a habit when it's every reply).
+const ASKS_WORD = /^\W*(?:what|whats|how|where|when|who|why|which|do|does|did|are|is|was|were|can|could|would|will|have|has|should|wanna|want|may|shall)\b/i;
+function isEcho(sentence, his = '') {
+  const w = wordsOf(sentence);
+  if (!w.length || w.length > 4 || ASKS_WORD.test(straight(sentence).replace(/^you\s+/i, ''))) return false;
+  const hisWords = new Set(wordsOf(his));
+  return w.some(x => x.length >= 3 && !STOPW.has(x) && hisWords.has(x)) || /^\W*(?:really|seriously|yeah|yes|no\s+way|oh|huh|right)\W*$/i.test(sentence);
+}
+// A message's sentences (an emoji before a capital letter ends one too: "Mike 😊 What…").
+const SENTENCE = /[^.!?…\n]+(?:[.!?…]+|$)(?:\s*\p{Extended_Pictographic}️?)*/gu;
+function sentences(t) {
+  const s = String(t).replace(/(\p{Extended_Pictographic}️?)\s+(?=\p{Lu})/gu, '$1\n');
+  const out = (s.match(SENTENCE) || []).map(x => x.trim()).filter(Boolean);
+  return out.length ? out : [String(t)];
+}
+// Her questions to him: sentences that end with "?" (an emoji may follow), echoes left out.
+function questionsIn(list, his = '') {
+  return list.flatMap(sentences).filter(s => /\?/.test(s) && !isEcho(s.replace(/\?[\s\S]*$/, ''), his)).length;
+}
+
+/**
+ * How a draft sounds, against her last replies and his messages. `recent` = her
+ * last replies (each one reply as one text, newest last), `his` = his recent
+ * messages as one text, `noQuestion` = why this reply shouldn't ask anything ('' =
+ * it may ask one). Returns plain-language problems ([] = fine).
+ */
+function voiceProblems(list, { recent = [], his = '', noQuestion = '' } = {}) {
+  const all = straight(list.join('\n'));
+  const out = [];
+  const questions = questionsIn(list, his);
+  if (questions > 1) out.push(`It asks him ${questions} questions; one at most, and often none.`);
+  else if (questions && noQuestion) out.push(`It asks him a question, but ${noQuestion}`);
+  if (COMMENTS_EAGER.test(all)) out.push('It comments on how eager or direct he is instead of answering him: just say yes, play along or lead.');
+  const last = recent.slice(-6);
+  const firstSentence = (t) => sentences(t)[0] || '';
+  const echoStart = (t) => /\?/.test(firstSentence(t)) && isEcho(firstSentence(t).replace(/\?[\s\S]*$/, ''), his);
+  if (echoStart(list[0]) && last.slice(-2).some(echoStart)) out.push(`It opens by repeating his words as a question again ("${firstSentence(list[0]).trim()}"). React differently.`);
+  const open = opening(list[0]);
+  const sameStart = open.includes(' ') && last.find(r => opening(r) === open);
+  if (sameStart) out.push(`It starts like one of her last replies ("${list[0].split(/\s+/).slice(0, 2).join(' ')}…"). Start differently.`);
+  const mine = runs(all, 4);
+  const reused = [...new Set(last.flatMap(r => [...runs(r, 4)].filter(g => mine.has(g))))];
+  if (reused.length) out.push(`It reuses "${reused[0]}" from one of her last replies. Say something new.`);
+  if (PET_PHRASE.test(all) && last.some(r => PET_PHRASE.test(r))) out.push(`It says "${all.match(PET_PHRASE)[0].toLowerCase()}" again.`);
+  const echo = [...runs(his, 5)].filter(g => runs(all, 5).has(g));
+  if (echo.length) out.push(`It repeats his own words back to him ("${echo[0]}"). Pick up one word of his at most.`);
+  for (const [re, what] of STIFF) if (re.test(all)) out.push(`It sounds like an assistant, not a girl texting: ${what}.`);
+  if (GUESSES_TIME.test(all) && !SAYS_TIME.test(his)) out.push('It guesses his time of day; she only knows her own.');
+  return out;
 }
 
 // A character must come across as an adult: nothing young, school-age or about minors.
@@ -149,4 +250,4 @@ function personaProblems(text) {
     : [];
 }
 
-module.exports = { screenFan, checkReply, personaProblems, replyLevel, MAX_MESSAGES };
+module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, personaProblems, replyLevel, MAX_MESSAGES };
