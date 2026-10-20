@@ -159,6 +159,9 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId, onMa
       {result.learned?.length > 0 && (
         <p className='text-xs text-muted-foreground'>Would remember: {result.learned.map(l => l.note).join(' · ')}</p>
       )}
+      {result.about_me?.length > 0 && (
+        <p className='text-xs text-muted-foreground'>Said about herself: {result.about_me.join(' · ')} (kept for this chat)</p>
+      )}
       {result.scene && <p className='text-xs text-muted-foreground'>Scene after this reply: {sceneLine(result.scene)}</p>}
       {canKeep && live && play.done && result.replies.length > 0 && (
         <div>
@@ -261,6 +264,11 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   };
   // a kept reply's new facts about him join what she knows for the rest of this chat
   const withLearned = (list, result) => [...new Set([...list, ...(result?.learned || []).map(l => l.note).filter(Boolean)])].slice(-20);
+  // what she said about herself in a kept reply joins her diary for the rest of this chat (never saved)
+  const addAboutMe = (result) => {
+    if (!result?.about_me?.length) return;
+    setSession(s => (s ? { ...s, diary_add: [...new Set([...(s.diary_add || []), ...result.about_me])].slice(-20) } : s));
+  };
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (fans || []).filter(f => !q || [f.display_name, f.fan_username, f.fan_nickname].some(v => String(v || '').toLowerCase().includes(q)));
@@ -323,6 +331,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         next = [...next, ...keptMessages(first, last.id)];
         known = withLearned(learned, first);
         setLearned(known);
+        addAboutMe(first);
         setRounds(rs => rs.map(r => (r === last ? { ...r, kept: first.model } : r)));
       }
     }
@@ -352,6 +361,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const keep = (round, result) => {
     setTest(t => [...t, ...keptMessages(result, round.id)]);
     setLearned(l => withLearned(l, result));
+    addAboutMe(result);
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
   };
   // keep the newest message in view while her messages arrive one by one

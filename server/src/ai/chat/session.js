@@ -25,6 +25,23 @@ const LIGHT = new Set(['chatty', 'joking', 'curious', 'flirty', 'horny', 'romant
 const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|too\s+expensive|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
 const FREE = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|one|something)|something\s+free|anything\s+free)\b/i;
 const WANTS_TO_BUY = /\b(?:what\s+(?:do\s+you|have\s+you|you)\s+(?:got|have|sell)|(?:send|show)\s+me\s+(?:something|more|what)|i'?ll\s+(?:buy|take|get)\s+it|how\s+much|price|unlock|wanna\s+see\s+(?:more|something)|got\s+(?:anything|something)\s+(?:for\s+me|new|hot|naughty))\b/i;
+// Her mood of the day (A7): picked from the date, so every fan gets the same Yuna that day.
+const MOODS_OF_DAY = [
+  'a bit sleepy and cosy', 'hyper and giggly', 'a lazy, slow mood', 'upbeat, a busy day', 'soft and cuddly', 'playful and a bit cheeky',
+  'quiet and thoughtful', 'in a great mood, music on', 'tired after a long day, but happy to chat', 'restless, can\'t sit still',
+  'chilled, nothing planned', 'a little moody, could use some cheering up',
+];
+// Her small moments (A4): what she does, and when in a conversation it fits ("start": her first
+// reply; "talk": small talk after a couple of replies; "any": whenever small talk goes on).
+const EVENTS = {
+  life_update: { slot: 'start', text: 'share one small, specific thing from your day or what you\'re doing right now, in a line, before you answer him' },
+  bad_day: { slot: 'start', text: 'mention lightly that you\'ve had a rough day (one real-sounding reason), and let him cheer you up a little; don\'t dwell on it' },
+  advice: { slot: 'talk', text: 'ask his advice on something small of yours: two outfits to pick from, what to cook tonight, what to do this weekend' },
+  game: { slot: 'talk', text: 'start a little game: two truths and a lie about you, or a "would you rather"' },
+  game_flirty: { slot: 'talk', text: 'start a little game: "guess what I\'m wearing", playfully' },
+  double_text: { slot: 'any', text: 'after your reply, send a second short message as an afterthought, the way people do ("oh and…", "wait, also…")' },
+  first_to_know: { slot: 'talk', text: 'tell him he\'s the first to know about your new set (name it, say what\'s in it in a line); no price unless he asks (A6)' },
+};
 const AIMS = {
   get_to_know: 'Get to know him: welcome him, let him talk, nothing sold before he\'s clearly in the mood',
   rapport: 'Build rapport, don\'t push: he bought recently. Nothing is offered unless he asks or starts the sexting himself',
@@ -126,6 +143,59 @@ function madeUpState(type, profile) {
   };
 }
 
+// ── Her day ───────────────────────────────────────────────────────────────────
+/** Her mood today, the same for every fan (A7). */
+function herMood(now = new Date(), timeZone = 'America/New_York') {
+  const day = new Date(now).toLocaleDateString('en-CA', { timeZone });
+  let h = 0;
+  for (const ch of day) h = (h * 31 + ch.charCodeAt(0)) % 100003;
+  return MOODS_OF_DAY[h % MOODS_OF_DAY.length];
+}
+
+/**
+ * A small moment of hers for this conversation, or null (A2–A5): about every other
+ * conversation with an intimate or girlfriend fan, every third with a friendly or
+ * flirty one, none with a new one or a time waster; never during selling or
+ * sexting (that's decided when it's used, see eventNow). `newItem` = a set added
+ * lately, for a whale's "first to know".
+ */
+function pickEvent({ profile, aim = 'read', mood = '', newItem = null, rand = Math.random }) {
+  if (aim === 'short' || profile.time_waster || profile.new_sub) return null;
+  const chance = ['intimate', 'girlfriend'].includes(profile.closeness) ? 0.5 : ['friendly', 'flirty'].includes(profile.closeness) ? 1 / 3 : 0;
+  if (!chance || rand() >= chance) return null;
+  if (profile.tier === 'whale' && newItem) return { kind: 'first_to_know', item: newItem, ...EVENTS.first_to_know, text: EVENTS.first_to_know.text.replace('your new set', `your new set "${newItem}"`), done: false };
+  const pool = ['life_update', 'advice', 'double_text', ['flirty', 'intimate', 'girlfriend'].includes(profile.closeness) ? 'game_flirty' : 'game'];
+  if (/moody/.test(mood)) pool.push('bad_day');
+  const kind = pool[Math.floor(rand() * pool.length) % pool.length];
+  return { kind, ...EVENTS[kind], done: false };
+}
+
+/** Does the moment planned fit this reply? `herReplies` = her replies in this conversation so far. */
+function eventFits(event, { goal, herReplies = 0, sexting = false }) {
+  if (!event || event.done || sexting) return false;
+  const calm = ['chat', 'get_to_know', 'welcome_back', 'follow_up'].includes(goal);
+  if (!calm) return false;
+  if (event.slot === 'start') return herReplies === 0;
+  if (event.slot === 'talk') return herReplies >= 2 && goal !== 'follow_up';
+  return true;
+}
+
+/** What she opened and closed past conversations with (A9): not to be repeated. */
+function rotationOf(chat = [], now = Date.now()) {
+  const out = { openers: [], goodbyes: [] };
+  let cur = null, prev = null;
+  const flush = () => { if (cur) { if (cur.first) out.openers.push(cur.first); if (cur.last) out.goodbyes.push(cur.last); } };
+  for (const m of chat) {
+    if (m.mass) continue;
+    const t = m.at ? Date.parse(m.at) : (prev ?? now);
+    if (!cur || (prev != null && t - prev >= PAUSE)) { flush(); cur = { first: '', last: '' }; }
+    if (!m.from_fan && clean(m.text)) { if (!cur.first) cur.first = clean(m.text).slice(0, 80); cur.last = clean(m.text).slice(0, 80); }
+    prev = t;
+  }
+  flush();
+  return { openers: out.openers.slice(-10), goodbyes: out.goodbyes.slice(-10) };
+}
+
 // ── The plan for this conversation ────────────────────────────────────────────
 const daysText = (d) => (d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`);
 /**
@@ -133,7 +203,7 @@ const daysText = (d) => (d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days 
  * fanStateOf, `away` = how long he was gone (ms). Returns the session the practice
  * room keeps: { aim, aim_text, why, warm_up, closeness, mood, lighter, no_sell, changes }.
  */
-function startSession({ profile, state, away = null, now = new Date() }) {
+function startSession({ profile, state, away = null, now = new Date(), timeZone = 'America/New_York', newItem = null, rand = Math.random }) {
   const d = profile.days_since_buy;
   let aim, why;
   if (state.faded) [aim, why] = ['short', `a time waster with ${state.strikes7} failed conversation${state.strikes7 === 1 ? '' : 's'} this week: lowest priority (Q19b)`];
@@ -143,9 +213,11 @@ function startSession({ profile, state, away = null, now = new Date() }) {
   else if (state.buyer && d != null && d >= 30) [aim, why] = ['sell', `he hasn't bought for ${d} days: plan to sell him something today (B2)`];
   else if (!state.buyer && !profile.time_waster && state.conversations >= 3) [aim, why] = ['sell', `${state.conversations} conversations and never a buy: plan to offer something today (B2)`];
   else [aim, why] = ['read', d != null ? `his last buy was ${daysText(d)}: read his vibe, no pushing (B2)` : 'nothing bought yet: read his vibe while talking (B2)'];
+  const mood_day = herMood(now, timeZone);
   return {
     aim, aim_text: AIMS[aim], why, warm_up: WARM_UP[profile.closeness] ?? WARM_UP.new, closeness: profile.closeness,
     started_at: now.toISOString(), mood: null, lighter: 0, no_sell: '', changes: [],
+    mood_day, event: pickEvent({ profile, aim, mood: mood_day, newItem, rand }), diary_add: [],
   };
 }
 
@@ -157,6 +229,9 @@ function resumeSession(s) {
     closeness: clean(s.closeness) || 'new', started_at: clean(s.started_at) || new Date().toISOString(),
     mood: HEAVY.has(s.mood) ? s.mood : null, lighter: Number.isInteger(s.lighter) ? s.lighter : 0, no_sell: clean(s.no_sell).slice(0, 200),
     changes: Array.isArray(s.changes) ? s.changes.slice(-10).map(c => ({ aim: clean(c.aim), why: clean(c.why).slice(0, 200) })) : [],
+    mood_day: clean(s.mood_day).slice(0, 80),
+    event: s.event && EVENTS[s.event.kind] ? { kind: s.event.kind, ...EVENTS[s.event.kind], text: clean(s.event.text).slice(0, 300) || EVENTS[s.event.kind].text, item: clean(s.event.item).slice(0, 120) || undefined, done: s.event.done === true } : null,
+    diary_add: Array.isArray(s.diary_add) ? s.diary_add.map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-20) : [],
   };
 }
 
@@ -186,4 +261,4 @@ function nextTurn(session, { read = 'chatty', said = '', suspicious = false, tim
   return { session: s, mood };
 }
 
-module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, WARM_UP, AIMS };
+module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, herMood, pickEvent, eventFits, rotationOf, WARM_UP, AIMS, EVENTS };

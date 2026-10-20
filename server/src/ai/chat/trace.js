@@ -95,6 +95,8 @@ function sessionStep({ session = null, state = null, herHere = 0 }) {
     tags: ['B2', 'B3', ...(session.mood ? ['B4'] : []), ...(state?.faded ? ['Q19b'] : [])],
     details: [
       { label: 'PPV allowed from', value: `her message ${session.warm_up} in this conversation (they're ${session.closeness}); ${herHere} so far${herHere >= session.warm_up ? ': allowed when it fits' : ''}` },
+      session.mood_day ? { label: 'Her mood today', value: `${session.mood_day} (the same for every fan today: A7)` } : null,
+      session.event ? { label: 'A moment of hers', value: `${session.event.kind.replace(/_/g, ' ')}: ${session.event.text}${session.event.done ? ' (used)' : ', when small talk allows (A2–A5)'}` } : { label: 'A moment of hers', value: 'none this conversation (chance: every other one when close, every third when friendly or flirty)' },
       session.mood ? { label: 'Mood that sticks', value: `${session.mood}, until he sounds lighter twice in a row (${session.lighter} of 2 so far)` } : null,
       session.no_sell ? { label: 'No selling', value: session.no_sell } : null,
       ...(session.changes || []).map(c => ({ label: 'Plan changed', value: `${aimWord(c.aim)}: ${c.why}` })),
@@ -141,6 +143,7 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         { label: 'Questions', value: plan.ask.allowed ? plan.ask.why : `none: ${plan.ask.why}` },
         { label: 'Length', value: `${plan.length.text} (${plan.length.why})` },
         plan.touch ? { label: 'Also, in passing', value: `${plan.touch.text}: ${plan.touch.why}` } : null,
+        plan.event ? { label: 'A moment of hers', value: `${plan.event.kind.replace(/_/g, ' ')}: ${plan.event.text}` } : null,
         plan.budget ? { label: 'Free talk', value: `${plan.budget.used} of ${plan.budget.limit} small-talk messages${plan.aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}` } : null,
         // what memory brings to this reply, near the top
         plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,
@@ -247,7 +250,7 @@ function coachStep(label, coach) {
  * The writer's drafts and the result. `drafts` = [{ raw, final, ppv, offer, problems,
  * style, review, verdict }] in order; `pick` = the draft shown.
  */
-function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene = null, learned = [], notes = [] }) {
+function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene = null, learned = [], aboutMe = [], typo = null, notes = [] }) {
   const out = drafts.map((d, i) => {
     const changed = d.raw.join('\n') !== d.final.join('\n');
     const turned = d.verdict === 'block';
@@ -272,6 +275,8 @@ function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene 
       ppv ? { label: 'PPV attached', value: `${ppv.title} · $${ppv.price} · ${ppv.what}` } : null,
       scene ? { label: 'Scene after', value: [scene.where, scene.wearing, scene.done?.length ? `so far: ${scene.done.join(', ')}` : '', scene.stage].filter(Boolean).join(' · ') } : null,
       learned.length ? { label: 'Would remember', value: learned.join(' · ') } : null,
+      aboutMe.length ? { label: 'Said about herself', value: `${aboutMe.join(' · ')} (kept for this chat, so she stays consistent)` } : null,
+      typo ? { label: 'A typo on purpose', value: `"${typo.word}"${typo.fixed ? ', fixed in a second message' : ', left as is'} (A8: about 1 message in 15, fixed half the time)` } : null,
       ...notes.map(n => ({ label: 'Note', value: n })),
     ],
   }));

@@ -111,6 +111,14 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
 });
 
 // ── Your marks on replies (database change 044): teaching from Practice ──────
+// Her diary (B9): what she has told fans about herself, the same for everyone.
+router.get('/pages/:creatorId/diary', async (req, res) => {
+  try { res.json(await A.diary(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her diary'); }
+});
+router.patch('/pages/:creatorId/diary', async (req, res) => {
+  try { res.json(await A.setDiaryFact(org(req), req.params.creatorId, req.body?.text, req.body?.off === true)); } catch (e) { fail(res, e, 'change her diary'); }
+});
+
 // GET /pages/:creatorId/checks?days=7 — Claude's checks of Practice replies, added up:
 // a score per day and the most common weak points (Q49).
 router.get('/pages/:creatorId/checks', async (req, res) => {

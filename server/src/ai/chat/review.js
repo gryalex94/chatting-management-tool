@@ -158,17 +158,18 @@ const COACH_SCHEMA = {
   required: ['answers_him', 'fits_moment', 'notes_facts', 'selling', 'lessons', 'overall', 'summary'],
   additionalProperties: false,
 };
-async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [] }) {
+async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [], diary = [] }) {
   const line = (m) => `${m.from_fan ? 'Him' : m.mass ? 'Her (mass message)' : 'Her'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m)}${mediaNote(m) ? ` [${mediaNote(m)}]` : ''}`;
   const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.heat && `how spicy: ${profile.heat}`].filter(Boolean).join('; ');
   const him = fan ? `${fan.tier_label}${fan.new_sub ? ', new subscriber' : ''}${fan.time_waster ? ', time waster' : ''}${fan.suspicious ? ', suspicious' : ''}; closeness: ${fan.closeness}; free talk ${fan.budget.used} of ${fan.budget.limit}` : 'unknown';
   const r = await ask(
     'You coach the chat replies of an AI character on Fanvue, a subscription site for verified adults; flirting and sex talk between adults are allowed. You judge one reply against the agency\'s rules, the plan made for it and the manager\'s notes. You never rewrite it. Be specific and short.',
     `The creator: ${who || 'unknown'}\n\nWho he is: ${him}\n`
-      + `His notes: ${card.map(f => `(${f.kind}${f.on ? `, on ${f.on}` : f.said_at ? `, said ${ago(f.said_at)}` : ''}) ${f.text}`).join('; ') || 'none'}\n\n`
+      + `His notes: ${card.map(f => `(${f.kind}${f.on ? `, on ${f.on}` : f.said_at ? `, said ${ago(f.said_at)}` : ''}) ${f.text}`).join('; ') || 'none'}\n`
+      + `What she has told fans about herself (she must stay consistent with it): ${diary.map(d => String(d.text || d)).join('; ') || 'nothing yet'}\n\n`
       + (plan ? `The plan made for this reply: ${plan.goal_text} (because ${plan.why}). PPV: ${plan.sell.allowed ? 'allowed' : `none (${plan.sell.why})`}. Questions: ${plan.ask.allowed ? 'one at most' : `none (${plan.ask.why})`}. Length: ${plan.length.text}.`
         + `${plan.tone ? ` Tone: ${plan.tone}.` : ''}${plan.callback ? ` Bring up from his notes: "${plan.callback.note}" (${plan.callback.ask}).` : ''}${plan.check ? ` Check with him: he just contradicted the note "${plan.check.note}".` : ''}`
-        + `${plan.hook ? ` Hook for next time: "${plan.hook.note}" (${plan.hook.when}).` : ''}${plan.back ? ` He's back after ${plan.back}.` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}\n\n` : '')
+        + `${plan.hook ? ` Hook for next time: "${plan.hook.note}" (${plan.hook.when}).` : ''}${plan.back ? ` He's back after ${plan.back}.` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}${plan.event ? ` A moment of hers planned: ${plan.event.text}.` : ''}${plan.touch ? ` Also, in passing: ${plan.touch.text}.` : ''}\n\n` : '')
       + `The chat (oldest first, the last part):\n${chat.slice(-24).map(line).join('\n')}\n\n`
       + `Her reply:\n${messages.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n')}${ppv ? `\n[with a PPV: "${ppv.title}", $${ppv.price}, ${ppv.what}]` : ''}\n\n`
       + `The agency's rules:\n${rules.map(x => `- ${x}`).join('\n')}\n\n`

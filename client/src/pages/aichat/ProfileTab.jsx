@@ -49,6 +49,45 @@ const fromForm = (f) => ({ ...f, ...Object.fromEntries(LISTS.map(k => [k, f[k].s
  * agency's analysis of ~35k chats, not her own Fanvue chats. Next to it, the
  * house rules every reply keeps, which can't be switched off.
  */
+// Her diary (B9): what she has told fans about herself, from every fan's notes, the
+// same for everyone. A fact that doesn't hold any more can be switched off here.
+function HerDiary({ page }) {
+  const [facts, setFacts] = useState(null);
+  const [busy, setBusy] = useState('');
+  useEffect(() => {
+    let live = true;
+    api.get(`/api/ai-chat/pages/${page.creator_id}/diary`).then(r => { if (live) setFacts(r.data.facts); }).catch(() => { if (live) setFacts([]); });
+    return () => { live = false; };
+  }, [page.creator_id]);
+  const toggle = async (f) => {
+    setBusy(f.text);
+    try {
+      const { data } = await api.patch(`/api/ai-chat/pages/${page.creator_id}/diary`, { text: f.text, off: !f.off });
+      setFacts(data.facts);
+    } catch (e) { toast.error(errMsg(e, 'Could not change her diary')); }
+    finally { setBusy(''); }
+  };
+  const on = (facts || []).filter(f => !f.off), off = (facts || []).filter(f => f.off);
+  return (
+    <div className='flex flex-col gap-2 rounded-lg border p-4'>
+      <p className='text-sm font-medium'>Her diary: what she has told fans about herself</p>
+      <p className='text-xs text-muted-foreground'>Gathered from every fan&apos;s notes, so she stays the same Yuna with everyone; the writer reads it with each reply and Claude checks for contradictions. Switch off anything that doesn&apos;t hold.</p>
+      {facts === null ? <p className='text-xs text-muted-foreground'>Loading…</p> : !facts.length ? <p className='text-xs text-muted-foreground'>Nothing yet: it fills up as fans&apos; notes are read.</p> : (
+        <ul className='flex flex-col gap-1 text-sm'>
+          {on.slice(0, 40).map(f => (
+            <li key={f.text} className='flex items-start justify-between gap-2'>
+              <span>{f.text}{f.profile ? <span className='ms-1.5 text-xs text-muted-foreground'>(profile)</span> : f.fans > 1 ? <span className='ms-1.5 text-xs text-muted-foreground'>({f.fans} fans)</span> : null}</span>
+              {!f.profile && <button type='button' onClick={() => toggle(f)} disabled={busy === f.text} className='shrink-0 text-xs text-muted-foreground hover:text-foreground hover:underline'>doesn&apos;t hold</button>}
+            </li>
+          ))}
+          {on.length > 40 && <li className='text-xs text-muted-foreground'>…and {on.length - 40} more; the writer reads the 40 most shared.</li>}
+          {off.length > 0 && <li className='mt-1 text-xs text-muted-foreground'>Switched off: {off.map(f => <button key={f.text} type='button' onClick={() => toggle(f)} className='me-2 line-through hover:no-underline'>{f.text}</button>)}</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ProfileTab({ page, writers, ready, onSaved }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -180,6 +219,7 @@ export default function ProfileTab({ page, writers, ready, onSaved }) {
       </div>
 
       <div className='flex flex-col gap-4'>
+        <HerDiary page={page} />
         <div className='flex flex-col gap-2 rounded-lg border bg-muted/30 p-4'>
           <p className='flex items-center gap-1.5 text-sm font-medium'><Lock className='size-3.5' />House rules, in every reply</p>
           <p className='text-xs text-muted-foreground'>Always on; they can&apos;t be switched off. The tool also checks every reply against them.</p>

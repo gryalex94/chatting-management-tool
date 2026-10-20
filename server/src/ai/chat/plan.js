@@ -13,6 +13,7 @@
  */
 const { replyLevel } = require('./safety');
 const { closenessOf, CLOSENESS, TONE, likesFor, awayText } = require('./memory');
+const { eventFits } = require('./session');
 
 const clean = (s) => String(s ?? '').trim();
 const DAY = 86400_000;
@@ -179,6 +180,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     if (match?.full.length) p.offer = { items: match.full.slice(0, 3), why: `he asked for ${match.wants.join(' + ')}` };
     else if (sexting?.next && (gap == null || gap >= 2)) p.offer = { next: sexting.next, why: `the next step of her set${gap != null ? ` (${gap} of her messages since the last PPV)` : ''}` };
     if (profile.avg_price) p.price_hint = `he usually pays about $${profile.avg_price}: stay close to that, slightly above (Q23)`;
+    // a whale who hasn't bought lately: a personal discount (A6), never below the lowest price
+    if (profile.tier === 'whale' && aim === 'sell') p.price_hint = `${p.price_hint ? `${p.price_hint}; ` : ''}a personal discount for him, 10–20% off, because he hasn't bought lately (A6)`;
   }
 
   // a note his latest message contradicts (Q14): she checks with him, in a calm moment only
@@ -232,6 +235,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
       }
     }
   }
+  // a small moment of hers planned for this conversation (A2–A5), when it fits: never while selling or sexting
+  p.event = session?.event && eventFits(session.event, { goal: p.goal, herReplies, sexting: !!sexting?.on }) ? session.event : null;
   // one small extra touch (B5): he's leaving while the reply has another job, or a note of his in passing
   p.touch = null;
   if (leaving && !['goodbye', 'follow_up'].includes(p.goal)) p.touch = { kind: 'goodbye', text: 'he\'s leaving: say goodbye too, warm, with a hook for next time', why: 'he said he has to go (B5)' };
@@ -254,6 +259,7 @@ function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
   if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
+  if (p.event) lines.push(`A moment of yours: ${p.event.text}. Make it concrete and yours; it's fine to invent the small detail, but keep it true to what you've told fans before.`);
   if (p.back) lines.push(`He's back after ${p.back}: let him feel you're glad he's back.`);
   if (p.tone) lines.push(`Tone: ${p.tone}.`);
   lines.push(`Length: ${p.length.text}.`);
