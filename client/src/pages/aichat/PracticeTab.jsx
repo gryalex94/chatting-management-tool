@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { cost, dayTime, errMsg, fanName, moneyLine, shortDay } from './shared';
@@ -44,7 +45,8 @@ const readLine = (u) => {
   if (u.money) bits.push('his spending');
   const level = u.level ? ` He seemed ${u.level.mood}, ${LEVEL[u.level.his]}${u.level.pulled_back ? ' and slowing down' : ''}: she could go up to ${LEVEL[u.level.max]}.` : '';
   const examples = u.examples ? ` ${u.examples} examples from the agency's good chats.` : '';
-  return `The AI read ${bits.join(', ')}.${level}${examples}`;
+  const type = u.fan_type ? ` Treated him as: ${u.fan_type.toLowerCase()}.` : '';
+  return `The AI read ${bits.join(', ')}.${type}${level}${examples}`;
 };
 // Under a kept reply: which writer, the checks, the cost, what it would remember.
 const keptNote = (result, used) => [
@@ -159,12 +161,12 @@ function Stopped({ screen }) {
  * and spending) or a made-up one, write as him, and see her reply from up to
  * three writers side by side, with the safety checks and the cost.
  */
-export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) {
+export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpent, onSetUp }) {
   const [fans, setFans] = useState(null);
   const [search, setSearch] = useState('');
   const [fanId, setFanId] = useState(MADE_UP);
   const [detail, setDetail] = useState(null);         // the real fan: what the AI reads; undefined while loading
-  const [madeUp, setMadeUp] = useState({ name: '', notes: '' });
+  const [madeUp, setMadeUp] = useState({ name: '', notes: '', type: 'none' });   // type: who he is (new subscriber, time waster…)
   const [test, setTest] = useState([]);               // typed here: { from: 'fan' | 'her', text, label? }
   const [rounds, setRounds] = useState([]);           // the AI's answers: { at (after test[at - 1]), screen, results, used, kept }
   const [models, setModels] = useState([page.writer]);
@@ -209,7 +211,7 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, {
         fan_uuid: real ? fanId : null,
-        made_up: real ? null : madeUp,
+        made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
         test: nextTest.map(({ from, text: t }) => ({ from, text: t })),
         models,
       });
@@ -308,14 +310,25 @@ export default function PracticeTab({ page, writers, ready, onSpent, onSetUp }) 
             </div>
           )
         ) : (
-          <div className='grid gap-3 rounded-lg border p-3 sm:grid-cols-[200px_minmax(0,1fr)]'>
+          <div className='grid gap-3 rounded-lg border p-3 sm:grid-cols-[160px_220px_minmax(0,1fr)]'>
             <div className='grid gap-1.5'>
               <Label htmlFor='mu-name'>His name</Label>
               <Input id='mu-name' value={madeUp.name} onChange={e => setMadeUp(m => ({ ...m, name: e.target.value }))} placeholder='e.g. Mike' disabled={test.length > 0} />
             </div>
-            <div className='grid gap-1.5'>
+            <div className='grid content-start gap-1.5'>
+              <Label>Who he is</Label>
+              <Select value={madeUp.type} onValueChange={v => setMadeUp(m => ({ ...m, type: v }))} disabled={test.length > 0}>
+                <SelectTrigger aria-label='Who he is'><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value='none'>Not set</SelectItem>
+                  {fanTypes.map(t => <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <span className='text-xs text-muted-foreground'>{fanTypes.find(t => t.id === madeUp.type)?.hint || 'The AI knows nothing about him.'}</span>
+            </div>
+            <div className='grid content-start gap-1.5'>
               <Label htmlFor='mu-notes'>What she knows about him (optional)</Label>
-              <Input id='mu-notes' value={madeUp.notes} onChange={e => setMadeUp(m => ({ ...m, notes: e.target.value }))} placeholder='e.g. 34, truck driver from Texas, new subscriber' disabled={test.length > 0} />
+              <Input id='mu-notes' value={madeUp.notes} onChange={e => setMadeUp(m => ({ ...m, notes: e.target.value }))} placeholder='e.g. 34, truck driver from Texas' disabled={test.length > 0} />
             </div>
           </div>
         )}

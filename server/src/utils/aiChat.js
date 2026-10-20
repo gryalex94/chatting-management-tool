@@ -22,6 +22,7 @@ const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/revie
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
 const { mediaNote, emptyBody, standingAt } = require('../ai/chat/notes');
+const { FAN_TYPES, fanType } = require('../ai/chat/fanTypes');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -96,6 +97,7 @@ async function pages(orgId) {
     ready: { tables: !persona.error || !tableMissing(persona.error), writer: or.configured(), checker: !!process.env.ANTHROPIC_API_KEY },
     writers: or.WRITERS.map(({ id, label }) => ({ id, label })),
     default_writer: or.DEFAULT_WRITER,
+    fan_types: FAN_TYPES,
     pages: accs.map(a => ({
       creator_id: a.creator_id, name: name[a.creator_id] || a.display_name || a.handle, handle: a.handle, is_ai_creator: a.is_ai_creator,
       has_profile: !!clean(prof[a.creator_id]?.profile?.name), writer: prof[a.creator_id]?.settings?.writer || or.DEFAULT_WRITER,
@@ -485,7 +487,8 @@ async function buildAllMemory(orgId, creatorId) {
 // ── A reply ──────────────────────────────────────────────────────────────────
 /**
  * Draft her reply in the practice room. `fanUuid` = a real fan (his chat, memory
- * and money) or null for a made-up one (`madeUp` = { name, notes }); `test` = the
+ * and money) or null for a made-up one (`madeUp` = { name, notes, type }: type =
+ * a fan type from ai/chat/fanTypes.js, his background and approach); `test` = the
  * messages typed in the practice room after that ({ from: 'fan' | 'her', text });
  * `models` = 1 to 3 writers to compare. Returns { screen, results, used }.
  */
@@ -497,7 +500,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const writers = [...new Set((models.length ? models : [persona.settings?.writer || or.DEFAULT_WRITER]).filter(or.isOffered))].slice(0, 3);
   if (!writers.length) writers.push(or.DEFAULT_WRITER);       // e.g. a writer that's no longer offered
 
-  let chat = [], card = [], story = '', money = null, fan = {}, long = false;
+  let chat = [], card = [], story = '', money = null, fan = {}, long = false, type = null;
   if (fanUuid) {
     const [person, mem, loaded] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid)]);
     chat = loaded.chat; money = loaded.money;
@@ -507,6 +510,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   } else {
     fan = { name: clean(madeUp?.name).slice(0, 60) };
     if (clean(madeUp?.notes)) card = [{ kind: 'about', text: clean(madeUp.notes).slice(0, 500) }];
+    // who he is (new subscriber, big spender, time waster…): his payments as Fanvue would show them
+    type = fanType(madeUp?.type);
+    if (type) money = moneyOf(type.payments, null, type.chatSince);
   }
   const typed = (Array.isArray(test) ? test : []).slice(-40)
     .map(t => ({ at: null, from_fan: t?.from === 'fan', text: clean(t?.text).slice(0, 1000), mass: false }))
@@ -525,9 +531,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const win = windowFor(convo);
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
-  const { plan, level, library } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money });
+  const { plan, level, library } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [] });
   const base = {
-    profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages, notes: screen.notes,
+    profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages, notes: [type?.approach, ...screen.notes].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
   };
 
@@ -539,7 +545,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     screen, results,
     used: {
       messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
-      situations: plan.ids.map(strategy.situationTitle), examples: library.length, level,
+      situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
     },
   };
 }
@@ -561,14 +567,19 @@ async function screenLatest(orgId, creatorId, fanUuid, latest) {
 // Her replies before this many of her own messages are the warm-up: she follows
 // him and doesn't lead (the analysis: a longer warm-up sold far better).
 const WARM_UP = 6;
+// Situations that say who he is rather than what he's doing.
+const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower', 'loyalty_play', 'time_waster']);
 
 /**
  * What one reply needs besides the chat: the Playbook situations and his level and
  * mood (the picker), how sexual her reply may get, and examples from the agency's
  * good chats that fit. `chat` = the messages the writer reads.
  */
-async function briefing({ orgId, creatorId, fanUuid, persona, chat, money }) {
+async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [] }) {
   const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money);
+  // a situation known for sure (a made-up fan's type) comes first, and the picker's
+  // guesses about who he is (new, spender, back after a break…) go
+  if (extraIds.length) plan.ids = strategy.readPick({ ids: [...extraIds, ...plan.ids.filter(id => !WHO_HE_IS.has(id))] });
   const { his, mood, pulled_back } = plan.mood;
   const warm = chat.filter(m => !m.from_fan && !m.mass).length >= WARM_UP;
   const max = P.maxLevel({ his, heat: persona?.profile?.heat, warm: warm && !pulled_back });

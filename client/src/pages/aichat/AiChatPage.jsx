@@ -92,7 +92,7 @@ export default function AiChatPage() {
         </div>
         {/* kept mounted, so a practice chat survives a look at the other tabs */}
         <TabsContent value='practice' forceMount className='data-[state=inactive]:hidden'>
-          <PracticeTab key={page.creator_id} page={page} writers={data.writers} ready={data.ready} onSpent={loadSpent} onSetUp={() => setTab('profile')} />
+          <PracticeTab key={page.creator_id} page={page} writers={data.writers} fanTypes={data.fan_types} ready={data.ready} onSpent={loadSpent} onSetUp={() => setTab('profile')} />
         </TabsContent>
         <TabsContent value='profile'>
           <ProfileTab key={page.creator_id} page={page} writers={data.writers} ready={data.ready} onSaved={() => { load(); loadSpent(); }} />

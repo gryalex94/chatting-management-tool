@@ -168,15 +168,16 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
 }
 
 /**
- * How sexual her reply may get: at his level, one step more when she's "hot" or
- * he's past the warm-up, never above what her profile allows (mild 2, medium 3
- * only when he is explicit, hot 3), and not ahead of him in the warm-up.
+ * How sexual her reply may get: at his level, one step more once past the
+ * warm-up, never above what her profile allows (mild 2, medium 3 only when he is
+ * explicit, hot 3). In the warm-up she follows him and stays at teasing at most.
  */
 function maxLevel({ his = 0, heat = '', warm = false }) {
   const kind = /\b(mild|medium|hot)\b/i.exec(String(heat))?.[1]?.toLowerCase() || 'medium';   // the first one named
   const cap = kind === 'hot' ? 3 : kind === 'mild' ? 2 : (his >= 3 ? 3 : 2);
   const step = warm ? 1 : 0;
-  return Math.max(0, Math.min(cap, his + step));
+  // the warm-up: teasing at most, however far he goes (too explicit too soon sold least)
+  return Math.max(0, Math.min(warm ? cap : Math.min(cap, 2), his + step));
 }
 
 /**
@@ -315,6 +316,8 @@ function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = fals
       // a removed emoji between two sentences ("Mike 😊 What…"): keep them apart
       .replace(/([.!?])?\s*\u0000[\s\u0000]*(?=\p{Lu})/gu, (_, p) => `${p || '.'} `)
       .replace(/\s*\u0000[\s\u0000]*/g, ' ')
+      // a full stop the AI left out before a new question ("…babe What's your name?")
+      .replace(/(\p{Ll})\s+(?=(?:What|How|Where|When|Why|Who|Do|Did|Are|Is|Can|Would|Will|Have|Tell)['’]?\w*\b)/gu, '$1. ')
       .replace(/,\s*([,.!?])/g, '$1')
       .replace(/^[,\s]+/, '')
       .replace(/\s+([,.!?])/g, '$1')
