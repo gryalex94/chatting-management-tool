@@ -67,7 +67,7 @@ function Vault({ page }) {
           const others = (t.people || []).filter(p => !/^(?:female|woman)$/.test(p));
           return (
             <div key={a.id} className='flex gap-3 rounded-lg border p-2.5'>
-              <Thumbs creatorId={page.creator_id} ids={[a.id]} videos={a.kind === 'video' ? [a.id] : []} />
+              <Thumbs creatorId={page.creator_id} ids={[a.id]} videos={a.kind === 'video' ? [a.id] : []} size='md' />
               <div className='flex min-w-0 flex-col gap-1 text-xs'>
                 <div className='flex flex-wrap items-center gap-1.5'>
                   <span className='font-medium'>{a.kind === 'video' ? `Video, ${Math.round((a.length_ms || 0) / 1000)} s` : a.kind === 'image' ? 'Photo' : 'File'}</span>
@@ -168,6 +168,12 @@ export default function ContentTab({ page, onChanged }) {
         </div>
       </div>
 
+      {data.connection?.problem && (
+        <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 px-4 py-3 text-sm'>
+          <CircleAlert className='mt-0.5 size-4 shrink-0 text-warn' />
+          <span>{data.connection.problem} Until then there are no previews and her vault isn&apos;t updated; what she sells still works in Practice.</span>
+        </div>
+      )}
       <div className='flex gap-1 self-start rounded-md bg-muted p-1'>
         {[['items', `What she sells (${data.items.length})`], ['vault', 'Her vault: what is where']].map(([k, l]) => (
           <button key={k} type='button' onClick={() => setView(k)} aria-pressed={view === k}

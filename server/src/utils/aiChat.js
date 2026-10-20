@@ -514,8 +514,9 @@ async function contentList(orgId, creatorId) {
   await pageAccount(orgId, creatorId);
   const { error } = await supabaseAdmin.from('ai_content').select('id').limit(1);
   const items = error ? [] : await loadContent(orgId, creatorId);
+  const { connection } = require('./contentLibrary');
   return {
-    ready: !error, items: items.map(it => ({ ...it, level: C.levelOf(it), lowest: C.lowest(it) })),
+    ready: !error, items: items.map(it => ({ ...it, level: C.levelOf(it), lowest: C.lowest(it) })), connection: await connection(creatorId),
     options: { nudity: C.NUDITY.map(id => ({ id, label: C.NUDITY_LABEL[id] })) },
   };
 }

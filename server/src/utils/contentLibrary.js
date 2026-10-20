@@ -144,7 +144,7 @@ async function library(orgId, creatorId) {
   const usedBy = {};
   for (const it of items || []) for (const a of it.asset_ids || []) (usedBy[a] ||= []).push({ id: it.id, title: it.title, series: it.series, step: it.step });
   return {
-    ready: true,
+    ready: true, connection: await connection(creatorId),
     assets: assets.map((a) => {
       const loc = where[a.id] || [];
       const fv_ = loc.find(l => l.platform === 'fanvue');
@@ -158,26 +158,45 @@ async function library(orgId, creatorId) {
   };
 }
 
-/** Fresh small preview links for some assets (Fanvue's links expire): { assetId: url }. */
-async function previews(orgId, creatorId, assetIds) {
-  const ids = [...new Set(assetIds.map(Number).filter(Boolean))].slice(0, 100);
-  if (!ids.length) return {};
-  const { data: locs } = await supabaseAdmin.from('content_locations').select('asset_id, platform, account_id, external_id, content_assets!inner(organisation_id, creator_id)')
+const RECONNECT = 'Fanvue needs connecting again (Settings → Fanvue): the previews come straight from her Fanvue vault.';
+
+/**
+ * Fresh preview links for some assets (Fanvue's links expire): small ones, or with
+ * `large` the full photo or the video itself. Returns { previews: { assetId: url },
+ * kinds: { assetId: kind }, problem } (problem: why there are none, e.g. Fanvue
+ * needs connecting again).
+ */
+async function previews(orgId, creatorId, assetIds, { large = false } = {}) {
+  const ids = [...new Set(assetIds.map(Number).filter(Boolean))].slice(0, large ? 1 : 100);
+  const out = { previews: {}, kinds: {}, problem: null };
+  if (!ids.length) return out;
+  const { data: locs } = await supabaseAdmin.from('content_locations').select('asset_id, platform, account_id, external_id, content_assets!inner(organisation_id, creator_id, kind)')
     .in('asset_id', ids).eq('platform', 'fanvue').eq('content_assets.organisation_id', orgId).eq('content_assets.creator_id', creatorId);
-  const out = {};
   const byAccount = {};
-  for (const l of locs || []) (byAccount[l.account_id] ||= []).push(l);
-  for (const [accountId, list_] of Object.entries(byAccount)) {
-    for (let i = 0; i < list_.length; i += 20) {
-      const batch = list_.slice(i, i + 20);
-      const body = await fv.request(accountId, '/v1/media/bulk', { params: { mediaUuids: batch.map(l => l.external_id).join(','), variants: 'thumbnail_gallery,thumbnail' } });
-      for (const l of batch) {
-        const v = (body?.results?.[l.external_id]?.variants || []).find(x => x.variantType === 'thumbnail_gallery') || (body?.results?.[l.external_id]?.variants || []).find(x => x.variantType === 'thumbnail');
-        if (v?.url) out[l.asset_id] = v.url;
+  for (const l of locs || []) { out.kinds[l.asset_id] = l.content_assets?.kind || null; (byAccount[l.account_id] ||= []).push(l); }
+  const types = large ? ['main'] : ['thumbnail_gallery', 'thumbnail'];
+  try {
+    for (const [accountId, list_] of Object.entries(byAccount)) {
+      for (let i = 0; i < list_.length; i += 20) {
+        const batch = list_.slice(i, i + 20);
+        const body = await fv.request(accountId, '/v1/media/bulk', { params: { mediaUuids: batch.map(l => l.external_id).join(','), variants: types.join(',') } });
+        for (const l of batch) {
+          const variants = body?.results?.[l.external_id]?.variants || [];
+          const v = types.map(t => variants.find(x => x.variantType === t)).find(Boolean);
+          if (v?.url) out.previews[l.asset_id] = v.url;
+        }
       }
     }
+  } catch (e) {
+    out.problem = e.reconnect ? RECONNECT : `Fanvue didn't give the previews: ${e.message}`;
   }
   return out;
 }
 
-module.exports = { copyFanvueVault, library, previews, fromFanvueTags, adult, LIB_MISSING };
+/** Whether her Fanvue connection works (for the content screens). */
+async function connection(creatorId) {
+  const { data } = await supabaseAdmin.from('fanvue_accounts').select('status, sync_error, synced_at').eq('creator_id', creatorId).maybeSingle();
+  return data ? { status: data.status, error: data.sync_error, synced_at: data.synced_at, problem: data.status === 'reconnect' ? RECONNECT : null } : null;
+}
+
+module.exports = { copyFanvueVault, library, previews, connection, fromFanvueTags, adult, LIB_MISSING };

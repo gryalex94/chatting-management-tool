@@ -128,7 +128,7 @@ router.post('/pages/:creatorId/content/suggest', async (req, res) => {
 // ── Her content library: what she has and where it is (database change 042) ──
 // GET  /api/ai-chat/pages/:creatorId/library            — her files, where they are, Fanvue's tags, how they sold
 // POST /api/ai-chat/pages/:creatorId/library/refresh    — read her Fanvue vault again now
-// POST /api/ai-chat/pages/:creatorId/library/previews   — fresh small preview links { ids: [assetId] }
+// POST /api/ai-chat/pages/:creatorId/library/previews   — fresh preview links { ids: [assetId], large }: { previews, kinds, problem }
 router.get('/pages/:creatorId/library', async (req, res) => {
   try { res.json(await L.library(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her vault'); }
 });
@@ -142,7 +142,7 @@ router.post('/pages/:creatorId/library/refresh', async (req, res) => {
 router.post('/pages/:creatorId/library/previews', async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(x => /^\d+$/.test(String(x))) : [];
-    res.json({ previews: await L.previews(org(req), req.params.creatorId, ids) });
+    res.json(await L.previews(org(req), req.params.creatorId, ids, { large: req.body?.large === true }));
   } catch (e) { fail(res, e, 'load the previews'); }
 });
 
