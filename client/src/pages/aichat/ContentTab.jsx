@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, Loader2, Lock, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
+import { CircleAlert, Layers, Loader2, Lock, Pencil, Plus, RefreshCw, Sparkles, Trash2, WandSparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -11,7 +11,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
-import { errMsg } from './shared';
+import { cost, errMsg } from './shared';
+import Thumbs from './Thumbs';
 
 const LEVEL = ['friendly', 'flirty', 'suggestive', 'explicit'];
 const KINDS = [['photos', 'Photos'], ['video', 'Video'], ['bundle', 'Bundle']];
@@ -19,7 +20,8 @@ const EMPTY = {
   title: '', kind: 'photos', amount: '', minutes: '', nudity: 'dressed', focus: '', outfit: '', setting: '', action: '',
   face: true, tags: '', description: '', price: '', min_price: '', notes: '', active: true,
 };
-const what = (it) => (it.kind === 'video' ? `${it.minutes ? `${Number(it.minutes)}-min ` : ''}video` : it.kind === 'bundle' ? `bundle${it.amount ? ` of ${it.amount}` : ''}` : `${it.amount || '?'} photo${it.amount === 1 ? '' : 's'}`);
+const length = (m) => (Number(m) < 1 ? `${Math.max(1, Math.round(Number(m) * 60))}-sec` : `${Number(m)}-min`);
+const what = (it) => (it.kind === 'video' ? `${it.minutes ? `${length(it.minutes)} ` : ''}video` : it.kind === 'bundle' ? `bundle${it.amount ? ` of ${it.amount}` : ''}` : `${it.amount || '?'} photo${it.amount === 1 ? '' : 's'}`);
 const money = (n) => `$${Number(n) % 1 ? Number(n).toFixed(2) : Number(n)}`;
 
 // One field of the item form.
@@ -33,20 +35,86 @@ function Field({ id, label, hint, children, className }) {
   );
 }
 
+// Her vault: every file, where it is, what Fanvue sees in it, how it sold, and which item uses it.
+function Vault({ page }) {
+  const [lib, setLib] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const url = `/api/ai-chat/pages/${page.creator_id}/library`;
+  useEffect(() => { api.get(url).then(r => setLib(r.data)).catch(e => setLib({ error: errMsg(e, 'Could not load her vault') })); }, [url]);
+  const refresh = async () => {
+    setBusy(true);
+    try { const { data } = await api.post(`${url}/refresh`); setLib(data); toast.success(`Read her vault: ${data.copied?.media ?? 0} files`); }
+    catch (e) { toast.error(errMsg(e, 'Could not read her vault')); }
+    finally { setBusy(false); }
+  };
+  if (!lib) return <Skeleton className='h-40 w-full' />;
+  if (lib.error) return <p className='text-sm text-muted-foreground'>{lib.error}</p>;
+  if (!lib.ready) return <p className='text-sm text-warn'>Run database change 042 (her content library) in Supabase first.</p>;
+  const live = lib.assets.filter(a => a.locations.some(l => l.status !== 'removed'));
+  return (
+    <div className='flex flex-col gap-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2 text-sm'>
+        <span className='text-muted-foreground'>
+          {live.length} files in her Fanvue vault ({live.filter(a => a.kind === 'image').length} photos, {live.filter(a => a.kind === 'video').length} videos), read with the hourly Fanvue copy.
+          What&apos;s in each comes from Fanvue&apos;s own analysis.
+        </span>
+        <Button size='sm' variant='outline' onClick={refresh} disabled={busy}>{busy ? <Loader2 className='animate-spin' /> : <RefreshCw />}Read her vault again</Button>
+      </div>
+      <div className='grid gap-2 lg:grid-cols-2'>
+        {live.map((a) => {
+          const t = a.tags || {};
+          const loc = a.locations[0] || {};
+          const others = (t.people || []).filter(p => !/^(?:female|woman)$/.test(p));
+          return (
+            <div key={a.id} className='flex gap-3 rounded-lg border p-2.5'>
+              <Thumbs creatorId={page.creator_id} ids={[a.id]} videos={a.kind === 'video' ? [a.id] : []} />
+              <div className='flex min-w-0 flex-col gap-1 text-xs'>
+                <div className='flex flex-wrap items-center gap-1.5'>
+                  <span className='font-medium'>{a.kind === 'video' ? `Video, ${Math.round((a.length_ms || 0) / 1000)} s` : a.kind === 'image' ? 'Photo' : 'File'}</span>
+                  <Badge variant='outline' className='font-normal'>{loc.platform} · {loc.folder || 'no folder'}</Badge>
+                  {t.nsfw && <Badge variant='outline' className='border-bad/40 font-normal text-bad'>explicit</Badge>}
+                  {a.used_by.map(u => <Badge key={u.id} variant='secondary' className='font-normal'>{u.series ? `${u.series} · step ${u.step}` : u.title}</Badge>)}
+                </div>
+                <p className='line-clamp-2 text-muted-foreground'>{a.description || 'No description from Fanvue yet.'}</p>
+                <p className='text-muted-foreground'>
+                  {[t.acts?.length ? `acts: ${t.acts.join(', ')}` : null, others.length ? `with: ${others.join(', ')}` : null, (t.objects || []).filter(o => o !== 'smartphone').length ? `objects: ${t.objects.filter(o => o !== 'smartphone').join(', ')}` : null,
+                    t.setting?.length ? `where: ${t.setting.slice(0, 4).join(', ')}` : null].filter(Boolean).join(' · ')}
+                </p>
+                <p>{a.sales?.ppv ? `As a PPV: bought ${a.sales.bought} of ${a.sales.ppv} times ($${a.sales.low}–$${a.sales.high})` : a.sales?.sent ? `Sent free ${a.sales.sent} times` : 'Never sent yet'}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /**
- * Her content: what she can sell, each item described exactly. The AI only offers
- * what's here, describes it truthfully, and when he asks for something that isn't
- * here, says so and offers the closest item.
+ * Her content: what she can sell, each item described exactly (made from the
+ * files in her vault, or typed in). The AI only offers what's here, describes it
+ * truthfully, and when he asks for something that isn't here, says so and offers
+ * the closest item. "Her vault" shows every file and where it is.
  */
 export default function ContentTab({ page, onChanged }) {
   const [data, setData] = useState(null);               // { ready, items, options }
   const [form, setForm] = useState(null);               // the item being added or changed
   const [busy, setBusy] = useState('');
+  const [view, setView] = useState('items');            // items / vault
   const url = `/api/ai-chat/pages/${page.creator_id}/content`;
 
   useEffect(() => {
     api.get(url).then(r => setData(r.data)).catch(e => setData({ error: errMsg(e, 'Could not load her content') }));
   }, [url]);
+  const suggest = async () => {
+    if (data.items.some(it => it.source === 'vault' || it.source === 'starter') && !window.confirm('Make new sets from her vault? They replace the starter list and earlier sets made from her vault (items you added yourself stay).')) return;
+    setBusy('suggest');
+    try {
+      const { data: d } = await api.post(`${url}/suggest`);
+      done(d, `${d.made} items made from her vault (${cost(d.cost)}): check them and their prices`);
+    } catch (e) { toast.error(errMsg(e, 'Could not make sets')); }
+    finally { setBusy(''); }
+  };
 
   const done = (d, msg) => { setData(d); setForm(null); onChanged?.(); if (msg) toast.success(msg); };
   const save = async () => {
@@ -94,10 +162,19 @@ export default function ContentTab({ page, onChanged }) {
           describes it truthfully, and when he asks for something that isn&apos;t here, it says so and offers the closest item. For now it sells only in Practice.
         </p>
         <div className='flex flex-wrap gap-2'>
+          <Button variant='outline' onClick={suggest} disabled={!!busy}>{busy === 'suggest' ? <><Loader2 className='animate-spin' />Making sets…</> : <><WandSparkles />Make sets from her vault</>}</Button>
           {!data.items.length && <Button variant='outline' onClick={starter} disabled={!!busy}>{busy === 'starter' ? <Loader2 className='animate-spin' /> : <Sparkles />}Add the starter list</Button>}
           <Button onClick={() => setForm({ ...EMPTY })} disabled={!!busy || !!form}><Plus />Add an item</Button>
         </div>
       </div>
+
+      <div className='flex gap-1 self-start rounded-md bg-muted p-1'>
+        {[['items', `What she sells (${data.items.length})`], ['vault', 'Her vault: what is where']].map(([k, l]) => (
+          <button key={k} type='button' onClick={() => setView(k)} aria-pressed={view === k}
+            className={cn('rounded px-3 py-1 text-sm', view === k ? 'bg-background shadow-sm' : 'text-muted-foreground')}>{l}</button>
+        ))}
+      </div>
+      {view === 'vault' && <Vault page={page} />}
 
       {form && (
         <div className='flex flex-col gap-4 rounded-lg border border-primary/40 p-4'>
@@ -148,7 +225,7 @@ export default function ContentTab({ page, onChanged }) {
         </div>
       )}
 
-      {!data.items.length ? (
+      {view === 'items' && (!data.items.length ? (
         <p className='rounded-lg border border-dashed p-6 text-sm text-muted-foreground'>Nothing yet. Add what she really has, or start from the starter list and change it.</p>
       ) : (
         <div className='flex flex-col gap-2'>
@@ -162,6 +239,7 @@ export default function ContentTab({ page, onChanged }) {
                   <Badge variant='outline' className='font-normal'>{data.options.nudity.find(n => n.id === it.nudity)?.label}</Badge>
                   <Badge variant='outline' className='font-normal'>{LEVEL[it.level]}</Badge>
                   <span className='text-sm tabular-nums'>{money(it.price)} <span className='text-xs text-muted-foreground'>(lowest {money(it.lowest)})</span></span>
+                  {it.series && <Badge variant='outline' className='border-warn/40 font-normal text-warn'><Layers className='size-3' />{it.series} · step {it.step}</Badge>}
                   {!it.active && <Badge variant='secondary'>not offered</Badge>}
                 </div>
                 <div className='flex gap-1'>
@@ -171,6 +249,7 @@ export default function ContentTab({ page, onChanged }) {
                   </Button>
                 </div>
               </div>
+              <Thumbs creatorId={page.creator_id} ids={it.asset_ids || []} />
               <p className='text-sm'>{it.description}</p>
               <p className='text-xs text-muted-foreground'>
                 {[it.tags?.length ? `Tags: ${it.tags.join(', ')}` : null, it.face === false ? 'face not shown' : null, it.notes ? `When: ${it.notes}` : null].filter(Boolean).join(' · ')}
@@ -178,7 +257,7 @@ export default function ContentTab({ page, onChanged }) {
             </div>
           ))}
         </div>
-      )}
+      ))}
     </div>
   );
 }

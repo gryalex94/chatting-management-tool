@@ -140,6 +140,7 @@ function Progress({ p }) {
     : p.phase === 'chats' ? `Reading the chat list… ${num(p.chats_listed)} chats so far`
     : p.phase === 'messages' ? `Copying messages: ${num(p.chats_read)} of ${num(p.chats_to_read)} chats · ${num(p.messages)} messages`
     : p.phase === 'media' ? `Copying photos, videos and PPVs… ${num(p.media)} so far`
+    : p.phase === 'vault' ? 'Reading her vault…'
     : `Copying earnings… ${num(p.earnings)} so far`;
   const pct = p.phase === 'messages' && p.chats_to_read ? Math.round((p.chats_read / p.chats_to_read) * 100) : null;
   return (

@@ -494,7 +494,19 @@ async function loadContent(orgId, creatorId) {
     if (/ai_content/.test(error.message)) return [];
     throw new Error(error.message);
   }
-  return data.map(r => ({ ...r, price: Number(r.price), min_price: num(r.min_price), minutes: num(r.minutes) }));
+  const items = data.map(r => ({ ...r, price: Number(r.price), min_price: num(r.min_price), minutes: num(r.minutes) }));
+  // what the platform's AI sees in each item's files (its content tags), for exact matching
+  const ids = [...new Set(items.flatMap(it => it.asset_ids || []))];
+  if (ids.length) {
+    const { data: assets } = await supabaseAdmin.from('content_assets').select('id, kind, tags, length_ms').in('id', ids);
+    const byId = Object.fromEntries((assets || []).map(a => [a.id, a]));
+    for (const it of items) {
+      const tags = (it.asset_ids || []).map(id => byId[id]?.tags || {});
+      const union = (k) => [...new Set(tags.flatMap(t => t[k] || []))];
+      it.seen = { categories: union('categories'), acts: union('acts'), objects: union('objects'), people: union('people'), setting: union('setting'), body: union('body') };
+    }
+  }
+  return items;
 }
 
 /** Her content list, each item with how spicy it is, and the choices for the form. */
@@ -514,7 +526,7 @@ function cleanItem(raw = {}) {
   const it = {
     title: text(raw.title, 80), kind: ['photos', 'video', 'bundle'].includes(raw.kind) ? raw.kind : 'photos',
     amount: Number.isInteger(Number(raw.amount)) && Number(raw.amount) > 0 ? Math.min(500, Number(raw.amount)) : null,
-    minutes: Number(raw.minutes) > 0 ? Math.min(600, Math.round(Number(raw.minutes) * 10) / 10) : null,
+    minutes: Number(raw.minutes) > 0 ? Math.min(600, Math.round(Number(raw.minutes) * 1000) / 1000) : null,
     nudity: C.NUDITY.includes(raw.nudity) ? raw.nudity : 'dressed',
     focus: text(raw.focus), outfit: text(raw.outfit), setting: text(raw.setting), action: text(raw.action, 400),
     face: raw.face !== false,
@@ -553,11 +565,101 @@ async function deleteContent(orgId, creatorId, id) {
   return contentList(orgId, creatorId);
 }
 
+// One asset as the set-maker reads it: what Fanvue says is in it, and how it sold.
+function assetLine(a) {
+  const t = a.tags || {};
+  const bits = [
+    `[a${a.id}] ${a.kind === 'video' ? `video, ${Math.round((a.length_ms || 0) / 1000)} seconds` : a.kind}`,
+    a.locations?.[0]?.folder ? `folder "${a.locations[0].folder}"` : 'no folder',
+    a.locations?.[0]?.name ? `named "${a.locations[0].name}"` : null,
+    a.sales?.ppv ? `sold ${a.sales.bought} of ${a.sales.ppv} times as a PPV ($${a.sales.low}–$${a.sales.high})` : 'never sold as a PPV',
+  ].filter(Boolean).join(' · ');
+  const tagBits = [
+    t.categories?.length && `categories: ${t.categories.join(', ')}`, t.acts?.length && `acts: ${t.acts.join(', ')}`,
+    t.objects?.length && `objects: ${t.objects.join(', ')}`, t.people?.length && `people: ${t.people.join(', ')}`,
+    t.setting?.length && `setting: ${t.setting.join(', ')}`, t.position?.length && `position: ${t.position.join(', ')}`,
+  ].filter(Boolean).join('; ');
+  return `${bits}\n  ${clean(a.description).slice(0, 600)}${tagBits ? `\n  Tags: ${tagBits}` : ''}`;
+}
+
+/**
+ * Sellable sets made from her vault (her content library): photo sets that belong
+ * together, each video on its own, and each vault folder made for sexting kept as
+ * an ordered series. Replaces the starter list and earlier suggestions; her own
+ * items stay. Returns the content list.
+ */
+async function suggestContent(orgId, creatorId) {
+  if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
+  await pageAccount(orgId, creatorId);
+  const { library } = require('./contentLibrary');
+  const lib = await library(orgId, creatorId);
+  if (!lib.ready) throw new AiChatError('Run database change 042 (her content library) in Supabase first', 409);
+  const assets = lib.assets.filter(a => a.description && a.locations.some(l => l.status !== 'removed') && a.kind !== 'other');
+  if (assets.length < 2) throw new AiChatError('Her vault hasn\'t been read yet: it\'s copied with the hourly Fanvue copy');
+  const persona = await loadPersona(orgId, creatorId);
+  const model = persona?.settings?.writer || or.DEFAULT_WRITER;
+  const res = await or.chat({
+    model, maxTokens: 16000, temperature: 0.2, fallbacks: or.backupsFor(model),
+    messages: [
+      { role: 'system', content: 'You organise an adult creator\'s content library on Fanvue (a subscription site for verified adults) into PPVs she can sell in chats. Adult content is allowed. You describe content precisely and only from the descriptions and tags given; never invent anything. She is an adult woman: never call her young.' },
+      {
+        role: 'user',
+        content: `Her content (id in brackets, then what the platform's AI says is in it, and how it sold):\n${assets.map(assetLine).join('\n')}\n\n`
+          + 'Make sellable PPV items from it. Reply with compact JSON only (no line breaks or indentation): {"items": [{"assets": ["a12", "a15"], "title": "", "kind": "photos | video | bundle", "nudity": "dressed | lingerie | implied | topless | nude | explicit", "focus": "", "outfit": "", "setting": "", "action": "", "tags": [""], "description": "", "price": 20, "min_price": 16, "series": "", "step": 0, "notes": ""}]}\n'
+          + '- Photos: put photos that share the outfit or the scene together, 2 to 5 per set; a photo stands alone only if nothing else is like it. Each video is its own item (kind "video"). Use every asset at most once. Leave out anything she isn\'t in (a room, an object).\n'
+          + '- A folder made for sexting (its name says so) becomes ONE ordered series: set "series" to the folder name and give every item in it its own step 1, 2, 3… (no two with the same step), from the most teasing to the most explicit, 2 to 4 photos per step. Other items: series "" and step 0.\n'
+          + '- description: exactly what is in it, precise and specific (outfit, what is shown, pose, setting, what happens, how long a video is in seconds), and what is NOT in it when a fan might expect it (no toys, no other people, no nudity…). Two or three plain sentences.\n'
+          + '- nudity: the most she shows in it: explicit = sex acts or toys; nude = fully nude; topless; implied = nude but covered; lingerie; dressed.\n'
+          + '- price in dollars: from how it sold (what was bought, at what price) and the rule "start low, raise step by step": teasing photo sets $10–20, nude sets $20–35, explicit $30–60, short videos by how explicit they are; a series rises step by step. min_price: about 80% of the price.\n'
+          + '- notes: when to offer it (e.g. "a light first offer", "only after he bought something").',
+      },
+    ],
+  });
+  await logUsage(orgId, 'profile', res.model, res.usage, { creatorId });
+  const j = P.parseJsonObject(res.text);
+  const raw = Array.isArray(j?.items) ? j.items : [];
+  // only what she is in (not a photo of her room)
+  const byRef = new Map(assets.filter(a => !a.tags?.people || a.tags.people.length).map(a => [`a${a.id}`, a]));
+  const used = new Set();
+  const rows = [];
+  for (const [i, it] of raw.entries()) {
+    const ids = (Array.isArray(it.assets) ? it.assets : []).map(String).filter(r => byRef.has(r) && !used.has(r));
+    if (!ids.length) continue;
+    ids.forEach(r => used.add(r));
+    const kinds = ids.map(r => byRef.get(r).kind);
+    try {
+      const item = cleanItem({
+        ...it, title: clean(it.title) || clean(it.description).split(/[.:;]/)[0].slice(0, 60),
+        kind: kinds.every(k => k === 'video') && ids.length === 1 ? 'video' : kinds.some(k => k === 'video') ? 'bundle' : 'photos',
+        amount: kinds.filter(k => k === 'image').length || null,
+        minutes: kinds.includes('video') ? Math.round(ids.reduce((s, r) => s + (byRef.get(r).length_ms || 0), 0) / 60) / 1000 : null,
+      });
+      rows.push({
+        ...item, asset_ids: ids.map(r => Number(r.slice(1))), series: clean(it.series) || null, step: clean(it.series) ? Math.max(1, parseInt(it.step, 10) || i + 1) : null,
+        source: 'vault', organisation_id: orgId, creator_id: creatorId, sort: i,
+      });
+    } catch (e) { console.error('[ai-chat] suggested item skipped:', e.message); }
+  }
+  // a series goes step by step: one item per step, in the order the AI gave (teasing first)
+  const series = {};
+  for (const r of rows) if (r.series) (series[r.series] ||= []).push(r);
+  for (const list_ of Object.values(series)) list_.sort((a, b) => a.step - b.step || a.sort - b.sort).forEach((r, k) => { r.step = k + 1; });
+  if (!rows.length) {
+    console.error('[ai-chat] sets unusable:', res.finish || '', String(res.text).slice(0, 300), '…', String(res.text).slice(-200));
+    throw new AiChatError('The AI\'s sets came back unusable: try again', 502);
+  }
+  const { error: delError } = await supabaseAdmin.from('ai_content').delete().eq('organisation_id', orgId).eq('creator_id', creatorId).in('source', ['starter', 'vault']);
+  if (delError) throw new Error(delError.message);
+  const { error } = await supabaseAdmin.from('ai_content').insert(rows);
+  if (error) throw new Error(error.message);
+  return { ...(await contentList(orgId, creatorId)), made: rows.length, unused: assets.length - used.size, cost: res.usage.cost };
+}
+
 /** Add the starter list (an example to change to what she really has). */
 async function addStarterContent(orgId, creatorId) {
   await pageAccount(orgId, creatorId);
   const now = new Date().toISOString();
-  const { error } = await supabaseAdmin.from('ai_content').insert(C.STARTER.map((it, i) => ({ ...it, organisation_id: orgId, creator_id: creatorId, sort: i, created_at: now, updated_at: now })));
+  const { error } = await supabaseAdmin.from('ai_content').insert(C.STARTER.map((it, i) => ({ ...it, source: 'starter', organisation_id: orgId, creator_id: creatorId, sort: i, created_at: now, updated_at: now })));
   if (error) throw new AiChatError(/ai_content/.test(error.message) ? CONTENT_MISSING : error.message, /ai_content/.test(error.message) ? 409 : 400);
   return contentList(orgId, creatorId);
 }
@@ -617,7 +719,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell });
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
-    notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), sell && !level.warm ? 'No PPV yet: you are still in the warm-up. Get to know him and build it up first.' : null].filter(Boolean),
+    notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
     selling: sell, content: sell ? C.contentText(content) : '', sales,
   };
@@ -640,6 +742,28 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   };
 }
 
+// What she should keep in mind about selling right now.
+const ASKS_FOR_CONTENT = new Set(['specific_content_request', 'content_not_available', 'asks_whats_in_ppv', 'fan_curious_about_page', 'wants_different_content', 'wants_preview']);
+const SEXTING = new Set(['deep_roleplay', 'peak_arousal', 'horny_fast', 'fan_in_bed', 'warmed_up']);
+function sellingNotes({ sell, level, ids, content, said = '', aboutLastPpv = false }) {
+  if (!sell) return [];
+  const out = [];
+  // what he asks for, matched against her content in code (Fanvue's tags): she must not guess
+  const m = aboutLastPpv ? null : C.matchRequest(said, content);
+  if (m) {
+    const name = (it) => `[c${it.id}] "${it.title}" (${C.what(it)}, ${C.money(it.price)})`;
+    if (m.full.length) out.push(`He asks for ${m.wants.join(' + ')}. You DO have that: ${m.full.slice(0, 4).map(name).join(', ')}. Say yes${level.warm ? ' and offer one of these' : ', and offer it once you\'ve chatted a little more'}.`);
+    else out.push(`He asks for ${m.wants.join(' + ')}. You DON'T have that exactly: say so plainly${m.close.length ? `, then offer the closest: ${m.close.map(x => `${name(x.it)} (has ${x.got.join(', ')})`).join(', ')}` : ', and keep chatting'}.`);
+  }
+  if (!level.warm) return [...out, 'No PPV yet: you are still in the warm-up. Get to know him and build it up first.'];
+  if (!m && ids.some(id => ASKS_FOR_CONTENT.has(id))) {
+    out.push('He is asking about content. Check your content list: if an item really is what he asks for, offer that one. If none is exactly it, start by saying plainly that you don\'t have that exact one, then offer the closest item and say what it is.');
+  }
+  const series = [...new Set(content.filter(it => it.series).map(it => it.series))];
+  if (series.length && level.his >= 2 && ids.some(id => SEXTING.has(id))) out.push(`He is in the mood to sext: your sexting sequence "${series[0]}" fits, step by step.`);
+  return out;
+}
+
 // A PPV in the practice chat, as the writer reads it (like a real one from Fanvue).
 function practicePpv(p, content) {
   const id = Number(String(p.item || '').replace(/^c/i, ''));
@@ -650,7 +774,19 @@ function practicePpv(p, content) {
     item: `c${id}`, title: clean(it.title || p.title).slice(0, 80), price: Number(p.price) || Number(it.price) || null,
     photos: kind === 'video' ? 0 : kind === 'bundle' ? Math.max(1, amount - 2) : amount || 1, videos: kind === 'video' ? 1 : kind === 'bundle' ? 2 : 0, other: 0,
     status: ['bought', 'not_bought'].includes(p.status) ? p.status : 'pending', speed: p.speed === 'slow' ? 'slow' : 'fast', bought_at: null,
+    series: it.series || null, step: it.step || null, next: it.series ? content.find(x => x.series === it.series && x.step === it.step + 1)?.title || null : null,
+    inside: it.description ? `${C.what(it)}: ${it.description}` : null,
   };
+}
+
+// He asks about a PPV she sent: "what's in it?", "is it nude?", "how long is it?"…
+const ASKS_ABOUT_IT = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this)\b|does\s+(?:it|that)\b|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
+
+// Whether his latest messages ask about the PPV she sent last (still unopened).
+function asksAboutLastPpv(convo) {
+  const i = convo.map(m => !!m.media?.item).lastIndexOf(true);
+  if (i < 0 || convo[i].media.status !== 'pending' || convo.slice(i + 1).some(m => !m.from_fan && !m.mass)) return false;
+  return ASKS_ABOUT_IT.test(convo.slice(i + 1).filter(m => m.from_fan).map(m => m.text).join(' '));
 }
 
 // What just happened with her last PPV (practice), and what she should do about it.
@@ -662,10 +798,15 @@ function ppvNotes(convo, followUp) {
   const out = [];
   if (p && !herAfter) {
     const name = `"${p.title}"`;
-    if (p.status === 'bought') out.push(`He just bought your PPV ${name}${p.speed === 'slow' ? ' after a while' : ' right away'}. React to it: ask what he liked, keep the mood going${p.speed === 'slow' ? '' : ', and while he\'s into it tease the next step'}.`);
+    if (p.status === 'bought') {
+      out.push(`He just bought your PPV ${name}${p.speed === 'slow' ? ' after a while' : ' right away'}. React to it: ask what he liked, keep the mood going${p.speed === 'slow' ? '' : ', and while he\'s into it tease the next step'}.`);
+      if (p.series) out.push(p.next ? `It was step ${p.step} of your "${p.series}" sexting sequence; the next step is "${p.next}", when he wants more.` : `That was the last step of your "${p.series}" sexting sequence.`);
+    }
     else if (p.status === 'not_bought') out.push(`He didn't buy your PPV ${name}. Don't beg or resend it; find out what's in the way, or keep chatting and try something else later.`);
     else if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
-    else out.push(`Your PPV ${name} is still unopened.`);
+    else if (hisAfter && ASKS_ABOUT_IT.test(convo.slice(i + 1).filter(m => m.from_fan).map(m => m.text).join(' ')) && p.inside) {
+      out.push(`He asks about your PPV ${name}. Answer his question first, truthfully and plainly, from what's really in it: ${p.inside} Then you can tease. Don't send another PPV now.`);
+    } else out.push(`Your PPV ${name} is still unopened: don't send another one now (you can talk about it, or answer him without offering anything).`);
   }
   if (followUp && !(p && !herAfter)) out.push('He hasn\'t replied for a while. Write one short, light follow-up to get him talking again; don\'t be pushy or needy.');
   if (followUp && p && !herAfter && p.status !== 'pending') out.push('He hasn\'t written anything since: you write first.');
@@ -825,7 +966,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (offerProblem) { c.verdict = 'block'; c.problems = [offerProblem, ...c.problems]; }
       // a PPV that passed the code checks: Claude checks it's truthful about what's inside
       if (draft.offer && c.verdict !== 'block') {
-        const r = await reviewOffer({ fanTexts: latest, messages: draft.messages, item: { ...draft.offer.item, what: C.what(draft.offer.item) } });
+        const r = await reviewOffer({ fanTexts: latest, messages: draft.messages, item: { ...draft.offer.item, what: C.what(draft.offer.item), seen: C.seenText(draft.offer.item) } });
         out.cost += r.usage.cost;
         await logUsage(orgId, 'check', CHECK_MODEL, r.usage, { creatorId, fanUuid });
         if (!r.ok) { c.verdict = 'block'; c.problems = [...r.problems.map(x => `Offer: ${x}`), ...c.problems]; }
@@ -840,6 +981,14 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         problems = r.ok ? [] : r.problems;
       }
       if (verdict === 'block' && attempt === 0 && problems.length && problems.every(x => /^Offer: /.test(x) || x === offerProblemSeen)) tries = 3;
+      // last try and only the PPV was wrong: send her text without it, if the text itself is fine
+      if (verdict === 'block' && attempt === tries - 1 && draft.ppv && problems.every(x => /^Offer: /.test(x) || x === offerProblemSeen)) {
+        const plain = checkReply(draft.messages, { recent: recentHer, chatting: recentHer.length > 0, maxLevel: base.level?.max ?? 3, selling: !!sell, offering: false });
+        if (plain.verdict !== 'block') {
+          draft.offer = null; verdict = plain.verdict === 'review' ? 'ok' : plain.verdict;
+          problems = ['The PPV was left out: it broke a selling rule.'];
+        }
+      }
       if (verdict !== 'block' || attempt === tries - 1) break;
       first = problems;
       retry = problems.join(' ');
@@ -852,6 +1001,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       ppv: verdict !== 'block' && draft.offer ? {
         item: `c${draft.offer.item.id}`, price: draft.offer.price, title: draft.offer.item.title, kind: draft.offer.item.kind, amount: draft.offer.item.amount,
         minutes: draft.offer.item.minutes, what: C.what(draft.offer.item), description: draft.offer.item.description,
+        series: draft.offer.item.series || null, step: draft.offer.item.step || null, asset_ids: draft.offer.item.asset_ids || [],
       } : null,
       // one message at a time, at her typing speed (never all in the same second)
       timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
@@ -884,8 +1034,8 @@ async function usage(orgId) {
 
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
-  buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent,
+  buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
   // for the blind test (utils/aiDuels.js)
-  _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf },
+  _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
 };

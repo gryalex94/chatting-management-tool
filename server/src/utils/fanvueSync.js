@@ -14,6 +14,7 @@
  */
 const { supabaseAdmin } = require('./supabase');
 const fv = require('../integrations/fanvue');
+const { copyFanvueVault } = require('./contentLibrary');
 
 const running = new Map();     // account id → progress of the sync in progress
 const lastResult = new Map();  // account id → the last sync's summary, errors included
@@ -223,6 +224,15 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
 
     if (mediaFailed) warnings.push(`Photos and PPVs of ${mediaFailed} chat${mediaFailed === 1 ? '' : 's'} couldn't be copied`);
 
+    // 3c. Her vault: what she has, with Fanvue's own description and tags (her content library)
+    progress.phase = 'vault';
+    try {
+      progress.vault = await copyFanvueVault(accountId);
+    } catch (e) {
+      if (NETWORK.test(String(e.message)) || e.reconnect) throw e;
+      warnings.push(e.status === 403 ? 'Her vault not copied: the read:media permission is missing' : `Her vault not copied: ${e.message}`);
+    }
+
     // 4. Earnings: from the account's start the first time, then the last 3 days
     //    again (statuses settle) and onwards.
     progress.phase = 'earnings';
@@ -239,7 +249,7 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
 
     const summary = {
       finished_at: new Date().toISOString(), took_s: Math.round((Date.now() - t0) / 1000),
-      chats_listed: progress.chats_listed, chats_read: progress.chats_read, messages: progress.messages, media: progress.media, earnings: progress.earnings, warnings,
+      chats_listed: progress.chats_listed, chats_read: progress.chats_read, messages: progress.messages, media: progress.media, vault: progress.vault || null, earnings: progress.earnings, warnings,
     };
     await supabaseAdmin.from('fanvue_accounts').update({ synced_at: summary.finished_at, sync_error: warnings[0] || null, status: 'connected' }).eq('id', accountId);
     lastResult.set(accountId, summary);

@@ -67,6 +67,7 @@ const SELLING_GUIDE = [
   'If he doesn\'t buy or goes quiet: one light, playful follow-up, no begging or spamming. If the price is the problem, a small personal discount (never below the lowest price) or a smaller item.',
   'If he says he has no money or can\'t buy now: no pressure, but never give anything away for free either (no free sexting, no free pics). Stay warm, let him open it later, or offer a smaller, cheaper item.',
   'One PPV at a time: never send a new one while the last one is unopened.',
+  'When he wants to sext and you have a sexting sequence, use it: sext with him and send its steps one by one, the next step once he has bought the last.',
 ];
 
 // How she chats: what the dialogues that went well had in common in the agency's

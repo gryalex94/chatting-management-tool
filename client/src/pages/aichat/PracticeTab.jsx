@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cost, dayTime, errMsg, fanName, moneyLine, shortDay } from './shared';
+import Thumbs from './Thumbs';
 
 const MADE_UP = 'made-up';
 const STATUS = {
@@ -64,10 +65,11 @@ const keptMessages = (result, used) => result.replies.map((r, i, all) => ({
 
 // A PPV she sent: price, what it is, exactly what's inside, and what he did with it.
 const PPV_STATUS = { pending: 'Not opened yet', bought: 'He bought it', not_bought: 'He didn\'t buy it' };
-function PpvCard({ ppv, children }) {
+function PpvCard({ ppv, creatorId, children }) {
   return (
     <div className='flex max-w-[85%] flex-col gap-1 self-end rounded-xl border border-dashed border-warn/50 bg-warn/5 px-3 py-2 text-xs'>
-      <span className='flex items-center gap-1.5 font-medium'><Lock className='size-3.5 text-warn' />PPV ${ppv.price} · {ppv.title} · {ppv.what}</span>
+      <span className='flex items-center gap-1.5 font-medium'><Lock className='size-3.5 text-warn' />PPV ${ppv.price} · {ppv.series ? `${ppv.series}, step ${ppv.step}: ` : ''}{ppv.title} · {ppv.what}</span>
+      {creatorId && ppv.asset_ids?.length > 0 && <Thumbs creatorId={creatorId} ids={ppv.asset_ids} />}
       <span className='text-muted-foreground'>{ppv.description}</span>
       {ppv.status && <span className={cn('font-medium', ppv.status === 'bought' ? 'text-good' : ppv.status === 'not_bought' ? 'text-bad' : 'text-muted-foreground')}>
         {PPV_STATUS[ppv.status]}{ppv.status === 'bought' ? (ppv.speed === 'slow' ? ' after a while' : ' right away') : ''}
@@ -112,7 +114,7 @@ const Typing = () => (
 
 // One writer's answer: the reply (one message at a time, at her typing speed),
 // whether it passed the checks, and what it cost.
-function Draft({ result, startAt, kept, onKeep, canKeep, onGrow }) {
+function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId }) {
   const s = STATUS[result.status] || STATUS.error;
   const live = ['ok', 'check'].includes(result.status);
   const play = usePlayback(result.timing, startAt, !live || kept);
@@ -132,7 +134,7 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow }) {
               meta={live && result.timing ? `arrived after ${play.arrivedAfter[i]} s` : null}>{r.creator_message}</Bubble>
           ))}
           {play.typing && <Typing />}
-          {play.done && result.ppv && <PpvCard ppv={result.ppv} />}
+          {play.done && result.ppv && <PpvCard ppv={result.ppv} creatorId={creatorId} />}
           {!play.done && (
             <button type='button' onClick={play.skip} className='self-end text-xs text-link hover:underline'>
               {play.shown ? 'Skip the wait' : `${result.replies.length} message${result.replies.length === 1 ? '' : 's'} on the way · skip the wait`}
@@ -294,7 +296,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           {round.screen?.review && <p className='text-xs text-muted-foreground'>Claude checked his message first: {round.screen.review.reason}</p>}
           <div className={cn('grid gap-2', round.results.length > 1 && 'lg:grid-cols-2', round.results.length > 2 && '2xl:grid-cols-3')}>
             {round.results.map(res => (
-              <Draft key={res.model} result={res} startAt={round.askedAt} kept={round.kept === res.model} onGrow={toBottom}
+              <Draft key={res.model} result={res} startAt={round.askedAt} kept={round.kept === res.model} onGrow={toBottom} creatorId={page.creator_id}
                 canKeep={!round.kept && round === rounds[rounds.length - 1]} onKeep={() => keep(round, res)} />
             ))}
           </div>
@@ -391,7 +393,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
             <div key={`t${i}`} className='flex flex-col gap-2'>
               <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}>{m.text}</Bubble>
               {m.ppv && (
-                <PpvCard ppv={m.ppv}>
+                <PpvCard ppv={m.ppv} creatorId={page.creator_id}>
                   {i === lastPpvAt && m.ppv.status === 'pending' && !busy && (
                     <div className='mt-1 flex flex-wrap gap-1.5'>
                       <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'fast')}>Bought right away</Button>

@@ -19,7 +19,8 @@ const LEVEL_WORD = ['friendly', 'flirty', 'suggestive', 'explicit'];
 const levelOf = (it) => Math.max(NUDITY_LEVEL[it.nudity] ?? 1, FETISH.test([...(it.tags || []), it.focus, it.action].join(' ')) ? 2 : 0);
 const money = (n) => `$${Number(n) % 1 ? Number(n).toFixed(2) : Number(n)}`;
 const lowest = (it) => Number(it.min_price ?? Math.round(it.price * 0.8));
-const what = (it) => (it.kind === 'video' ? `a ${it.minutes ? `${Number(it.minutes)}-minute ` : ''}video`
+const length = (m) => (Number(m) < 1 ? `${Math.max(1, Math.round(Number(m) * 60))}-second` : `${Number(m)}-minute`);
+const what = (it) => (it.kind === 'video' ? `a ${it.minutes ? `${length(it.minutes)} ` : ''}video`
   : it.kind === 'bundle' ? 'a bundle' : `${it.amount || 'a set of'} photo${it.amount === 1 ? '' : 's'}`);
 
 const STARTER = [
@@ -85,15 +86,36 @@ const STARTER = [
   },
 ];
 
-/** The content list as the writer reads it (only active items). */
+// What the platform's AI sees in an item's files, in one line.
+function seenText(it) {
+  const s = it.seen;
+  if (!s) return '';
+  const others = (s.people || []).filter(p => !/^(?:female|woman|women)$/.test(p));
+  return [
+    `acts: ${s.acts?.length ? s.acts.join(', ') : 'none'}`, `toys/objects: ${(s.objects || []).filter(o => o !== 'smartphone').join(', ') || 'none'}`,
+    `other people: ${others.length ? others.join(', ') : 'none'}`, s.setting?.length ? `setting: ${s.setting.slice(0, 6).join(', ')}` : null,
+    s.body?.length ? `shows: ${s.body.slice(0, 8).join(', ')}` : null,
+  ].filter(Boolean).join('; ');
+}
+
+/** The content list as the writer reads it (only active items; a series in order). */
 function contentText(items) {
-  return items.filter(it => it.active !== false).map((it) => {
-    const head = `[c${it.id}] ${it.title} · ${what(it)} · ${NUDITY_LABEL[it.nudity] || it.nudity}, ${LEVEL_WORD[levelOf(it)]} · ${money(it.price)} (lowest ${money(lowest(it))})`;
+  const active = items.filter(it => it.active !== false);
+  const one = (it) => {
+    const head = `[c${it.id}] ${it.series ? `${it.series}, step ${it.step}: ` : ''}${it.title} · ${what(it)} · ${NUDITY_LABEL[it.nudity] || it.nudity}, ${LEVEL_WORD[levelOf(it)]} · ${money(it.price)} (lowest ${money(lowest(it))})`;
     const bits = [`  Inside: ${it.description}`];
+    if (it.seen) bits.push(`  In the files: ${seenText(it)}`);
     if (it.tags?.length) bits.push(`  Tags: ${it.tags.join(', ')}${it.face === false ? ' · her face isn\'t shown' : ''}`);
     if (it.notes) bits.push(`  When: ${it.notes}`);
     return [head, ...bits].join('\n');
-  }).join('\n');
+  };
+  const single = active.filter(it => !it.series);
+  const series = {};
+  for (const it of active.filter(x => x.series)) (series[it.series] ||= []).push(it);
+  return [
+    ...single.map(one),
+    ...Object.entries(series).map(([name, list]) => `Series "${name}" (a sexting sequence: send it step by step, the next step only after he bought the last one):\n${list.sort((a, b) => a.step - b.step).map(one).join('\n')}`),
+  ].join('\n');
 }
 
 /**
@@ -108,6 +130,15 @@ function checkOffer({ ppv, items, offered = [], level, warm }) {
   if (!warm) return { problem: 'It offered a PPV during the warm-up. Get to know him first; offer something only once you have been chatting a while.' };
   if (offered.some(o => o.status === 'pending')) return { problem: 'Her last PPV is still unopened. Don\'t send another one until he reacts to it.' };
   if (offered.some(o => o.id === item.id)) return { problem: `He already got "${item.title}". Don't send the same item twice; pick another one or talk about that one.` };
+  if (item.series) {
+    // a sexting sequence: step by step, the next one only after he bought the last
+    const bought = offered.map(o => items.find(x => x.id === o.id)).filter((x, k) => x?.series === item.series && offered[k].status === 'bought').map(x => x.step);
+    const next = (bought.length ? Math.max(...bought) : 0) + 1;
+    if (item.step !== next) {
+      const want = items.find(x => x.series === item.series && x.step === next);
+      return { problem: `"${item.series}" goes step by step: ${want ? `send step ${next} next ("${want.title}")` : 'it is finished'}, not step ${item.step}.` };
+    }
+  }
   if (levelOf(item) > (level?.max ?? 0) + 1) return { problem: `"${item.title}" is ${LEVEL_WORD[levelOf(item)]}: far spicier than the chat is now. Build it up first, or offer something softer.` };
   const price = Number(ppv.price) || Number(item.price);
   if (price < lowest(item)) return { problem: `${money(price)} is below the lowest price for "${item.title}" (${money(lowest(item))}).` };
@@ -115,4 +146,51 @@ function checkOffer({ ppv, items, offered = [], level, warm }) {
   return { item, price: Math.round(price * 100) / 100 };
 }
 
-module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money };
+// What a fan may ask for, and how to recognise it in an item (its kind, how much she
+// shows, Fanvue's content tags, its own words). Each concept: [label, words he uses, test].
+// "No toys, no other people." in a description isn't a toy: negations are left out.
+const said = (t) => String(t || '').toLowerCase().replace(/\b(?:no|not|without|nothing)\b[^.;]*[.;]?/g, ' ');
+const has = (it, ...words) => {
+  const s = it.seen || {};
+  const hay = [it.title, said(it.description), ...(it.tags || []), it.focus, it.outfit, it.setting, it.action, ...(s.acts || []), ...(s.objects || []), ...(s.setting || []), ...(s.body || []), ...(s.categories || [])]
+    .join(' ').toLowerCase();
+  return words.some(w => hay.includes(w));
+};
+// what an item is about (not every body part that happens to be in a full-body shot)
+const about = (it, ...words) => {
+  const hay = [it.title, said(it.description), ...(it.tags || []), it.focus].join(' ').toLowerCase();
+  return words.some(w => hay.includes(w));
+};
+const withMan = (it) => (it.seen?.people || []).some(p => /\b(?:male|man|men|boy)\b/.test(p)) || /\b(?:male partner|a man|with a man|nude man|partner)\b/i.test(it.description || '');
+const CONCEPTS = [
+  ['a man in it', /\b(?:guy|guys|man|men|dude|boy ?friend|bf|partner|couple|b\/?g|with (?:a|another) (?:guy|man|dude)|sex with)\b/i, withMan],
+  ['a toy', /\b(?:toy|toys|dildo|vibrator|plug)\b/i, it => has(it, 'dildo', 'vibrator', 'plug', 'sex toy') || (it.seen?.objects || []).some(o => /toy|dildo|vibrator/.test(o))],
+  ['the shower or bath', /\b(?:shower|bath|bathtub|tub)\b/i, it => has(it, 'shower', 'bath')],
+  ['a video', /\b(?:video|vid|vids|clip|movie)\b/i, it => it.kind === 'video' || it.kind === 'bundle'],
+  ['full nudity', /\b(?:nude|naked|everything|all of you|full(?:y)? (?:nude|naked))\b/i, it => ['nude', 'explicit'].includes(it.nudity)],
+  ['lace', /\blace\b/i, it => about(it, 'lace')],
+  ['lingerie', /\b(?:lingerie|bra|panties|thong|bodysuit|underwear)\b/i, it => about(it, 'lingerie', 'bra', 'panties', 'thong', 'bodysuit', 'underwear')],
+  ['her feet', /\b(?:feet|foot|toes|soles)\b/i, it => about(it, 'feet', 'foot', 'toes', 'soles')],
+  ['her ass', /\b(?:ass|butt|booty|behind)\b/i, it => has(it, 'ass', 'buttock', 'booty')],
+  ['her breasts', /\b(?:tits|boobs|breasts|titties|nipples)\b/i, it => has(it, 'boobs', 'breast', 'nipple')],
+  ['anal', /\b(?:anal|ass ?fuck)\b/i, it => has(it, 'anal')],
+  ['oral', /\b(?:blow ?job|bj|oral|suck(?:ing)? (?:a |his )?(?:cock|dick))\b/i, it => has(it, 'oral', 'blowjob', 'fellatio')],
+  ['touching herself', /\b(?:touch(?:ing)? (?:yourself|herself)|masturbat\w*|finger(?:ing)?|play(?:ing)? with (?:yourself|herself))\b/i, it => has(it, 'masturbat', 'fingering')],
+  ['a mirror selfie', /\b(?:mirror|selfie)\b/i, it => has(it, 'mirror', 'selfie')],
+];
+
+/**
+ * What he asks for (from his latest messages), matched against her content: the items
+ * that have all of it, or else the closest ones. Null when he isn't asking for anything specific.
+ */
+function matchRequest(text, items) {
+  const wants = CONCEPTS.filter(([, re]) => re.test(String(text || '')));
+  if (!wants.length) return null;
+  const active = items.filter(it => it.active !== false);
+  const scored = active.map(it => ({ it, got: wants.filter(([, , test]) => test(it)).map(([label]) => label) })).filter(x => x.got.length);
+  const full = scored.filter(x => x.got.length === wants.length).map(x => x.it);
+  const close = full.length ? [] : scored.sort((a, b) => b.got.length - a.got.length || a.it.price - b.it.price).slice(0, 3);
+  return { wants: wants.map(([label]) => label), full, close };
+}
+
+module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money, seenText, matchRequest };

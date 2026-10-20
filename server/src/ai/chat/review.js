@@ -126,8 +126,9 @@ async function reviewOffer({ fanTexts = [], messages = [], item }) {
     'You check PPV offers an AI creator sends fans on Fanvue, a subscription site for verified adults. Adult content is allowed. You only check that the offer is truthful about what the content really is. You never rewrite anything.',
     `His last messages:\n${fanTexts.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n') || '(none)'}\n\n`
       + `What she writes with the PPV:\n${messages.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n')}\n\n`
-      + `What the PPV really is: "${item.title}", ${item.what}. Inside: ${item.description}\n\n`
-      + 'ok = true only if (1) what she writes promises or implies nothing that isn\'t in it (a video when it\'s photos, a toy, an act, a place, an outfit that isn\'t described), and (2) if he asked for something specific, either this item really is that, or she says plainly that it\'s not exactly that and offers it as the closest thing. Teasing and leaving details out is fine. List each problem in one short plain sentence.',
+      + `What the PPV really is: "${item.title}", ${item.what}. Inside: ${item.description}${item.seen ? ` In the files (the platform's own analysis): ${item.seen}.` : ''}\n\n`
+      + 'Only check what she says the PPV itself shows or contains. Flirting, sexting and fantasy about what she would do with him are fine and are not claims about the content; teasing and leaving details out are fine too. '
+      + 'ok = true unless (1) she says or clearly implies the PPV contains something it doesn\'t (a video when it\'s photos, a toy, an act, a place, an outfit, another person that isn\'t in it), or (2) he asked for something specific that this item is not, and she presents it as that thing instead of saying it\'s not exactly that. List each problem in one short plain sentence.',
     REPLY_SCHEMA);
   if (r.declined) return { ok: true, declined: true, problems: [], usage: r.usage };
   return { ok: !!r.answer.ok, problems: (r.answer.problems || []).map(String).filter(Boolean), usage: r.usage };

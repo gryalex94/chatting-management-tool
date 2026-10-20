@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { requireMinRole } = require('../middleware/auth');
 const A = require('../utils/aiChat');
+const L = require('../utils/contentLibrary');
 const D = require('../utils/aiDuels');
 
 // The AI chat for the Fanvue AI creator (utils/aiChat.js): her profile, what she
@@ -119,6 +120,32 @@ router.post('/pages/:creatorId/content/starter', async (req, res) => {
 router.post('/pages/:creatorId/content', async (req, res) => {
   try { res.json(await A.saveContent(org(req), req.params.creatorId, req.body || {}, req.user.id)); } catch (e) { fail(res, e, 'save the item'); }
 });
+// POST /api/ai-chat/pages/:creatorId/content/suggest — sellable sets made from her vault (replaces the starter list)
+router.post('/pages/:creatorId/content/suggest', async (req, res) => {
+  try { res.json(await A.suggestContent(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'make sets from her vault'); }
+});
+
+// ── Her content library: what she has and where it is (database change 042) ──
+// GET  /api/ai-chat/pages/:creatorId/library            — her files, where they are, Fanvue's tags, how they sold
+// POST /api/ai-chat/pages/:creatorId/library/refresh    — read her Fanvue vault again now
+// POST /api/ai-chat/pages/:creatorId/library/previews   — fresh small preview links { ids: [assetId] }
+router.get('/pages/:creatorId/library', async (req, res) => {
+  try { res.json(await L.library(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her vault'); }
+});
+router.post('/pages/:creatorId/library/refresh', async (req, res) => {
+  try {
+    const { account } = await A._engine.pageAccount(org(req), req.params.creatorId);
+    const copied = await L.copyFanvueVault(account.id);
+    res.json({ ...(await L.library(org(req), req.params.creatorId)), copied });
+  } catch (e) { fail(res, e, 'read her vault'); }
+});
+router.post('/pages/:creatorId/library/previews', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(x => /^\d+$/.test(String(x))) : [];
+    res.json({ previews: await L.previews(org(req), req.params.creatorId, ids) });
+  } catch (e) { fail(res, e, 'load the previews'); }
+});
+
 router.delete('/pages/:creatorId/content/:itemId', async (req, res) => {
   try {
     if (!/^\d+$/.test(req.params.itemId)) return res.status(400).json({ error: 'Not found' });
