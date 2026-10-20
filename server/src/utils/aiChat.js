@@ -24,6 +24,7 @@ const strategy = require('../ai/chat/strategy');
 const { mediaNote, emptyBody, standingAt } = require('../ai/chat/notes');
 const { FAN_TYPES, fanType } = require('../ai/chat/fanTypes');
 const C = require('../ai/chat/content');
+const T = require('../ai/chat/trace');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -713,7 +714,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
 
   // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
   const screen = latest.length ? await screenLatest(orgId, creatorId, fanUuid, latest) : { action: 'continue', reasons: [], notes: [], review: null };
-  if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: null };
+  if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: { trace: [T.safetyStep(screen)] } };
 
   // 2. the briefing, with the Playbook situations that fit this moment
   const win = windowFor(convo);
@@ -732,12 +733,23 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
   const sexting = await storyFor({ orgId, level, scene, said: latest.join(' '), content, convo, waiting, sell, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ });
+  const momentNotes = [...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })];
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
-    notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })].filter(Boolean),
+    notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
     selling: sell, content: sell ? C.contentText(content) : '', sales,
   };
+  // the decision map: what was looked at and decided before any writer wrote a word
+  const situations = plan.ids.map(strategy.situationTitle);
+  const trace = [
+    T.safetyStep(latest.length ? screen : null),
+    T.himStep({ real: !!fanUuid, fan, type, money, card, story, long }),
+    T.momentStep({ level, situations, herCount: win.messages.filter(m => !m.from_fan && !m.mass).length, warmUp: WARM_UP, phase, waiting, followUp }),
+    T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on }),
+    T.storyStep(sexting),
+    T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
+  ].filter(Boolean);
 
   // 3. each writer drafts; every draft is checked, and rewritten if it breaks a rule or sounds off
   const speed = persona.settings?.typing || 'normal';
@@ -752,6 +764,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
       selling: sell, phase, sales: sales.length, follow_up: !!followUp,
       story: sexting ? { stage: sexting.stage, ideas: sexting.ideas.length, moves: sexting.moves?.moves.length || 0, setting: sexting.moves?.where || null, scene: !!sexting.scene } : null,
+      trace, said: latest,
     },
   };
 }
@@ -1065,7 +1078,7 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
   const lead = !pulled_back && (warm || (hot && since >= LEAD_AFTER));
   const match = hot && since >= MATCH_AFTER;
   const max = P.maxLevel({ his, heat: persona?.profile?.heat, lead, match });
-  const level = { his, mood, pulled_back, max, lead, match };
+  const level = { his, mood, pulled_back, max, lead, match, since };
   let last = chat.length;
   while (last > 0 && chat[last - 1].from_fan) last -= 1;
   const said = chat.slice(last).map(m => m.text).join(' ');               // his latest message(s)
@@ -1188,6 +1201,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
   const maxLevel = base.level?.max ?? 3;
   try {
     let retry = null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
+    const steps = [];                                       // each draft, for the decision map
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
       const res = await or.chat({ model, maxTokens: 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
@@ -1195,6 +1209,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
       const draft = P.readReply(res.text);
+      const raw = [...draft.messages];                        // as the writer wrote it, before the code tidied it
       if (noPpv) draft.ppv = null;
       // a PPV she attached: is it in her list, and allowed right now?
       let offerProblem = null;
@@ -1209,7 +1224,10 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (voice) draft.messages = P.dropSentences(draft.messages, { his: voice.his, noOffer: draft.ppv ? '' : noPpv || base.noOffer || '' });
       const asks = voice ? questionsIn(draft.messages, voice.his) : 0;
       if (voice && ((voice.noQuestion && asks) || asks > 1)) draft.messages = P.unQuestion(draft.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
-      if (draft.handover) return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started };
+      if (draft.handover) {
+        steps.push({ raw, final: [...draft.messages], ppv: null, offer: null, problems: [`It asks a person to take over: ${draft.handover}`], style: [], review: null, verdict: 'handover' });
+        return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started, trace: T.writerSteps({ label: out.label, drafts: steps, pick: steps.length - 1, status: 'handover' }) };
+      }
       const c = checkReply(draft.messages, {
         recent: recentHer, chatting: recentHer.length > 0, maxLevel, selling: !!sell, offering: !!draft.offer,
         noOffer: draft.offer || draft.ppv ? '' : noPpv || base.noOffer || '', voice,
@@ -1231,7 +1249,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         verdict = r.ok ? 'ok' : r.declined ? 'person' : 'block';
         problems = r.ok ? [] : r.problems;
       }
-      const now = { draft, verdict, problems, review, style: [...(c.style || [])] };
+      const now = { draft, verdict, problems, review, style: [...(c.style || [])], index: attempt };
       // sexting: a reply that doesn't move the story on (stands still, or only reacts)
       // (a PPV sent as part of the story counts as a step, and so does a step the writer names, like "undresses")
       const named = draft.scene?.beat && draft.scene.beat !== 'reacts_to_him';
@@ -1242,6 +1260,10 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (draft.offer && !draft.offer.item.series && C.levelOf(draft.offer.item) <= (base.level?.his ?? 0) - 2) {
         now.style.push(`The PPV "${draft.offer.item.title}" is much tamer than where the chat is: offer something closer to what he wants.`);
       }
+      steps.push({
+        raw, final: [...draft.messages], ppv: draft.ppv ? `${draft.ppv.item} at $${draft.ppv.price ?? '?'}${offerProblem ? `: ${offerProblem}` : ''}` : null,
+        offer: draft.offer ? `${draft.offer.item.title}, $${draft.offer.price}` : null, problems, style: now.style, review, verdict,
+      });
       last = now;
       if (verdict !== 'block') kept = now;
       if (!first) first = verdict === 'block' ? problems : now.style;
@@ -1257,21 +1279,25 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     const { draft } = pick;
     const notes = [...pick.problems];
     if (noPpv && pick === kept && !draft.offer) notes.push(`Written again without a PPV: ${noPpv}`);
+    const status = pick.verdict === 'ok' ? 'ok' : pick.verdict === 'person' ? 'check' : 'blocked';
+    // the PPV on her last message (only when the reply passed)
+    const ppv = pick.verdict !== 'block' && draft.offer ? {
+      item: `c${draft.offer.item.id}`, price: draft.offer.price, title: draft.offer.item.title, kind: draft.offer.item.kind, amount: draft.offer.item.amount,
+      minutes: draft.offer.item.minutes, what: C.what(draft.offer.item), description: draft.offer.item.description,
+      series: draft.offer.item.series || null, step: draft.offer.item.step || null, asset_ids: draft.offer.item.asset_ids || [],
+    } : null;
+    const scene = base.sexting?.on ? draft.scene || base.sexting.scene || null : null;
     return {
       ...out,
-      status: pick.verdict === 'ok' ? 'ok' : pick.verdict === 'person' ? 'check' : 'blocked',
+      status,
       replies: draft.messages.map(m => ({ creator_message: m })),
-      // the PPV on her last message (only when the reply passed)
-      ppv: pick.verdict !== 'block' && draft.offer ? {
-        item: `c${draft.offer.item.id}`, price: draft.offer.price, title: draft.offer.item.title, kind: draft.offer.item.kind, amount: draft.offer.item.amount,
-        minutes: draft.offer.item.minutes, what: C.what(draft.offer.item), description: draft.offer.item.description,
-        series: draft.offer.item.series || null, step: draft.offer.item.step || null, asset_ids: draft.offer.item.asset_ids || [],
-      } : null,
+      ppv,
+      trace: T.writerSteps({ label: out.label, drafts: steps, pick: pick.index, status, ppv, scene, learned: draft.learned, notes: pick.verdict === 'block' ? [] : notes }),
       // one message at a time, at her typing speed (never all in the same second)
       timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
       learned: draft.learned.map(t => ({ note: t })),
       // her sexting story after this reply (the practice room sends it back with the next message)
-      scene: base.sexting?.on ? draft.scene || base.sexting.scene || null : null,
+      scene,
       problems: notes, style: pick.style, review: pick.review, retried: drafts > 1, drafts, first_problems: drafts > 1 ? first || [] : [], format_ok: draft.format_ok,
       ms: Date.now() - started,
     };

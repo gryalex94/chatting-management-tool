@@ -29,6 +29,8 @@ export default function AiChatPage() {
   const [data, setData] = useState(null);             // { ready, writers, default_writer, pages }
   const [pageId, setPageId] = useState(null);
   const [tab, setTab] = useState('practice');
+  const [practiceOpen, setPracticeOpen] = useState(false);   // the practice room's own window
+  const closePractice = useCallback(() => setPracticeOpen(false), []);
   const [contentVersion, setContentVersion] = useState(0);   // her content changed: Practice counts it again
   const [spent, setSpent] = useState(null);
 
@@ -86,7 +88,7 @@ export default function AiChatPage() {
       <Tabs value={tab} onValueChange={setTab} className='gap-4'>
         <div className='-mx-1 overflow-x-auto overflow-y-hidden px-1'>
           <TabsList>
-            <TabsTrigger value='practice'>Practice</TabsTrigger>
+            <TabsTrigger value='practice' onClick={() => setPracticeOpen(true)}>Practice</TabsTrigger>
             <TabsTrigger value='profile'>Her profile</TabsTrigger>
             <TabsTrigger value='content'>Her content</TabsTrigger>
             <TabsTrigger value='memory'>Fan memory</TabsTrigger>
@@ -95,8 +97,9 @@ export default function AiChatPage() {
         </div>
         {/* kept mounted, so a practice chat survives a look at the other tabs */}
         <TabsContent value='practice' forceMount className='data-[state=inactive]:hidden'>
-          <PracticeTab key={page.creator_id} page={page} writers={data.writers} fanTypes={data.fan_types} ready={data.ready} onSpent={loadSpent} onSetUp={() => setTab('profile')}
-            onContent={() => setTab('content')} contentVersion={contentVersion} />
+          <PracticeTab key={page.creator_id} page={page} writers={data.writers} fanTypes={data.fan_types} ready={data.ready} onSpent={loadSpent}
+            onSetUp={() => { setPracticeOpen(false); setTab('profile'); }} onContent={() => { setPracticeOpen(false); setTab('content'); }} contentVersion={contentVersion}
+            open={practiceOpen} onOpen={() => setPracticeOpen(true)} onClose={closePractice} />
         </TabsContent>
         <TabsContent value='profile'>
           <ProfileTab key={page.creator_id} page={page} writers={data.writers} ready={data.ready} onSaved={() => { load(); loadSpent(); }} />
