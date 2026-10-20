@@ -96,7 +96,7 @@ router.get('/pages/:creatorId/memory', (req, res) => res.json({ job: A.memoryJob
 // room. Only shown in the tool; nothing is sent to Fanvue.
 router.post('/pages/:creatorId/reply', async (req, res) => {
   try {
-    const { fan_uuid: fanUuid, made_up: madeUp, test, models, selling, follow_up: followUp, what_if: whatIf, plan_only: planOnly, learned } = req.body || {};
+    const { fan_uuid: fanUuid, made_up: madeUp, test, models, selling, follow_up: followUp, what_if: whatIf, plan_only: planOnly, learned, session, outcome } = req.body || {};
     if (fanUuid != null && !FAN_RE.test(String(fanUuid))) return res.status(400).json({ error: 'Fan not found' });
     res.json(await A.reply(org(req), req.params.creatorId, {
       fanUuid: fanUuid || null, madeUp: madeUp && typeof madeUp === 'object' ? madeUp : null,
@@ -104,6 +104,8 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
       selling: selling === true, followUp: followUp === true,
       whatIf: whatIf && typeof whatIf === 'object' ? whatIf : null, planOnly: planOnly === true,
       learned: Array.isArray(learned) ? learned : [],
+      session: session && typeof session === 'object' ? session : null,
+      outcome: outcome && typeof outcome === 'object' ? outcome : null,
     }));
   } catch (e) { fail(res, e, 'draft a reply'); }
 });

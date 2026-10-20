@@ -28,6 +28,7 @@ const C = require('../ai/chat/content');
 const T = require('../ai/chat/trace');
 const Plan = require('../ai/chat/plan');
 const Mem = require('../ai/chat/memory');
+const S = require('../ai/chat/session');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -393,10 +394,16 @@ async function fans(orgId, creatorId) {
 /** One fan: names, memory, money and the latest messages (for the tool's screens). */
 async function fanDetail(orgId, creatorId, fanUuid) {
   const { account } = await pageAccount(orgId, creatorId);
-  const [person, mem, { chat, money }] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid)]);
+  const [person, mem, { chat, money }, persona, pageUsd] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid), loadPersona(orgId, creatorId), pageMonthly(account.id)]);
   if (!chat.length) throw new AiChatError('No chat with this fan', 404);
   const win = windowFor(chat);             // exactly what the writer reads
+  // his state from his history (session.js), as the engine would see him if he wrote now
+  const timeZone = persona?.settings?.timezone || P.DEFAULT_TZ;
+  const talk = Mem.conversation(chat);
+  const profile = Plan.fanProfile({ money, chat, pageMonthly: pageUsd, card: mem?.facts || [], bond: mem?.bond || null, from: talk.start });
+  const state = S.fanStateOf({ chat, profile, away: talk.away, timeZone });
   return {
+    state: { ...state, tier: profile.tier_label, closeness: profile.closeness, plan: S.startSession({ profile, state, away: talk.away }) },
     fan: { fan_uuid: fanUuid, display_name: person.display_name || null, fan_username: person.handle || null, fan_nickname: person.nickname || null, top_spender: !!person.is_top_spender },
     memory: mem ? {
       facts: (mem.facts || []).map(f => ({ id: f.id, kind: f.kind, note: f.text, locked: !!f.locked, said_at: f.said_at || null, on: f.on || null })),
@@ -791,8 +798,16 @@ async function pageMonthly(accountId) {
  * { type (a made-up fan's type), tier, mood, his (0–3), budget: 'used' }. `planOnly`:
  * decide but don't write (no writer is called).
  */
-async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [] }) {
+async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [], session: sentSession = null, outcome = null }) {
   const { account } = await pageAccount(orgId, creatorId);
+  // what he did after her previous reply (Practice: as you played him): the outcomes log (B7)
+  if (outcome && typeof outcome === 'object' && clean(outcome.happened) && !whatIf && !planOnly) {
+    supabaseAdmin.from('ai_outcomes').insert({
+      organisation_id: orgId, creator_id: creatorId, fan_uuid: fanUuid, source: 'practice',
+      goal: clean(outcome.goal).slice(0, 40) || null, aim: clean(outcome.aim).slice(0, 20) || null, tier: clean(outcome.tier).slice(0, 20) || null,
+      closeness: clean(outcome.closeness).slice(0, 20) || null, happened: clean(outcome.happened).slice(0, 20), ppv: outcome.ppv === true,
+    }).then(({ error }) => { if (error && !/ai_outcomes/.test(error.message)) console.error('[ai-chat] outcome:', error.message); });
+  }
   const persona = await loadPersona(orgId, creatorId);
   if (!clean(persona?.profile?.name)) throw new AiChatError('Set up her profile first (Her profile)', 409);
   if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
@@ -835,6 +850,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const talk = Mem.conversation(convo);
   if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
   const now = new Date();
+  const herHere = convo.slice(talk.start).filter(m => !m.from_fan && !m.mass).length;   // her messages in this conversation
 
   // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
   const screen = latest.length ? await screenLatest(orgId, creatorId, fanUuid, latest) : { action: 'continue', reasons: [], notes: [], review: null };
@@ -845,17 +861,27 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
   const sell = content.length > 0;
-  // his notes the planner checks his latest message against (a contradiction: she checks with him,
-  // Q14): who he is first (where he lives, his job, family), then his plans and likes
-  const checkable = ['about', 'plan', 'likes'].flatMap(k => card.filter(f => f.kind === k && clean(f.text))).slice(0, 25);
-  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text) });
   // her last PPV in this practice chat: none new while it waits for him (unless he wants something else)
   const waiting = lastPpv(convo);
   const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status, open: false }));
   if (waiting && offered.length) offered[offered.length - 1].open = waiting.open;
+  // who he is, first from his numbers and notes alone (the planner's read comes next), then his state
+  // from his history and the plan for this conversation (session.js), kept by the practice room
+  const pageUsd = await pageMonthly(account.id);
+  const first = Plan.fanProfile({ money, type, chat: convo, ids: [], mood: '', pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, now });
+  const state = fanUuid ? S.fanStateOf({ chat, profile: first, away: talk.away, timeZone, now }) : S.madeUpState(type, first);
+  let session = S.resumeSession(sentSession) || S.startSession({ profile: first, state, away: talk.away, now });
+  // his notes the planner checks his latest message against (a contradiction: she checks with him,
+  // Q14): who he is first (where he lives, his job, family), then his plans and likes
+  const checkable = ['about', 'plan', 'likes'].flatMap(k => card.filter(f => f.kind === k && clean(f.text))).slice(0, 25);
+  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: session.warm_up, herHere });
+  // a sad or annoyed mood sticks (B4); no selling for the rest of a conversation he was sad, annoyed or suspicious in (B3)
+  const turn = S.nextTurn(session, { read: level.mood, said: latest.join(' '), suspicious: first.suspicious || level.mood === 'suspicious', timeWaster: first.time_waster });
+  session = turn.session;
+  level.mood = turn.mood;
   // why no PPV can go out right now (then she mustn't promise one either)
-  let noOffer = !sell ? '' : !level.warm ? 'you are still in the warm-up, so get to know him first.'
-    : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : '';
+  let noOffer = !sell ? '' : !level.warm ? `you are still in the warm-up (${herHere} of ${session.warm_up} of your messages this conversation), so get to know him first.`
+    : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : session.no_sell ? `${session.no_sell}.` : '';
   const voice = voiceFor({ chat: convo, fan, latest, followUp, from: talk.start });
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
@@ -863,7 +889,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const momentNotes = [...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })];
 
   // 3. the plan: who he is and what this reply should do, decided in code (plan.js)
-  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: await pageMonthly(account.id), offered, card, bond, from: talk.start, override: whatIf || {}, now });
+  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, now });
   const match = sell && !asksAboutLastPpv(convo) ? C.matchRequest(latest.join(' '), content) : null;
   const lastSent = convo.map(m => !!m.media?.item).lastIndexOf(true);
   const gap = lastSent < 0 ? null : convo.slice(lastSent + 1).filter(m => !m.from_fan && !m.mass).length;
@@ -881,7 +907,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
-    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null,
+    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session,
   });
   // the plan is enforced: no PPV (nor a promise of one) when it says so, no question when it says so, his length mirrored
   if (sell && !replyPlan.sell.allowed && !noOffer) noOffer = replyPlan.sell.why;
@@ -901,14 +927,15 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const situations = plan.ids.map(strategy.situationTitle);
   const trace = [
     T.safetyStep(latest.length ? screen : null),
-    T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, now, timeZone }),
-    T.momentStep({ level, situations, herCount: win.messages.filter(m => !m.from_fan && !m.mass).length, warmUp: WARM_UP, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null }),
+    T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, state, now, timeZone }),
+    T.sessionStep({ session, state, herHere }),
+    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
     T.lessonsStep(lessons),
   ].filter(Boolean);
-  if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile } };
+  if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile, session, state } };
 
   // 3. each writer drafts; every draft is checked, and rewritten if it breaks a rule or sounds off
   const speed = persona.settings?.typing || 'normal';
@@ -938,7 +965,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
       selling: sell, phase, sales: sales.length, follow_up: !!followUp,
       story: sexting ? { stage: sexting.stage, ideas: sexting.ideas.length, moves: sexting.moves?.moves.length || 0, setting: sexting.moves?.where || null, scene: !!sexting.scene } : null,
-      trace, said: latest, what_if: whatIf, plan: replyPlan, profile,
+      trace, said: latest, what_if: whatIf, plan: replyPlan, profile, session, state,
     },
   };
 }
@@ -1055,8 +1082,23 @@ async function checkScore(orgId, creatorId, { days = 7 } = {}) {
       if (w.examples.length < 3) w.examples.push({ note: clean(v.note), his: clean(r.his).slice(0, 300), her: r.her || [], goal: r.goal, at: r.created_at });
     }
   }
+  // what he did after her replies (B7): in Practice, as you played him; live later
+  let outs = [];
+  try {
+    outs = await all(() => supabaseAdmin.from('ai_outcomes').select('goal, happened, ppv, created_at').eq('organisation_id', orgId).eq('creator_id', creatorId).gte('created_at', since).order('created_at', { ascending: false }).order('id'));
+  } catch { outs = []; }
+  const byGoalOut = new Map();
+  for (const r of outs) {
+    if (Mem.dayIn(r.created_at, timeZone) < first) continue;
+    const g = r.goal || 'unknown';
+    if (!byGoalOut.has(g)) byGoalOut.set(g, { goal: g, n: 0, replied: 0, quiet: 0, bought: 0, not_bought: 0, ignored: 0 });
+    const o = byGoalOut.get(g);
+    o.n += 1;
+    if (o[r.happened] != null) o[r.happened] += 1;
+  }
   const withScore = (c) => ({ ...c, score: scoreOf(c) });
   return {
+    outcomes: [...byGoalOut.values()].sort((a, b) => b.n - a.n),
     days: span, today,
     total: { ...withScore(total), cost: round(total.cost, 4) },
     today_score: withScore(byDay.get(today) || blank()),
@@ -1363,7 +1405,9 @@ const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower'
  * mood (the picker), how sexual her reply may get and whether she leads, and
  * examples from the agency's good chats that fit. `chat` = the messages the writer reads.
  */
-async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false, override = null, notes = [] }) {
+// `warmUp` = her messages before a PPV may go (the session's floor, by closeness: B3), `herHere` =
+// her messages in this conversation (default: the whole window, as the blind test still counts).
+async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false, override = null, notes = [], warmUp = WARM_UP, herHere = null }) {
   const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling, notes);
   // what if (Practice): his mood or level as you set it, instead of the planner's read
   if (override?.mood && strategy.MOODS.includes(override.mood)) plan.mood.mood = override.mood;
@@ -1372,7 +1416,7 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
   // guesses about who he is (new, spender, back after a break…) go
   if (extraIds.length) plan.ids = strategy.readPick({ ids: [...extraIds, ...plan.ids.filter(id => !WHO_HE_IS.has(id))] }, { selling });
   const { his, mood, pulled_back } = plan.mood;
-  const warm = chat.filter(m => !m.from_fan && !m.mass).length >= WARM_UP;
+  const warm = (herHere ?? chat.filter(m => !m.from_fan && !m.mass).length) >= warmUp;
   // how many of her replies since he first got sexual (his words, checked in code)
   const hotAt = chat.findIndex(m => m.from_fan && replyLevel(m.text) >= 2);
   const since = hotAt < 0 ? 0 : herReplies(chat.slice(hotAt)).length;

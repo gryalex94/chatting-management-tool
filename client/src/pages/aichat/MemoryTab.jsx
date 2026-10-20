@@ -34,6 +34,14 @@ function MemoryEditor({ detail, busy, onSave, onBuild }) {
             {detail.memory?.built_at ? ` · memory updated ${dayTime(detail.memory.built_at)}` : ''}{detail.memory?.edited_at ? ` · corrected ${dayTime(detail.memory.edited_at)}` : ''}
           </p>
           {bond?.warmth && <p className='text-xs text-muted-foreground'>How he treats her: <span className='text-foreground'>{bond.warmth}</span>{bond.why ? ` (${bond.why})` : ''}. Part of how close they are.</p>}
+          {detail.state && (
+            <p className='text-xs text-muted-foreground'>
+              {detail.state.tier} · {detail.state.closeness} · {detail.state.phase} ({detail.state.phase_why}) · {detail.state.conversations} conversation{detail.state.conversations === 1 ? '' : 's'}
+              {detail.state.hours?.text ? ` · ${detail.state.hours.text}` : ''}{detail.state.strikes30 ? ` · ${detail.state.strikes30} failed sale${detail.state.strikes30 === 1 ? '' : 's'} this month` : ''}
+              {detail.state.last?.text ? ` · last time: ${detail.state.last.text}` : ''}
+              {detail.state.plan ? ` · if he wrote now: ${detail.state.plan.aim.replace(/_/g, ' ')} (${detail.state.plan.why})` : ''}
+            </p>
+          )}
         </div>
         <div className='flex flex-wrap gap-2'>
           <Button size='sm' variant='outline' onClick={() => onBuild(false)} disabled={!!busy}>

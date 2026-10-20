@@ -1,5 +1,5 @@
 import { Fragment, useState } from 'react';
-import { Activity, BookOpen, Check, ChevronLeft, ChevronRight, CircleCheck, Flag, Flame, FlaskConical, GraduationCap, ListChecks, Loader2, NotebookPen, PenLine, Route, ShieldCheck, UserRound } from 'lucide-react';
+import { Activity, BookOpen, Check, ChevronLeft, ChevronRight, CircleCheck, Compass, Flag, Flame, FlaskConical, GraduationCap, ListChecks, Loader2, NotebookPen, PenLine, Route, ShieldCheck, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,9 +8,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { cost } from './shared';
 
 // How each step looks: its icon, and its colour by status.
-const ICON = { safety: ShieldCheck, him: UserRound, moment: Activity, plan: Route, story: Flame, briefing: BookOpen, result: CircleCheck, lessons: NotebookPen, coach: GraduationCap };
+const ICON = { safety: ShieldCheck, him: UserRound, session: Compass, moment: Activity, plan: Route, story: Flame, briefing: BookOpen, result: CircleCheck, lessons: NotebookPen, coach: GraduationCap };
 // Which steps you can mark: a wrong call (a decision) or bad wording (her words).
-const markKind = (id) => (['him', 'moment', 'plan', 'story'].includes(id) ? 'decision' : id === 'result' || id.startsWith('draft') ? 'wording' : null);
+const markKind = (id) => (['him', 'session', 'moment', 'plan', 'story'].includes(id) ? 'decision' : id === 'result' || id.startsWith('draft') ? 'wording' : null);
 
 // Marking a step as wrong: what was wrong and what she should have done; it teaches the engine.
 function Mark({ kind, onSave }) {

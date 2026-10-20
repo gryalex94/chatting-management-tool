@@ -127,6 +127,17 @@ export default function ClaudeScore({ creatorId, version = 0 }) {
                 ))}
               </section>
 
+              {shown.outcomes?.length > 0 && (
+                <section className='flex flex-col gap-1.5'>
+                  <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>What he did next, by moment (as you played him)</h3>
+                  {shown.outcomes.map(o => (
+                    <div key={o.goal} className='grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-sm'>
+                      <span className='truncate'>{GOAL_WORD[o.goal] || o.goal}</span>
+                      <span className='text-[11px] text-muted-foreground'>{o.n} repl{o.n === 1 ? 'y' : 'ies'}: {[['replied', o.replied], ['quiet', o.quiet], ['bought', o.bought], ['didn’t buy', o.not_bought], ['ignored', o.ignored]].filter(([, n]) => n).map(([l, n]) => `${n} ${l}`).join(' · ') || 'nothing yet'}</span>
+                    </div>
+                  ))}
+                </section>
+              )}
               <section className='flex flex-col gap-1.5'>
                 <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>By moment</h3>
                 {shown.by_goal.map(g => (

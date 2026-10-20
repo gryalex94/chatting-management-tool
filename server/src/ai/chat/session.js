@@ -1,0 +1,189 @@
+/**
+ * The fan state and the plan for one conversation (your answers B1–B8 and A9 in
+ * AI_CHAT_UPGRADE_QUESTIONS.md). Pure: no database, no network.
+ *  - fanStateOf: what his history says, computed fresh each time: his conversations
+ *    (split at pauses of 6 hours or more), his phase, the hours he is usually
+ *    around, time-waster strikes (Q19b), how the last conversation ended.
+ *  - startSession: the plan for this conversation (B2): bought recently, build
+ *    rapport; no buy for a long time, plan to sell; in between, read his vibe. Plus
+ *    the warm-up floor by closeness (B3).
+ *  - nextTurn: what changes with each reply: a sad or annoyed mood sticks until he
+ *    sounds lighter twice (B4); no selling for the rest of the conversation once he
+ *    was sad, annoyed or suspicious (B3); the aim moves when he says he's broke or
+ *    asks to buy. The practice room keeps the session and sends it back each time.
+ */
+const { replyLevel } = require('./safety');
+const { PAUSE, awayText } = require('./memory');
+
+const DAY = 86400_000;
+const clean = (s) => String(s ?? '').trim();
+// her messages in a conversation before a PPV is even allowed, by closeness (B3): a floor, not a trigger
+const WARM_UP = { new: 6, friendly: 4, flirty: 3, intimate: 3, girlfriend: 2 };
+const HEAVY = new Set(['sad', 'annoyed']);                 // sticks (B4)
+const NO_SELL = new Set(['sad', 'annoyed', 'suspicious']); // no selling for the rest of the conversation (B3)
+const LIGHT = new Set(['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring']);
+const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|too\s+expensive|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
+const FREE = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|one|something)|something\s+free|anything\s+free)\b/i;
+const WANTS_TO_BUY = /\b(?:what\s+(?:do\s+you|have\s+you|you)\s+(?:got|have|sell)|(?:send|show)\s+me\s+(?:something|more|what)|i'?ll\s+(?:buy|take|get)\s+it|how\s+much|price|unlock|wanna\s+see\s+(?:more|something)|got\s+(?:anything|something)\s+(?:for\s+me|new|hot|naughty))\b/i;
+const AIMS = {
+  get_to_know: 'Get to know him: welcome him, let him talk, nothing sold before he\'s clearly in the mood',
+  rapport: 'Build rapport, don\'t push: he bought recently. Nothing is offered unless he asks or starts the sexting himself',
+  sell: 'Plan to sell him something today, without pushing: steer toward it earlier, his set when he\'s in the mood',
+  read: 'Read his vibe while talking: judge whether he\'s willing to buy, offer only when it fits',
+  win_back: 'Win him back: warm, personal, catch up first; selling only if he asks',
+  short: 'A time waster at the bottom: friendly, short, nothing for free, no chasing',
+};
+
+// ── His history ───────────────────────────────────────────────────────────────
+/**
+ * His conversations in `chat` (oldest first): split at pauses of 6 hours or more.
+ * Messages typed in Practice have no time: they belong to the conversation going on.
+ */
+function conversationsOf(chat = [], now = Date.now()) {
+  const out = [];
+  let cur = null, prev = null;
+  for (const m of chat) {
+    if (m.mass) continue;
+    const t = m.at ? Date.parse(m.at) : (prev ?? now);
+    if (!cur || (prev != null && t - prev >= PAUSE)) {
+      cur = { start: m.at || null, end: m.at || null, his: 0, hers: 0, ppv: 0, bought: 0, sexual: false, last_his: '' };
+      out.push(cur);
+    }
+    if (m.from_fan) { cur.his += 1; cur.last_his = clean(m.text).slice(0, 120); if (replyLevel(m.text) >= 2) cur.sexual = true; }
+    else {
+      cur.hers += 1;
+      if (m.media?.price) { cur.ppv += 1; if (m.paid || m.media.bought_at || m.media.status === 'bought') cur.bought += 1; }
+    }
+    if (m.at) cur.end = m.at;
+    prev = t;
+  }
+  return out;
+}
+
+const pad = (h) => `${String(h).padStart(2, '0')}:00`;
+/** The hours he is usually around (his messages of the last 90 days, in her time zone). */
+function hoursOf(chat = [], { timeZone = 'America/New_York', now = Date.now() } = {}) {
+  const since = now - 90 * DAY;
+  const counts = new Array(24).fill(0);
+  let n = 0;
+  for (const m of chat) {
+    if (!m.from_fan || !m.at || Date.parse(m.at) < since) continue;
+    counts[Number(new Date(m.at).toLocaleString('en-GB', { timeZone, hour: '2-digit', hour12: false })) % 24] += 1;
+    n += 1;
+  }
+  if (n < 5) return { n, best: null, text: '' };
+  const win = counts.map((_, h) => counts[h] + counts[(h + 1) % 24] + counts[(h + 2) % 24]);
+  const best = win.indexOf(Math.max(...win));
+  const share = Math.round((100 * win[best]) / n);
+  return { n, best, text: `usually around ${pad(best)}–${pad((best + 3) % 24)} her time (${share}% of his messages)` };
+}
+
+/**
+ * His state from his history. `chat` = his real chat (oldest first), `profile` =
+ * plan.fanProfile, `away` = how long he was gone before this conversation (ms).
+ * Returns { conversations, buyer, phase, phase_why, hours, strikes7, strikes30,
+ * faded, last }.
+ */
+function fanStateOf({ chat = [], profile, away = null, timeZone = 'America/New_York', now = new Date() }) {
+  const t = now.getTime();
+  const convs = conversationsOf(chat, t);
+  const done = convs.filter(c => c.end && t - Date.parse(c.end) >= PAUSE);   // the conversation going on isn't counted
+  const buyer = done.some(c => c.bought > 0) || (profile?.tier && ['small', 'spender', 'whale'].includes(profile.tier));
+  // Q19b: a failed conversation = a PPV sent and not bought (one approach tried)
+  const failed = done.filter(c => c.ppv > 0 && c.bought === 0 && c.end);
+  const strikes7 = failed.filter(c => t - Date.parse(c.end) <= 7 * DAY).length;
+  const strikes30 = failed.filter(c => t - Date.parse(c.end) <= 30 * DAY).length;
+  const faded = !!profile?.time_waster && (strikes7 >= 2 || strikes30 >= 5);
+  const sexy = done.filter(c => c.sexual || c.bought > 0).length;
+  let phase, why;
+  if (faded) [phase, why] = ['winding down', `a time waster with ${strikes7} failed conversation${strikes7 === 1 ? '' : 's'} this week, ${strikes30} this month (Q19b)`];
+  else if (profile?.new_sub) [phase, why] = ['new', 'a new subscriber'];
+  else if (away != null && away >= 14 * DAY && done.length) [phase, why] = ['lapsed', `away ${awayText(away)}`];
+  else if (sexy >= 2) [phase, why] = ['sexting partner', `${sexy} conversations got sexual or ended in a buy`];
+  else if (done.length < 3) [phase, why] = ['getting to know', `${done.length} conversation${done.length === 1 ? '' : 's'} so far`];
+  else [phase, why] = ['regular', `${done.length} conversations, ${sexy} sexual or with a buy`];
+  const last = done[done.length - 1] || null;
+  return {
+    conversations: done.length, buyer, phase, phase_why: why, hours: hoursOf(chat, { timeZone, now: t }),
+    strikes7, strikes30, faded,
+    last: last ? {
+      ended: last.end, his: last.his, hers: last.hers, ppv: last.ppv, bought: last.bought, sexual: last.sexual,
+      text: `${last.his} from him, ${last.hers} from her${last.ppv ? `, ${last.ppv} PPV${last.ppv === 1 ? '' : 's'} sent, ${last.bought ? `${last.bought} bought` : 'none bought'}` : ', no PPV'}${last.sexual ? ', it got sexual' : ''}`,
+    } : null,
+  };
+}
+
+/** A made-up fan's state, from his practice type (fanTypes.js: conversations, lastDays, strikes…). */
+function madeUpState(type, profile) {
+  const h = type?.history || {};
+  const n = h.conversations ?? 0;
+  const faded = !!profile?.time_waster && (h.strikes7 || 0) >= 2;
+  return {
+    conversations: n, buyer: !!h.bought, phase: faded ? 'winding down' : profile?.new_sub ? 'new' : (h.awayDays || 0) >= 14 ? 'lapsed' : h.sexual ? 'sexting partner' : n < 3 ? 'getting to know' : 'regular',
+    phase_why: `his practice type (${type?.label || 'not set'})`, hours: { n: 0, best: null, text: '' },
+    strikes7: h.strikes7 || 0, strikes30: h.strikes30 || h.strikes7 || 0, faded,
+    last: n ? { text: h.last || 'a normal chat', sexual: !!h.sexual, bought: h.bought ? 1 : 0 } : null,
+  };
+}
+
+// ── The plan for this conversation ────────────────────────────────────────────
+const daysText = (d) => (d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`);
+/**
+ * The plan when a conversation starts (B2). `profile` = plan.fanProfile, `state` =
+ * fanStateOf, `away` = how long he was gone (ms). Returns the session the practice
+ * room keeps: { aim, aim_text, why, warm_up, closeness, mood, lighter, no_sell, changes }.
+ */
+function startSession({ profile, state, away = null, now = new Date() }) {
+  const d = profile.days_since_buy;
+  let aim, why;
+  if (state.faded) [aim, why] = ['short', `a time waster with ${state.strikes7} failed conversation${state.strikes7 === 1 ? '' : 's'} this week: lowest priority (Q19b)`];
+  else if (profile.new_sub) [aim, why] = ['get_to_know', 'a new subscriber (Q21)'];
+  else if (away != null && away >= 14 * DAY && state.buyer) [aim, why] = ['win_back', `he used to buy and was away ${awayText(away)}`];
+  else if (d != null && d <= 7) [aim, why] = ['rapport', `he bought ${daysText(d)}: no pushing, build rapport (B2)`];
+  else if (state.buyer && d != null && d >= 30) [aim, why] = ['sell', `he hasn't bought for ${d} days: plan to sell him something today (B2)`];
+  else if (!state.buyer && !profile.time_waster && state.conversations >= 3) [aim, why] = ['sell', `${state.conversations} conversations and never a buy: plan to offer something today (B2)`];
+  else [aim, why] = ['read', d != null ? `his last buy was ${daysText(d)}: read his vibe, no pushing (B2)` : 'nothing bought yet: read his vibe while talking (B2)'];
+  return {
+    aim, aim_text: AIMS[aim], why, warm_up: WARM_UP[profile.closeness] ?? WARM_UP.new, closeness: profile.closeness,
+    started_at: now.toISOString(), mood: null, lighter: 0, no_sell: '', changes: [],
+  };
+}
+
+/** A session the practice room sent back, checked. */
+function resumeSession(s) {
+  if (!s || typeof s !== 'object' || !AIMS[s.aim]) return null;
+  return {
+    aim: s.aim, aim_text: AIMS[s.aim], why: clean(s.why).slice(0, 200), warm_up: Number.isInteger(s.warm_up) ? s.warm_up : WARM_UP.new,
+    closeness: clean(s.closeness) || 'new', started_at: clean(s.started_at) || new Date().toISOString(),
+    mood: HEAVY.has(s.mood) ? s.mood : null, lighter: Number.isInteger(s.lighter) ? s.lighter : 0, no_sell: clean(s.no_sell).slice(0, 200),
+    changes: Array.isArray(s.changes) ? s.changes.slice(-10).map(c => ({ aim: clean(c.aim), why: clean(c.why).slice(0, 200) })) : [],
+  };
+}
+
+/**
+ * What this reply changes in the session: the sticky mood (B4), no selling once he
+ * was sad, annoyed or suspicious (B3), and the aim when he says he's broke or asks
+ * to buy. `read` = the planner's mood for this reply, `said` = his latest message(s).
+ * Returns { session, mood } with the mood to use.
+ */
+function nextTurn(session, { read = 'chatty', said = '', suspicious = false, timeWaster = false }) {
+  const s = { ...session, changes: [...(session.changes || [])] };
+  let mood = read;
+  if (HEAVY.has(read)) { s.mood = read; s.lighter = 0; }
+  else if (s.mood) {
+    s.lighter = LIGHT.has(read) ? s.lighter + 1 : 0;
+    if (s.lighter >= 2) { s.mood = null; s.lighter = 0; } else mood = s.mood;
+  }
+  if (!s.no_sell && (NO_SELL.has(read) || suspicious)) s.no_sell = `he was ${suspicious && !NO_SELL.has(read) ? 'suspicious' : read} earlier in this conversation: no selling for the rest of it (B3)`;
+  const change = (aim, why) => { if (s.aim !== aim) { s.changes.push({ aim, why }); s.aim = aim; s.aim_text = AIMS[aim]; s.why = why; } };
+  if (FREE.test(said)) { /* a free ask changes nothing: the plan handles it (no freebies) */ }
+  else if (BROKE.test(said) && !timeWaster && s.aim !== 'short') change('rapport', 'he says he can\'t spend now: no pushing');
+  else if (WANTS_TO_BUY.test(said) && s.aim !== 'short' && s.aim !== 'get_to_know') {
+    change('sell', 'he asks what she has or wants to buy');
+    // he asks himself: answering him isn't pushing, so the no-selling rule (B3) doesn't hold him back
+    if (s.no_sell) { s.changes.push({ aim: 'sell', why: 'he asked himself, so selling is back on' }); s.no_sell = ''; }
+  }
+  return { session: s, mood };
+}
+
+module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, WARM_UP, AIMS };

@@ -203,6 +203,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const [rounds, setRounds] = useState([]);           // the AI's answers: { id, at (after test[at - 1]), screen, results, used, kept }
   const [mapId, setMapId] = useState(null);           // the reply whose decision map is shown
   const [learned, setLearned] = useState([]);         // what she learned about him from the replies kept (this chat only)
+  const [session, setSession] = useState(null);       // the plan for this conversation, kept by the engine between replies
   const [models, setModels] = useState([page.writer]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -247,9 +248,17 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
 
   const pick = (id) => {
     if (busy) return;
-    setFanId(id); setTest([]); setRounds([]); setMapId(null); setLearned([]); setDetail(id === MADE_UP ? null : undefined);
+    setFanId(id); setTest([]); setRounds([]); setMapId(null); setLearned([]); setSession(null); setDetail(id === MADE_UP ? null : undefined);
   };
-  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); setLearned([]); } };
+  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); setLearned([]); setSession(null); } };
+  // what he did after her last reply (as you played him): logged with the next request, for the outcomes report
+  const outcomeOf = (quiet) => {
+    const last = rounds[rounds.length - 1];
+    if (!last?.used?.plan) return null;
+    const status = test.find(m => m.roundId === last.id && m.ppv)?.ppv?.status;
+    const happened = ['bought', 'not_bought', 'ignored'].includes(status) ? status : quiet ? 'quiet' : 'replied';
+    return { goal: last.used.plan.goal, aim: last.used.session?.aim, tier: last.used.profile?.tier, closeness: last.used.profile?.closeness, happened, ppv: !!status };
+  };
   // a kept reply's new facts about him join what she knows for the rest of this chat
   const withLearned = (list, result) => [...new Set([...list, ...(result?.learned || []).map(l => l.note).filter(Boolean)])].slice(-20);
   const shown = useMemo(() => {
@@ -263,7 +272,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const blocked = !page.has_profile || !ready.writer || !ready.tables;
 
   const sells = selling && contentCount > 0;
-  const ask = async (nextTest, { followUp = false, known = learned } = {}) => {
+  const ask = async (nextTest, { followUp = false, known = learned, outcome = null } = {}) => {
     const askedAt = Date.now();         // her timing counts from when he wrote
     setBusy(true);
     // kept with the reply, so "what if" can ask again about the same moment
@@ -271,12 +280,13 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       fan_uuid: real ? fanId : null,
       made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
       test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
-      models, selling: sells, follow_up: followUp, learned: known,
+      models, selling: sells, follow_up: followUp, learned: known, session, outcome,
     };
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, body);
       const id = `r${askedAt}`;
-      setRounds(r => [...r, { id, at: nextTest.length, askedAt, body, ...data, kept: null, whatIfs: [] }]);
+      if (data.used?.session) setSession(data.used.session);
+      setRounds(r => [...r, { id, at: nextTest.length, askedAt, body: { ...body, outcome: null }, ...data, kept: null, whatIfs: [] }]);
       setMapId(id);                     // the newest reply's map
       onSpent?.();
     } catch (e) { toast.error(errMsg(e, 'Could not get a reply')); }
@@ -321,18 +331,20 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const send = () => {
     const t = text.trim();
     if (!t || busy || blocked) return;
+    const outcome = outcomeOf(false);
     const kept = withKept();
     const next = [...kept.next, { from: 'fan', text: t }];
     setTest(next);
     setText('');
-    ask(next, { known: kept.known });
+    ask(next, { known: kept.known, outcome });
   };
   // she writes without a new message from him (he went quiet, or just bought)
   const followUp = () => {
     if (busy || blocked) return;
+    const outcome = outcomeOf(true);
     const { next, known } = withKept();
     setTest(next);
-    ask(next, { followUp: true, known });
+    ask(next, { followUp: true, known, outcome });
   };
   // what he did with her PPV (the practice room plays him)
   const setPpv = (i, status, speed = null) => setTest(t => t.map((m, k) => (k === i ? { ...m, ppv: { ...m.ppv, status, speed } } : m)));
@@ -403,6 +415,13 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
             <span className='text-xs text-muted-foreground'>One note per comma. &quot;Interview tomorrow&quot; or &quot;a date yesterday&quot; become plans with a day.</span>
           </div>
           {test.length > 0 && <span className='text-xs text-muted-foreground'>Start over to change him.</span>}
+        </div>
+      )}
+      {session && (
+        <div className='flex flex-col gap-0.5 rounded-md border border-primary/30 bg-primary/5 p-2.5 text-xs'>
+          <span className='font-medium'>This conversation: {session.aim.replace(/_/g, ' ')}</span>
+          <span className='text-muted-foreground'>{session.aim_text}. Because {session.why}.</span>
+          {session.no_sell && <span className='text-warn'>{session.no_sell}.</span>}
         </div>
       )}
       {real && (detail === undefined ? <Skeleton className='h-16 w-full' /> : detail && (

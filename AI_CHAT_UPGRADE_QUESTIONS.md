@@ -209,6 +209,7 @@ The plan can change during the conversation with how it goes and his mood. Event
 - c) By his mood only
 
 Answer: a) Per conversation, by closeness: new 6, friendly 4, flirty 3, intimate 3, girlfriend 2 of her messages. Sad, annoyed or suspicious: no selling at all that conversation. The warm-up is only a floor: a PPV still goes out only when the moment calls for it (he's sexual and she leads, he asks for something she has, or his free talk ran out), and never as a push after a recent buy (B2).
+My reading of "no selling at all": it means no pushing. If he asks himself what she has, she may answer and offer; the map says "he asked himself, so selling is back on".
 
 **B4. Mood smoothing**
 - a) Sad or annoyed stays until his messages are clearly lighter for 2 replies (recommended)

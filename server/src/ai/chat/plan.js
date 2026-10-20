@@ -105,20 +105,30 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * it (ms), `lastSexual` = the conversation before ended sexual, `byeAgain` = he
  * already said goodbye once in it, `callback` = a note of his she could bring up
  * (memory.callbackFor), `hook` = a plan of his coming up (memory.hookFor), `check` =
- * a note his latest message contradicts ({ note }), `rand` = chance (tests).
+ * a note his latest message contradicts ({ note }), `session` = the plan for this
+ * conversation (session.js: aim rapport / sell / read / win_back / get_to_know /
+ * short), `rand` = chance (tests).
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
- * opener, callback, hook, check, likes, story, offer, rules }.
+ * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
+  // the plan for this conversation (B2): selling day, rapport day… (session.js)
+  const aim = session?.aim || 'read';
+  p.aim = aim; p.aim_text = session?.aim_text || ''; p.aim_why = session?.why || '';
+  // free talk: shorter when today's plan is to sell; no steering on a rapport or win-back day
+  const limit = aim === 'sell' ? Math.max(3, Math.ceil(profile.budget.limit * 0.6)) : profile.budget.limit;
+  p.budget = { used: profile.budget.used, limit };
+  const noSteer = ['rapport', 'win_back', 'get_to_know'].includes(aim);
   const goal = (g, text, why, rules = []) => { p.goal = g; p.goal_text = text; p.why = why; p.rules.push(...rules); };
   const leaving = !followUp && (GOODBYE.test(said) || ids.includes('leaving_soon'));
   const back = !followUp && away >= 2 * DAY_MS && herReplies === 0;
 
   // 1. the goal of this reply
-  if (followUp) goal('follow_up', 'He went quiet: one short, light message to get him talking again', 'he hasn\'t answered', ['Q6']);
+  if (followUp && aim === 'short') goal('follow_up', 'He went quiet, and he\'s a time waster at the bottom: no chasing; if you must write, one dry, friendly line', 'he hasn\'t answered, and he gets no follow-ups (Q19b)', ['Q6e-2', 'Q19b']);
+  else if (followUp) goal('follow_up', 'He went quiet: one short, light message to get him talking again', 'he hasn\'t answered', ['Q6']);
   else if (profile.time_waster && FREE_ASK.test(said)) goal('no_freebies', 'Friendly but short: nothing for free; if anything, a small, cheap offer', 'a time waster asking for free things', ['Q19', 'Q31']);
   else if (waiting?.p?.status === 'bought' && !waiting.herAfter) goal('after_buy', 'He just bought: react to it, and keep the mood going', 'he bought her last PPV', ['Q34']);
   else if (sexting?.on && sexting.stage === 'after') goal('aftercare', 'He finished: aftercare, warm and personal', 'he says he finished', ['Q44']);
@@ -146,8 +156,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     goal('welcome_back', `He's back after ${awayText(away)}: start by showing you're really happy he's back (in your own words), ${text}`, `he was away ${awayText(away)}`, ['Q7']);
     p.opener = { kind: way, why: way === 'pick_up' ? 'the last conversation wasn\'t sexual, so picking it up is fine' : lastSexual && way !== 'callback' ? 'the last conversation was sexual: never restart dirty talk cold' : 'picked by chance (Q7)' };
   }
-  else if (profile.budget.used >= profile.budget.limit && sell && !noOffer && !profile.time_waster) goal('steer_to_sale', 'His free talk is used up: steer gently toward something to buy that fits him', `${profile.budget.used} of ${profile.budget.limit} free messages used`, ['Q26b', 'Q28']);
-  else if (profile.budget.used >= profile.budget.limit) goal('wind_down', 'His free talk is used up: keep it short and warm, she has to go soon', `${profile.budget.used} of ${profile.budget.limit} free messages used`, ['Q28', 'Q29']);
+  else if (profile.budget.used >= limit && sell && !noOffer && !profile.time_waster && !noSteer) goal('steer_to_sale', 'His free talk is used up: steer gently toward something to buy that fits him', `${profile.budget.used} of ${limit} free messages used${aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}`, ['Q26b', 'Q28']);
+  else if (profile.budget.used >= limit && !noSteer) goal('wind_down', 'His free talk is used up: keep it short and warm, she has to go soon', `${profile.budget.used} of ${limit} free messages used`, ['Q28', 'Q29']);
   else if (profile.new_sub) goal('get_to_know', 'Get to know him: welcome him, react to what he says', 'a new subscriber', ['Q21']);
   else goal('chat', 'Keep him talking: real interest in what he said, a small story of hers, or a new topic', 'small talk', ['Q5', 'Q5b']);
 
@@ -158,10 +168,11 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     welcome_back: 'he just came back: welcome him first (Q7)',
     goodbye: p.bye === 'mid_sexting' ? null : 'he\'s leaving: no new PPV now (Q8)',
   }[p.goal];
-  // a time waster: short replies (Q19)
-  if (profile.time_waster && !['offer', 'lead_story'].includes(p.goal)) p.short = 'he\'s a time waster: friendly but short (Q19)';
+  // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b)
+  if (aim === 'short' && !['offer', 'lead_story'].includes(p.goal)) p.short = 'a time waster at the bottom: friendly, short, nothing for free (Q19b)';
+  else if (profile.time_waster && !['offer', 'lead_story'].includes(p.goal)) p.short = 'he\'s a time waster: friendly but short (Q19)';
   p.sell = !sell ? { allowed: false, why: 'selling is off' } : noOffer ? { allowed: false, why: noOffer } : noSell ? { allowed: false, why: noSell }
-    : { allowed: true, why: ['offer', 'steer_to_sale', 'lead_story', 'after_buy'].includes(p.goal) ? 'a PPV fits now, if it fits the story' : 'allowed, if it really fits' };
+    : { allowed: true, why: ['offer', 'steer_to_sale', 'lead_story', 'after_buy'].includes(p.goal) ? 'a PPV fits now, if it fits the story' : aim === 'rapport' ? 'only if he asks or leads there himself: today is about rapport' : 'allowed, if it really fits' };
   // what to offer: what he asked for, or the next step of her sexting set (after 2–4 messages of story: Q41)
   p.offer = null;
   if (p.sell.allowed) {
@@ -221,6 +232,12 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
       }
     }
   }
+  // one small extra touch (B5): he's leaving while the reply has another job, or a note of his in passing
+  p.touch = null;
+  if (leaving && !['goodbye', 'follow_up'].includes(p.goal)) p.touch = { kind: 'goodbye', text: 'he\'s leaving: say goodbye too, warm, with a hook for next time', why: 'he said he has to go (B5)' };
+  else if (callback && !p.callback && !p.check && ['comfort', 'after_buy', 'calm', 'ease_off', 'wind_down', 'steer_to_sale'].includes(p.goal) && herReplies <= 2) {
+    p.touch = { kind: 'callback', note: callback.note, text: `mention "${callback.note}" in passing (${callback.ask})`, why: `a small personal touch (B5); ${callback.why}` };
+  }
   // a hook for next time when he leaves: a plan of his coming up (Q8)
   p.hook = p.goal === 'goodbye' && hook && p.bye !== 'short' ? hook : null;
   // what he likes, for selling and sexting only (Q11)
@@ -235,6 +252,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
 /** The plan as the writer reads it. */
 function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
+  if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
+  if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
   if (p.back) lines.push(`He's back after ${p.back}: let him feel you're glad he's back.`);
   if (p.tone) lines.push(`Tone: ${p.tone}.`);
   lines.push(`Length: ${p.length.text}.`);

@@ -45,7 +45,7 @@ function safetyStep(screen) {
 }
 
 /** 2. Who he is: his tier and flags (plan.fanProfile), a made-up fan's type, or a real fan's numbers and notes. */
-function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false, profile = null, bond = null, now = new Date(), timeZone = 'America/New_York' }) {
+function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false, profile = null, bond = null, state = null, now = new Date(), timeZone = 'America/New_York' }) {
   const bits = [];
   if (profile) bits.push(profile.tier_label);
   if (m?.standing?.label) bits.push(m.standing.label);
@@ -63,6 +63,9 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
     details: [
       profile ? { label: 'Tier', value: `${profile.tier_label}: ${profile.tier_why}` } : null,
       flags.length ? { label: 'Marked', value: flags.join(', ') } : null,
+      state ? { label: 'Phase', value: `${state.phase}: ${state.phase_why}` } : null,
+      state?.hours?.text ? { label: 'When he\'s around', value: state.hours.text } : null,
+      state?.strikes30 ? { label: 'Failed sales', value: `${state.strikes7} this week, ${state.strikes30} this month (a PPV sent, not bought)${state.faded ? ': at the bottom (Q19b)' : ''}` } : null,
       close ? {
         label: 'Closeness',
         value: close.what_if ? `${close.level} (what if)` : `${close.level}, ${close.score} of 10 points: ${close.signals.map(s => `${s.label.toLowerCase()} ${s.points > 0 ? '+' : ''}${s.points} (${s.why})`).join(' · ')}`,
@@ -81,6 +84,26 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
   });
 }
 
+/** 2b. This conversation: the plan for it (session.js), the sticky mood, no-selling, how the last one went. */
+function sessionStep({ session = null, state = null, herHere = 0 }) {
+  if (!session) return null;
+  const aimWord = (a) => String(a || '').replace(/_/g, ' ');
+  return step('session', 'This conversation', {
+    status: 'decision',
+    result: session.aim_text,
+    why: `Because ${session.why}.`,
+    tags: ['B2', 'B3', ...(session.mood ? ['B4'] : []), ...(state?.faded ? ['Q19b'] : [])],
+    details: [
+      { label: 'PPV allowed from', value: `her message ${session.warm_up} in this conversation (they're ${session.closeness}); ${herHere} so far${herHere >= session.warm_up ? ': allowed when it fits' : ''}` },
+      session.mood ? { label: 'Mood that sticks', value: `${session.mood}, until he sounds lighter twice in a row (${session.lighter} of 2 so far)` } : null,
+      session.no_sell ? { label: 'No selling', value: session.no_sell } : null,
+      ...(session.changes || []).map(c => ({ label: 'Plan changed', value: `${aimWord(c.aim)}: ${c.why}` })),
+      state?.last ? { label: 'Last conversation', value: `${state.last.ended ? `${day(state.last.ended)}: ` : ''}${state.last.text}` } : null,
+      state ? { label: 'Conversations before', value: String(state.conversations) } : null,
+    ],
+  });
+}
+
 /** 3. The moment: the planner's read of him, and where the chat is. */
 function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null }) {
   const phaseWord = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[phase];
@@ -92,7 +115,7 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
       herHere != null ? { label: 'This conversation', value: `${herHere} of her replies so far${away ? `; he was away ${awayText(away)} before it` : ''}` } : null,
       clash ? { label: 'Doesn\'t fit his notes', value: `his latest message contradicts "${clash}"` } : null,
-      { label: 'Warm-up', value: herCount >= warmUp ? `done (${herCount} of her messages)` : `${herCount} of ${warmUp} of her messages` },
+      { label: 'Warm-up', value: herCount >= warmUp ? `done (${herCount} of her messages this conversation, ${warmUp} needed)` : `${herCount} of ${warmUp} of her messages this conversation` },
       level.since ? { label: 'Since he got sexual', value: `${level.since} of her replies` } : null,
       phaseWord ? { label: 'Selling', value: phaseWord } : null,
       waiting ? { label: 'Her last PPV', value: `"${waiting.p.title}": ${waiting.p.status === 'pending' ? 'not opened yet' : waiting.p.status.replace('_', ' ')}${waiting.open ? ', no new PPV until he reacts' : ''}` } : null,
@@ -117,6 +140,8 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         plan.price_hint ? { label: 'Price', value: plan.price_hint } : null,
         { label: 'Questions', value: plan.ask.allowed ? plan.ask.why : `none: ${plan.ask.why}` },
         { label: 'Length', value: `${plan.length.text} (${plan.length.why})` },
+        plan.touch ? { label: 'Also, in passing', value: `${plan.touch.text}: ${plan.touch.why}` } : null,
+        plan.budget ? { label: 'Free talk', value: `${plan.budget.used} of ${plan.budget.limit} small-talk messages${plan.aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}` } : null,
         // what memory brings to this reply, near the top
         plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,
         plan.callback ? { label: 'From his notes', value: `"${plan.callback.note}" (${plan.callback.ask}): ${plan.callback.why}` } : null,
@@ -253,4 +278,4 @@ function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene 
   return out;
 }
 
-module.exports = { safetyStep, himStep, momentStep, planStep, storyStep, briefingStep, lessonsStep, coachStep, writerSteps, heatKind };
+module.exports = { safetyStep, himStep, sessionStep, momentStep, planStep, storyStep, briefingStep, lessonsStep, coachStep, writerSteps, heatKind };
