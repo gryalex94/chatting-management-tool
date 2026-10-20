@@ -16,7 +16,7 @@
 const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
-const { screenFan, checkReply, personaProblems, replyLevel, questionsIn } = require('../ai/chat/safety');
+const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
@@ -702,6 +702,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const typed = (Array.isArray(test) ? test : []).slice(-40).map((t) => {
     const m = { at: null, from_fan: t?.from === 'fan', text: clean(t?.text).slice(0, 1000), mass: false };
     if (!m.from_fan && t?.ppv && typeof t.ppv === 'object') m.media = practicePpv(t.ppv, content);
+    if (!m.from_fan && t?.scene) m.scene = P.readScene(t.scene);           // her sexting story after that reply
     return m;
   }).filter(t => t.text || t.media);
   const convo = [...chat, ...typed];
@@ -728,10 +729,13 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const noOffer = !sell ? '' : !level.warm ? 'you are still in the warm-up, so get to know him first.'
     : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : '';
   const voice = voiceFor({ chat: convo, fan, latest, followUp });
+  // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
+  const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
+  const sexting = await storyFor({ orgId, level, scene, said: latest.join(' '), content, convo, waiting, sell, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ });
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })].filter(Boolean),
-    situations: strategy.situationGuide(plan.ids), library, level, voice, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
+    situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
     selling: sell, content: sell ? C.contentText(content) : '', sales,
   };
 
@@ -747,8 +751,112 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
       selling: sell, phase, sales: sales.length, follow_up: !!followUp,
+      story: sexting ? { stage: sexting.stage, ideas: sexting.ideas.length, moves: sexting.moves?.moves.length || 0, setting: sexting.moves?.where || null, scene: !!sexting.scene } : null,
     },
   };
+}
+
+// ── Her sexting story ────────────────────────────────────────────────────────
+// He's close, or he finished: where the story goes next.
+const PEAK = /\b(?:so\s+close|about\s+to\s+(?:cum|come|finish|bust)|gonna\s+(?:cum|come|bust)|i'?m\s+close|close\s+to\s+(?:cumming|coming)|edging|can'?t\s+hold\s+(?:it|on)|cumming)\b/i;
+const FINISHED = /\b(?:i\s+(?:came|finished|busted|just\s+came)|just\s+(?:came|finished|busted)|made\s+me\s+(?:cum|come)|(?:that|this)\s+was\s+(?:amazing|incredible|so\s+good|insane|perfect)|i'?m\s+(?:spent|done\s+now))\b/i;
+function storyStage(scene, said) {
+  if (FINISHED.test(said)) return { stage: 'after', hint: 'He finished: aftercare now. Be warm and personal, tell him you enjoyed it too; no new PPV unless he asks for more.' };
+  if (PEAK.test(said)) return { stage: 'peak', hint: 'He is close: take him over the edge, short and intense, no questions.' };
+  const stage = scene?.stage || 'warming';
+  if (stage === 'warming' && (scene?.done?.length || 0) >= 2) return { stage: 'building', hint: '' };
+  return { stage, hint: '' };
+}
+// Where she is in the story, as the scene library names it.
+const SETTINGS = [['bed', /\bbed|sheets|covers|duvet|blanket|pillow/i], ['shower', /\bshower/i], ['bath', /\bbath|tub\b/i], ['couch', /\bcouch|sofa/i],
+  ['mirror', /\bmirror/i], ['kitchen', /\bkitchen/i], ['car', /\bcar\b/i], ['work', /\bwork|office|desk/i], ['gym', /\bgym/i], ['outdoors', /\boutside|beach|park|pool|balcony/i]];
+const settingOf = (where) => (SETTINGS.find(([, re]) => re.test(String(where || ''))) || [null])[0];
+
+// Story moves for her sexting stories (ai/chat/scenes.json: 18 home settings, moves
+// for each stage, little twists), and which set fits where she is.
+const SCENES = require('../ai/chat/scenes.json');
+const SCENE_OF = [
+  ['after_shower', /\btowel|shower/i], ['bath', /\bbath|tub\b/i], ['couch_movie', /\bcouch|sofa|movie|tv\b/i], ['trying_on', /\blingerie|trying\s+on/i],
+  ['getting_ready', /\bmirror|getting\s+ready/i], ['after_gym', /\bgym|sports\s+bra|leggings/i], ['kitchen', /\bkitchen/i], ['desk', /\bdesk|office|laptop|work/i],
+  ['rainy_day', /\brain/i], ['balcony', /\bbalcony/i], ['hotel', /\bhotel/i], ['oil', /\boil\b/i], ['stretching', /\byoga|stretch/i],
+];
+function sceneSet(where, hour) {
+  const hit = SCENE_OF.find(([, re]) => re.test(String(where || '')));
+  if (hit) return hit[0];
+  if (/\bbed|sheets|covers|duvet|bedroom/i.test(String(where || ''))) return hour >= 5 && hour < 12 ? 'bed_morning' : 'bed_night';
+  // no place yet: one that fits her time of day
+  const fits = hour >= 5 && hour < 12 ? ['bed_morning', 'after_shower', 'kitchen'] : hour < 18 ? ['couch_movie', 'after_gym', 'rainy_day', 'trying_on'] : ['bed_night', 'after_shower', 'bath', 'couch_movie', 'cant_sleep'];
+  return fits[Math.floor(Math.random() * fits.length)];
+}
+const pickSome = (list, n) => [...list].sort(() => Math.random() - 0.5).slice(0, n);
+const sharesWords = (a, b) => { const w = wordsOf(b); return [...wordsOf(a)].filter(x => w.has(x)).length >= 2; };
+// Three moves for this stage she hasn't used yet; the way to start when there's no
+// scene; now and then a twist while it builds up.
+function storyMoves({ scene, stage, hour }) {
+  const key = sceneSet(scene?.where, hour);
+  const set = SCENES[key];
+  if (!set) return null;
+  const done = scene?.done || [];
+  const fresh = (set.moves[stage] || []).filter(m => !done.some(d => sharesWords(m, d)));
+  return {
+    where: set.where, start: scene ? [] : pickSome(set.opener, 2), moves: pickSome(fresh, 3),
+    twist: stage === 'building' && Math.random() < 0.2 ? pickSome(set.twists, 1)[0] || '' : '',
+  };
+}
+
+// Her sexting sequence in this story: where it was shot (to set the scene there,
+// so its PPVs fit) and its next step (to lead the story to it).
+function storySeed(content, convo) {
+  const series = content.filter(it => it.series).sort((a, b) => a.step - b.step);
+  if (!series.length) return { seed: '', next: '' };
+  const sent = convo.filter(m => m.media?.item && m.media.series);
+  const name = sent.length ? sent[sent.length - 1].media.series : series[0].series;
+  const steps = series.filter(it => it.series === name);
+  const bought = sent.filter(m => m.media.series === name && m.media.status === 'bought').map(m => m.media.step);
+  const next = steps.find(it => it.step === (bought.length ? Math.max(...bought) : 0) + 1);
+  const first = steps[0];
+  const shot = [first.setting && `in ${first.setting}`, first.outfit && `wearing ${first.outfit}`].filter(Boolean).join(', ');
+  return {
+    seed: shot ? `set where your sexting sequence "${name}" was shot (${shot}), so its PPVs fit the story` : '',
+    next: next ? `Next in "${name}": step ${next.step}, [c${next.id}] "${next.title}" (${C.what(next)}, ${C.money(next.price)}). Inside: ${next.description} Lead the story to it, then attach it.` : '',
+    shot: first.setting || '',
+  };
+}
+
+/**
+ * Her sexting story for this reply, or null when they aren't sexting: on once he's
+ * sexual and she matches or leads him (and while a story is going, unless he pulls
+ * back). The scene so far, the stage it's at, her sequence's next step, and three
+ * beats from the agency's sexting chats that do something other than her last reply.
+ */
+async function storyFor({ orgId, level, scene, said, content, convo, waiting, sell, noOffer, timeZone = P.DEFAULT_TZ }) {
+  const on = !level.pulled_back && ((level.his >= 2 && (level.lead || level.match)) || (!!scene && level.his >= 1));
+  if (!on) return null;
+  const { stage, hint } = storyStage(scene, said);
+  const { seed, next, shot } = sell ? storySeed(content, convo) : { seed: '', next: '', shot: '' };
+  const skip = new Set([scene?.beat, ...(sell && !noOffer ? [] : ['teases_ppv', 'after_ppv'])].filter(Boolean));
+  const ideas = await sceneIdeas(orgId, { stage, setting: settingOf(scene?.where || shot), his: level.his, max: level.max, skip, said, n: 2 });
+  const hour = Number(new Date().toLocaleString('en-GB', { timeZone, hour: '2-digit', hour12: false })) % 24;
+  const moves = storyMoves({ scene: scene || (shot ? { where: shot } : null), stage, hour });
+  if (moves && !scene && shot) moves.start = [];               // her sequence says where it starts
+  return { on: true, scene, stage, hint, seed, next: waiting?.open || stage === 'after' ? '' : next, ideas, moves };
+}
+
+// Beats from the agency's sexting chats (kind 'scene', database change 043) for the
+// next step: this stage, her level allowed, where she is in it; each doing something different.
+async function sceneIdeas(orgId, { stage, setting = null, his = 0, max = 0, skip = new Set(), said = '', n = 3 }) {
+  const his_ = wordsOf(said);
+  const rows = (await libraryRows(orgId)).filter(r => r.kind === 'scene' && r.phase === stage && r.her_level <= max && Math.abs(r.his_level - his) <= 1 && !skip.has(r.situation));
+  const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
+  const score = (r) => overlap(r) + (setting && r.setting === setting ? 3 : 0) + (r.his_level === his ? 1 : 0) + Math.random() * 2;
+  const out = [], beats = new Set();
+  for (const [, r] of rows.map(r => [score(r), r]).sort((a, b) => b[0] - a[0])) {
+    if (beats.has(r.situation)) continue;
+    beats.add(r.situation);
+    out.push({ stage: r.phase, beat: r.situation, setting: r.setting, moment: r.moment, him: r.him, reply: r.reply });
+    if (out.length >= n) break;
+  }
+  return out;
 }
 
 // ── How she sounds: her last replies, his name, whether to ask anything ───────
@@ -898,7 +1006,8 @@ function ppvNotes(convo, followUp) {
         ? `He isn't opening your PPV ${name} for now. Don't bring it up again: keep the chat going, and when it fits offer a different item (closer to what he wants, or cheaper).`
         : `He saw your PPV ${name} and hasn't opened it. Mention it once, lightly and playfully (no begging), then keep the chat going.`);
     } else if (p.status === 'pending') {
-      if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
+      if (hisLatest && FINISHED.test(hisLatest)) out.push(`He says he finished. Aftercare first: be warm and personal. Your PPV ${name} can wait; don't push it now.`);
+      else if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
       else if (hisLatest && ASKS_ABOUT_IT.test(hisLatest) && p.inside) out.push(`He asks about your PPV ${name}. Answer his question first, truthfully and plainly, from what's really in it: ${p.inside} Then you can tease. Don't send another PPV now.`);
       else if (s.wantsOther) out.push(`He wants something more than your PPV ${name} (he hasn't opened it). Offer a different item from your list that fits what he wants now: attach it as a PPV, don't just promise it.`);
       else if (hisAfter) {
@@ -1015,8 +1124,11 @@ async function libraryRows(orgId) {
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
   let rows = [];
   try {
-    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
-  } catch { rows = []; }                                     // none before database change 040
+    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, phase, situation, setting, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
+  } catch {
+    // before database change 043 (no setting column), or 040 (no library at all)
+    try { rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, phase, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id')); } catch { rows = []; }
+  }
   libraryCache.set(orgId, { at: Date.now(), rows });
   return rows;
 }
@@ -1120,6 +1232,12 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         problems = r.ok ? [] : r.problems;
       }
       const now = { draft, verdict, problems, review, style: [...(c.style || [])] };
+      // sexting: a reply that doesn't move the story on (stands still, or only reacts)
+      // (a PPV sent as part of the story counts as a step, and so does a step the writer names, like "undresses")
+      const named = draft.scene?.beat && draft.scene.beat !== 'reacts_to_him';
+      if (base.sexting?.on && base.level?.lead && base.sexting.stage !== 'after' && !draft.offer && !named && !STORY_MOVE.test(draft.messages.join(' '))) {
+        now.style.push('It doesn\'t move the story on: say what you are doing right now (your next story move), then tease him.');
+      }
       // a set much tamer than where the chat is (a dressed set when he's explicit), outside a sexting sequence
       if (draft.offer && !draft.offer.item.series && C.levelOf(draft.offer.item) <= (base.level?.his ?? 0) - 2) {
         now.style.push(`The PPV "${draft.offer.item.title}" is much tamer than where the chat is: offer something closer to what he wants.`);
@@ -1152,6 +1270,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // one message at a time, at her typing speed (never all in the same second)
       timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
       learned: draft.learned.map(t => ({ note: t })),
+      // her sexting story after this reply (the practice room sends it back with the next message)
+      scene: base.sexting?.on ? draft.scene || base.sexting.scene || null : null,
       problems: notes, style: pick.style, review: pick.review, retried: drafts > 1, drafts, first_problems: drafts > 1 ? first || [] : [], format_ok: draft.format_ok,
       ms: Date.now() - started,
     };

@@ -99,6 +99,33 @@ const CHAT_GUIDE = [
 // How sexual a message is, as the situation picker rates it (0 to 3).
 const LEVELS = ['friendly (no flirting at all)', 'flirty (compliments, light teasing)', 'suggestive (hints and innuendo, nothing explicit)', 'explicit'];
 
+// A sexting story: its stages and what a message can do in it (the scene library's
+// tags, from the agency's ~640 sexting sessions).
+const STAGE_WORDS = { warming: 'warming up', building: 'building up', peak: 'the peak', after: 'afterwards' };
+const BEAT_WORDS = {
+  sets_scene: 'sets the scene', undresses: 'undresses', touches_herself: 'touches herself', what_she_would_do: 'says what she would do to him',
+  tells_him_what_to_do: 'tells him what to do', reacts_to_him: 'reacts to him', teases_ppv: 'sends a PPV as part of the story',
+  after_ppv: 'after he bought one', aftercare: 'aftercare',
+};
+const STAGES = Object.keys(STAGE_WORDS);
+const BEATS = Object.keys(BEAT_WORDS);
+// The scene as one line: "where: her bed · wearing: a crop top · so far: lights off, top off · him: stroking · building up".
+function sceneLine(s) {
+  if (!s) return '';
+  return [s.where && `where: ${s.where}`, s.wearing && `wearing: ${s.wearing}`, s.done?.length && `so far: ${s.done.join(', ')}`, s.him && `him: ${s.him}`, s.stage && STAGE_WORDS[s.stage]]
+    .filter(Boolean).join(' · ');
+}
+// The scene from an answer (the writer's, or one sent back by the practice room), cleaned.
+function readScene(v) {
+  if (!v || typeof v !== 'object') return null;
+  const t = (x, n = 60) => clean(typeof x === 'string' ? x : '').slice(0, n);
+  const s = {
+    where: t(v.where), wearing: t(v.wearing), done: (Array.isArray(v.done) ? v.done : []).map(x => t(x, 50)).filter(Boolean).slice(-8),
+    him: t(v.him), stage: STAGES.includes(v.stage) ? v.stage : null, beat: BEATS.includes(v.beat) ? v.beat : null,
+  };
+  return s.where || s.wearing || s.done.length || s.stage ? s : null;
+}
+
 const clean = (s) => String(s ?? '').trim();
 // Her time zone (her profile settings); times in the chat are shown in it.
 const TIME_ZONES = [
@@ -121,7 +148,7 @@ function profileText(p = {}) {
   return lines.join('\n');
 }
 
-function systemText(profile, { selling = false } = {}) {
+function systemText(profile, { selling = false, story = false } = {}) {
   const name = clean(profile?.name) || 'the creator';
   return [
     `You write chat replies as ${name}, an AI character on Fanvue, a subscription site for adults. Every fan is a verified adult who subscribes to you.`,
@@ -130,9 +157,10 @@ function systemText(profile, { selling = false } = {}) {
     `# How you chat\n${CHAT_GUIDE.map(r => `- ${r}`).join('\n')}`,
     `# Your game plan (what works best, from the agency's analysed chats)\n${GAME_PLAN.map(r => `- ${r}`).join('\n')}`,
     selling ? `# How you sell (what worked in the agency's analysed chats)\n${SELLING_GUIDE.map(r => `- ${r}`).join('\n')}` : '',
-    `# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], ${selling ? '"ppv": null, ' : ''}"learned": ["..."], "handover": ""}\n`
+    `# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], ${selling ? '"ppv": null, ' : ''}${story ? '"scene": {"where": "", "wearing": "", "done": [""], "him": "", "stage": "building", "beat": "undresses"}, ' : ''}"learned": ["..."], "handover": ""}\n`
       + '- messages: what you send him now. Usually ONE short message (under 15 words). Two only when the second really adds something; three is rare.\n'
       + (selling ? '- ppv: null, or a PPV from your content list attached to your LAST message: {"item": "c12", "price": 22}. Use the list price unless a small discount fits. That last message is its caption: tease what\'s really in it. Never write "[PPV]", ids or prices in brackets in your messages: the PPV card shows the price and what it is.\n' : '')
+      + (story ? `- scene: your sexting story after this reply: where you are, what you're wearing now, what has happened so far (a few words each, oldest first; add what you just did), what he is doing, the stage (${STAGES.join(', ')}) and what this reply did (beat: ${BEATS.join(', ')}). Keep it true to the chat and to the PPVs you send.\n` : '')
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- handover: empty, or a short reason when a person should take over this chat.',
   ].filter(Boolean).join('\n\n');
@@ -170,7 +198,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -187,6 +215,26 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
     parts.push(`# How good chatters sold in moments like this\nReal moments from the agency's chats, with how they turned out. Learn from what worked and avoid what didn't; don't copy the words.\n${sales.map(one).join('\n')}`);
   }
   if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
+  // sexting: the story she leads, where it is now, and ideas for its next step
+  if (sexting?.on) {
+    const lines = [sexting.scene ? `So far: ${sceneLine(sexting.scene)}` : `No scene yet: start one now${sexting.seed ? `, ${sexting.seed}` : ''}.`];
+    if (sexting.next) lines.push(sexting.next);
+    if (sexting.hint) lines.push(sexting.hint);
+    const m = sexting.moves;
+    if (m?.start?.length) lines.push(`A way to start it (${m.where}): ${m.start.map(x => `"${x}"`).join(' · ')}`);
+    if (m?.moves?.length) {
+      lines.push(`Your next story move: "${m.moves[0]}"${m.moves.length > 1 ? ` (or: ${m.moves.slice(1).map(x => `"${x}"`).join(' · ')}, or one like them)` : ''}. Say it your way, fitted to your scene.`);
+    }
+    if (m?.twist) lines.push(`A little twist you could throw in once: "${m.twist}"`);
+    lines.push('Shape of a sexting reply: first what you are doing right now (the story move), then a tease, or what he should do. Like: "just kicked the blanket off, it\'s getting so hot in here" then "slow down for me".');
+    if (sexting.ideas?.length) {
+      const one = (x) => `- (${STAGE_WORDS[x.stage] || x.stage}; she ${BEAT_WORDS[x.beat] || x.beat}${x.setting && x.setting !== 'none' ? `; ${x.setting}` : ''}) ${clean(x.moment)}\n  Him: ${clean(x.him)}\n  Her: ${x.reply.map(clean).join(' / ')}`;
+      lines.push(`Ideas for your next step, from the agency's sexting chats (take the idea, not the words, and fit it to your scene):\n${sexting.ideas.map(one).join('\n')}`);
+    }
+    parts.push('# Your sexting story (you lead it: each reply takes it one step on, what you do or what happens next, like a little story; two short messages are fine here. '
+      + 'Setting the scene is fine in your character, like getting under the covers or closing the curtains; your PPVs are already made, so never say you are taking or filming them now)\n'
+      + lines.join('\n'));
+  }
   const now_ = [];
   if (level) {
     now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);
@@ -200,7 +248,7 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
   return [
-    { role: 'system', content: systemText(profile, { selling }) },
+    { role: 'system', content: systemText(profile, { selling, story: !!sexting?.on }) },
     { role: 'user', content: parts.join('\n\n') },
   ];
 }
@@ -494,7 +542,7 @@ function readReply(text) {
   const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
   if (j && (Array.isArray(j.messages) || typeof j.messages === 'string')) {
     const ppv = j.ppv && typeof j.ppv === 'object' && j.ppv.item ? { item: clean(j.ppv.item), price: Number(j.ppv.price) || null } : null;
-    return { messages: strings(j.messages), ppv, learned: strings(j.learned).slice(0, 10), handover: clean(j.handover), format_ok: true };
+    return { messages: strings(j.messages), ppv, scene: readScene(j.scene), learned: strings(j.learned).slice(0, 10), handover: clean(j.handover), format_ok: true };
   }
   // broken JSON (cut off, a stray quote): the texts inside "messages", if they can be found
   const inside = /"messages"\s*:\s*\[([\s\S]*?)(?:\]|$)/.exec(String(text || ''));
@@ -507,4 +555,4 @@ function readReply(text) {
   return { messages: lines, ppv: null, learned: [], handover: '', format_ok: false };
 }
 
-module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, unQuestion, dropSentences, chatLine };
+module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, chatLine };

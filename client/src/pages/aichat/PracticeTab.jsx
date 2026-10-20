@@ -50,17 +50,22 @@ const readLine = (u) => {
   const type = u.fan_type ? ` Treated him as: ${u.fan_type.toLowerCase()}.` : '';
   const phase = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[u.phase];
   const selling = u.selling ? ` Selling${phase ? `: ${phase}` : ''}${u.sales ? `, ${u.sales} selling examples` : ''}.` : '';
-  return `The AI read ${bits.join(', ')}.${type}${level}${examples}${selling}`;
+  const story = u.story ? ` Sexting story: ${STAGE[u.story.stage] || u.story.stage}${u.story.ideas ? `, ${u.story.ideas} ideas from the agency's sexting chats` : ''}.` : '';
+  return `The AI read ${bits.join(', ')}.${type}${level}${examples}${selling}${story}`;
 };
-// Under a kept reply: which writer, the checks, the cost, what it would remember.
+// Her sexting story after a reply, in one line: "in bed · a crop top · so far: lights off, top off · he: stroking · building up".
+const STAGE = { warming: 'warming up', building: 'building up', peak: 'the peak', after: 'afterwards' };
+const sceneLine = (s) => (s ? [s.where, s.wearing, s.done?.length ? `so far: ${s.done.join(', ')}` : null, s.him ? `he: ${s.him}` : null, STAGE[s.stage]].filter(Boolean).join(' · ') : '');
+// Under a kept reply: which writer, the checks, the cost, what it would remember, the story.
 const keptNote = (result, used) => [
   `kept · ${result.label}`, STATUS[result.status]?.label?.toLowerCase(), cost(result.cost),
   result.learned?.length ? `would remember: ${result.learned.map(l => l.note).join(' · ')}` : null,
-].filter(Boolean).join(' · ') + (used ? `\n${readLine(used)}` : '');
-// Her reply as messages in the practice chat; the details (and a PPV) go on the last one.
+].filter(Boolean).join(' · ') + (result.scene ? `\nScene: ${sceneLine(result.scene)}` : '') + (used ? `\n${readLine(used)}` : '');
+// Her reply as messages in the practice chat; the details (a PPV, the story's scene) go on the last one.
 const keptMessages = (result, used) => result.replies.map((r, i, all) => ({
   from: 'her', text: r.creator_message, label: result.label, note: i === all.length - 1 ? keptNote(result, used) : null,
   ...(i === all.length - 1 && result.ppv ? { ppv: { ...result.ppv, status: 'pending' } } : {}),
+  ...(i === all.length - 1 && result.scene ? { scene: result.scene } : {}),
 }));
 
 // A PPV she sent: price, what it is, exactly what's inside, and what he did with it.
@@ -157,6 +162,7 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId }) {
       {result.learned?.length > 0 && (
         <p className='text-xs text-muted-foreground'>Would remember: {result.learned.map(l => l.note).join(' · ')}</p>
       )}
+      {result.scene && <p className='text-xs text-muted-foreground'>Scene after this reply: {sceneLine(result.scene)}</p>}
       {canKeep && live && play.done && result.replies.length > 0 && (
         <div>
           <Button size='sm' variant={kept ? 'secondary' : 'outline'} onClick={onKeep} disabled={kept}>
@@ -243,7 +249,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, {
         fan_uuid: real ? fanId : null,
         made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
-        test: nextTest.map(({ from, text: t, ppv }) => ({ from, text: t, ...(ppv ? { ppv } : {}) })),
+        test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
         models, selling: sells, follow_up: followUp,
       });
       setRounds(r => [...r, { at: nextTest.length, askedAt, ...data, kept: null }]);

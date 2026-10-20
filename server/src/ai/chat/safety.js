@@ -113,7 +113,7 @@ const ASKS_MONEY = /\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips
 const LIVE_CLAIM = /\b(?:just|literally)\s+(?:took|shot|filmed|recorded|made)\s+(?:this|it|these)\b|\b(?:taking|filming|recording|shooting)\s+(?:it|this|one|them|a\s+\w+)\s+(?:right\s+)?now\b|\bmade\s+(?:it|this)\s+(?:right\s+now|live)\b/i;
 // Promising to show or send him something ("how about I show you…", "something I've
 // been saving"): only with a PPV attached, or when one could follow.
-const PROMISES_SHOW = /\b(?:how\s+about\s+i\s+(?:show|send|give)|let\s+me\s+(?:show|send|give)\s+you|i'?ll\s+(?:show|send|give)\s+you|i\s+(?:can|could|will|wanna|want\s+to)\s+(?:show|send)\s+you|want\s+me\s+to\s+(?:show|send)|wanna\s+see\s+(?:it|more|something|what)|(?:got|have)\s+(?:something|a\s+surprise)\s+(?:special\s+|naughty\s+|hot\s+)?(?:for|just\s+for)\s+you|something\s+i'?ve\s+been\s+saving|(?:show|give)\s+you\s+(?:exactly\s+)?(?:how|what)\s+(?:i|you)\b|wait\s+(?:till|until|'?til)\s+you\s+see|what\s+else\s+i'?(?:ve|\s+have)?\s*got|i\s+(?:have|'?ve\s+got)\s+(?:more|something\s+else)\s+(?:for\s+you|coming))/i;
+const PROMISES_SHOW = /\b(?:how\s+about\s+i\s+(?:show|send|give)|let\s+me\s+(?:show|send|give)\s+you|i'?ll\s+(?:show|send|give)\s+you|i\s+(?:can|could|will|wanna|want\s+to)\s+(?:show|send)\s+you|want\s+me\s+to\s+(?:show|send)|(?:wanna|want\s+to)\s+see\s+(?:it|more|something|what|how|where)|(?:got|have)\s+(?:something|a\s+surprise)\s+(?:special\s+|naughty\s+|hot\s+)?(?:for|just\s+for)\s+you|something\s+i'?ve\s+been\s+saving|(?:show|give)\s+you\s+(?:exactly\s+)?(?:how|what)\s+(?:i|you)\b|wait\s+(?:till|until|'?til)\s+you\s+see|what\s+else\s+i'?(?:ve|\s+have)?\s*got|i\s+(?:have|'?ve\s+got)\s+(?:more|something\s+else)\s+(?:for\s+you|coming))/i;
 
 /**
  * A drafted reply against the house rules. `selling`: she may sell through a PPV;
@@ -170,7 +170,10 @@ const STIFF = [
   [/\b(?:so|now)\s+tell\s+me\b|(?:^|[\n.!?…]\s*)tell\s+me\s*,/im, '"so tell me…"'],
 ];
 // Commenting on how eager or direct he is instead of answering him (the AI's way of stalling).
-const COMMENTS_EAGER = /\byou\s+(?:don'?t|do\s+not)\s+waste\s+(?:any\s+)?time\b|\bwasting\s+no\s+time\b|\b(?:how|so)\s+(?:eager|direct|impatient|forward|bold|straightforward)\s+you\s+are\b|\byou'?re\s+(?:so\s+|very\s+|really\s+|quite\s+)?(?:eager|direct|impatient|forward|straightforward)\b|\bstraight\s+to\s+the\s+point\b|\bcut(?:ting)?\s+(?:right\s+)?to\s+the\s+chase\b|\bnot\s+(?:shy|one\s+to\s+beat\s+around)\b|\bi\s+(?:like|love)\s+(?:how|that)\s+you(?:'re|\s+are)?\s+(?:not\s+shy|so\s+eager|direct|ready|eager)\b/i;
+const COMMENTS_EAGER = /\byou\s+(?:don'?t|do\s+not)\s+waste\s+(?:any\s+)?time\b|\bwasting\s+no\s+time\b|\b(?:how|so)\s+(?:eager|direct|impatient|forward|bold|straightforward)\s+you\s+are\b|\byou'?re\s+(?:so\s+|very\s+|really\s+|quite\s+|this\s+|being\s+)?(?:eager|direct|impatient|forward|straightforward)\b|\bstraight\s+to\s+the\s+point\b|\bcut(?:ting)?\s+(?:right\s+)?to\s+the\s+chase\b|\bnot\s+(?:shy|one\s+to\s+beat\s+around)\b|\bi\s+(?:like|love)\s+(?:how|that)\s+you(?:'re|\s+are)?\s+(?:not\s+shy|so\s+eager|direct|ready|eager)\b|\bi\s+(?:like|love|adore)\s+(?:a\s+)?(?:man|guy)\s+who\b|\b(?:man|guy)\s+(?:who\s+)?knows\s+what\s+he\s+wants\b/i;
+// Her story going on: something she does or that happens, in her words ("pulling my top
+// up", "under the covers", "my fingers…"). A sexting reply without any just reacts.
+const STORY_MOVE = /\b(?:pull|slid|slide|slip|kick|lying|laying|lay\s|laid|lie\s|tak(?:e|ing)\s+(?:it\s+|this\s+|my\s+\w+\s+)?off|took\s+(?:it\s+|my\s+\w+\s+)?off|bit(?:e|ing)\s+my|arch|touch(?:ing)?\s+my|spread|roll|turn(?:ed|ing)?\s+(?:the|off|over)|grab|squeez|rub|sitting|sat\s|kneel|knelt|bend|bent|strip|unbutton|unhook|lift|drop|wrap|tuck|stretch|crawl|climb|shiver|shak|trembl|moan|whisper|undress|peel|tug|press|riding\s+up|comfy|getting\s+(?:wet|hot|comfy|naked|undressed)|let\s+me\s+(?:get|pull|take|peel|slide|slip|lie|lay|sit|turn|kick|unbutton|undo|tug|drop)|my\s+(?:hands?|fingers?|legs|thighs|hips|back|lips|top|shirt|bra|panties|thong|shorts|towel|bed|pjs|pajamas|sheets|blanket)|under\s+the\s+(?:covers|sheets|blanket)|on\s+(?:my|the)\s+(?:bed|couch|knees)|towel|curtains|lights?\s+(?:off|down|low)|lamp|pillow|sheets|\w+'s\s+off|off\s+(?:now|already)|toss|threw|fingers?|tracing|grind|bounc|spank|kiss(?:ing)?\s+(?:my|your))\w*/i;
 // Guessing his time of day ("what's keeping you up this early?") when he didn't say it.
 const GUESSES_TIME = /\b(?:this|so)\s+(?:early|late)\b|\bup\s+(?:so\s+)?(?:early|late)\b|\bkeep(?:s|ing)?\s+you\s+up\b|\bthis\s+(?:morning|afternoon|evening)\b|\bstart\s+(?:the|your)\s+day\b/i;
 const SAYS_TIME = /\b(?:early|late|morning|night|tonight|sleep\w*|awake|bed|tired|insomnia|\d{1,2}\s*(?:am|pm)|o'?clock|time\s+zone)\b/i;
@@ -198,7 +201,7 @@ function isEcho(sentence, his = '') {
   return w.some(x => x.length >= 3 && !STOPW.has(x) && hisWords.has(x)) || /^\W*(?:really|seriously|yeah|yes|no\s+way|oh|huh|right)\W*$/i.test(sentence);
 }
 // A message's sentences (an emoji before a capital letter ends one too: "Mike 😊 What…").
-const SENTENCE = /[^.!?…\n]+(?:[.!?…]+|$)(?:\s*\p{Extended_Pictographic}️?)*/gu;
+const SENTENCE = /[^.!?…\n]+(?:[.!?…]+|(?=\n)|$)(?:\s*\p{Extended_Pictographic}\uFE0F?)*/gu;
 function sentences(t) {
   const s = String(t).replace(/(\p{Extended_Pictographic}️?)\s+(?=\p{Lu})/gu, '$1\n');
   const out = (s.match(SENTENCE) || []).map(x => x.trim()).filter(Boolean);
@@ -250,4 +253,4 @@ function personaProblems(text) {
     : [];
 }
 
-module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, personaProblems, replyLevel, MAX_MESSAGES };
+module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, STORY_MOVE, personaProblems, replyLevel, MAX_MESSAGES };
