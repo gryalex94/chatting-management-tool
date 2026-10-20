@@ -94,15 +94,21 @@ Practice mode only: nothing is sent to Fanvue.
 - b) The writer invents moments in each chat (no consistency between fans).
 - c) You write her week by hand.
 
+Answer: b) The writer invents moments in each chat. (Note: then what she tells each fan about herself must be kept and checked, so fans don't get contradicting stories; see B9.)
+
 **A2. How often should a small event happen with a close fan (intimate or girlfriend)?**
 - a) About every other conversation (recommended)
 - b) Every conversation
 - c) Every third conversation
 
+Answer: a) About every other conversation.
+
 **A3. And with a friendly or flirty fan?**
 - a) Every third conversation (recommended)
 - b) Every other conversation
 - c) Only when he goes quiet
+
+Answer: a) Every third conversation.
 
 **A4. Which kinds of events are fine? (more than one)**
 - 1) She writes first with a life update
@@ -115,26 +121,38 @@ Practice mode only: nothing is sent to Fanvue.
 - 8) "Thinking of you" out of nowhere
 - 9) A deal "just because it's you"
 
+Answer: 1) a life update, 2) asking his advice, 3) a little game, 4) a bad day she shares, 5) a late reply with a reason or a double text. Not 6–9: no sticking nicknames, no running jokes brought back, no "thinking of you" out of nowhere, no "just because it's you" deals.
+
 **A5. May an event interrupt a selling or sexting moment?**
 - a) Never (recommended)
 - b) Only a double text
+
+Answer: a) Never.
 
 **A6. Whales' "something special" (your Q6f answer): what is it?**
 - a) A first look: one free teaser photo of a new set, at most once a month
 - b) No free content; a personal discount instead
 - c) A personal "you're the first to know" message, no photo
 
+Answer: b) and c) together: a personal discount when he hasn't bought lately, and "you're the first (or the only one) to know" messages about what's new. No free content. With whales the aim is an intimate connection.
+
 **A7. Her mood of the day**
 - a) Varies a little day to day (sleepy, hyper, lazy Sunday), the same for all fans (recommended)
 - b) Always the same
+
+Answer: a) Varies a little day to day, the same for every fan that day.
 
 **A8. Typos, like real texting?**
 - a) Rarely (about 1 reply in 15), fixed with a quick second message
 - b) Never
 
+Answer: Yes: about 1 typo in 15 messages, and a correction follows only half the time.
+
 **A9. Should the engine keep, per fan, which openers, goodbyes, tease styles and events she used, and not repeat the last 10?**
 - a) Yes (recommended)
 - b) No
+
+Answer: a) Yes.
 
 ## Part B: Seeing him
 
@@ -142,38 +160,60 @@ Practice mode only: nothing is sent to Fanvue.
 - a) Yes, build it (recommended)
 - b) His notes are enough
 
+Answer: a) Yes, build it.
+
 **B2. A session plan when a conversation starts?** Picked from his state with some chance: for example a spender: 50% just chat, 30% build toward the sexting set, 20% a cheap single; a new subscriber: get to know him; a lapsed fan: win him back.
 - a) Yes (recommended)
 - b) No, decide per reply only
+
+Answer: Yes, a plan when the conversation starts, built from the previous conversations (their mood, how they ended), his type, and what happened with sales:
+- he bought recently: don't push, build rapport;
+- he hasn't bought for a long time: plan to sell him something in this dialogue;
+- in between: read his vibe while talking and judge whether he's willing to buy, without pushing.
+The plan can change during the conversation with how it goes and his mood. Eventually the engine should learn which behaviour sells best.
 
 **B3. The warm-up: per conversation, and by closeness?**
 - a) New 6, friendly 4, flirty 3, intimate 2, girlfriend 1 of her messages; sad, annoyed or suspicious: no selling at all that conversation (recommended)
 - b) Keep 6 over the whole history
 - c) By his mood only
 
+Answer: a) Per conversation, by closeness: new 6, friendly 4, flirty 3, intimate 3, girlfriend 2 of her messages. Sad, annoyed or suspicious: no selling at all that conversation. The warm-up is only a floor: a PPV still goes out only when the moment calls for it (he's sexual and she leads, he asks for something she has, or his free talk ran out), and never as a push after a recent buy (B2).
+
 **B4. Mood smoothing**
 - a) Sad or annoyed stays until his messages are clearly lighter for 2 replies (recommended)
 - b) Re-read every reply, as now
+
+Answer: a) Sad or annoyed sticks until two of his messages in a row read as clearly lighter.
 
 **B5. One main goal plus a touch?** (comfort plus his dog; after a buy plus goodnight)
 - a) Yes, one main goal and at most one touch (recommended)
 - b) One goal only
 
+Answer: a) One main job plus at most one small touch when it fits (react to the buy and say goodnight; comfort him and mention his dog).
+
 **B6. His usual hours, learned from when he writes, used for follow-ups and events?**
 - a) Yes (recommended)
 - b) Later
+
+Answer: a) Yes.
 
 **B7. An outcomes log?** For every reply: did he answer, go quiet, buy within an hour or a day; a weekly report that tunes budgets and warm-ups.
 - a) Yes (recommended)
 - b) Later
 
+Answer: a) Yes.
+
 **B8. Time-waster strikes (your Q19b answer): fade him out after 2 failed conversations in a week.**
 - a) Build with the fan state
 - b) Later
 
+Answer: a) Build it now with the fan state.
+
 **B9. Her facts across fans (your Q15 answer): what she tells any fan about herself goes into one shared diary that every chat must respect.**
 - a) Build it with "Her day" (recommended)
 - b) Later
+
+Answer: a) Build it now: one shared diary of what she has told any fan about herself; every chat respects it, Claude's check flags contradictions, you can edit it.
 
 ## Part C: Photos and videos from fans
 
@@ -181,6 +221,8 @@ Practice mode only: nothing is sent to Fanvue.
 - a) A cheap Mistral describer writes a neutral, detailed description; the planner, the writer, the notes and Claude's check all read that text (recommended: one description everyone shares, the file stays out of the chat)
 - b) The writer (Mistral Large 3) sees the photo itself
 - c) Claude (it refuses explicit images, so only for non-sexual ones)
+
+Answer: a) A cheap Mistral describer writes one neutral, detailed description; everyone reads that text.
 
 **C2. Videos**
 - a) 4–6 frames spread over the video, described as a sequence (recommended)
