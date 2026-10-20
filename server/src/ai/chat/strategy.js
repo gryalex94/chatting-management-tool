@@ -47,8 +47,12 @@ const line = (m) => {
   return `${m.from_fan ? 'Him' : 'You'}: ${clean(m.text).replace(/\s+/g, ' ') || '(a photo or video)'}${note ? ` [${note}]` : ''}`;
 };
 
-/** The messages for the situation picker: the menu, the facts and the last messages. */
-function pickPrompt({ chat, money, selling = false }) {
+/**
+ * The messages for the situation picker: the menu, the facts and the last messages.
+ * `notes` = what she remembers about him (texts): it also says when his latest
+ * message contradicts one (Q14).
+ */
+function pickPrompt({ chat, money, selling = false, notes = [] }) {
   const menu = selling ? PLAYBOOK.situations : SITUATIONS;
   return [
     { role: 'system', content: 'You match a moment in a chat between a creator and a fan to situations from a chatting playbook. Answer with JSON only.' },
@@ -58,12 +62,14 @@ function pickPrompt({ chat, money, selling = false }) {
         `Situations:\n${menu.map(s => `${s.id}: ${s.title}`).join('\n')}`,
         `About this moment: ${momentFacts(chat, money)}`,
         `The last messages:\n${chat.filter(m => !m.mass).slice(-10).map(line).join('\n')}`,
+        notes.length ? `What she remembers about him:\n${notes.map(n => `- ${n}`).join('\n')}` : '',
         'Which situations (at most 3) fit his latest message right now? Only ones that clearly fit.\n'
           + 'level: how sexual his latest message is: 0 = friendly, no flirting; 1 = flirty (compliments, light teasing); 2 = suggestive (hints, innuendo); 3 = explicit (sex acts or intimate body parts).\n'
           + `mood: his mood right now, one of ${MOODS.join(', ')}.\n`
           + 'pulled_back: true if he is slowing things down (says it\'s going fast, changes the subject away from sex, seems put off).\n'
-          + 'Reply with JSON only: {"ids": ["..."], "level": 0, "mood": "chatty", "pulled_back": false}',
-      ].join('\n\n'),
+          + (notes.length ? 'contradicts: if his latest message clearly contradicts one of the remembered notes (he now says something different about the same thing: the note says he has a dog, now he says he has no pets; the note says he lives in Texas, now he says he lives in Ohio), copy that note word for word; else "". New details that fit, or things he says about her, are not contradictions.\n' : '')
+          + `Reply with JSON only: {"ids": ["..."], "level": 0, "mood": "chatty", "pulled_back": false${notes.length ? ', "contradicts": ""' : ''}}`,
+      ].filter(Boolean).join('\n\n'),
     },
   ];
 }
@@ -76,6 +82,24 @@ function readPick(json, { selling = false } = {}) {
 
 // His level (0 to 3), mood and whether he pulled back, from the picker's answer.
 const MOODS = ['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring', 'tired', 'sad', 'annoyed', 'brief', 'suspicious'];
+// The note his latest message contradicts, as the picker copied it: its place in
+// `notes` (1-based), or 0. The copy must match a note closely (most of its words).
+function readContradiction(json, notes = []) {
+  const said = String(json?.contradicts ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, ' ').trim();
+  if (!said) return 0;
+  const words = (t) => new Set(String(t).toLowerCase().match(/[\p{L}\p{N}']+/gu) || []);
+  const got = words(said);
+  let best = 0, score = 0;
+  notes.forEach((n, i) => {
+    const w = words(n);
+    if (!w.size) return;
+    const both = [...w].filter(x => got.has(x)).length;
+    const s = both / Math.max(w.size, got.size);
+    if (s > score) { score = s; best = i + 1; }
+  });
+  return score >= 0.6 ? best : 0;
+}
+
 function readMood(json) {
   const level = Number.isInteger(json?.level) && json.level >= 0 && json.level <= 3 ? json.level : 0;
   return { his: level, mood: MOODS.includes(json?.mood) ? json.mood : 'chatty', pulled_back: json?.pulled_back === true };
@@ -94,4 +118,4 @@ function situationGuide(ids) {
 
 const situationTitle = (id) => byId[id]?.title || id;
 
-module.exports = { GAME_PLAN, SITUATIONS, MOODS, pickPrompt, readPick, readMood, situationGuide, situationTitle, momentFacts };
+module.exports = { GAME_PLAN, SITUATIONS, MOODS, pickPrompt, readPick, readMood, readContradiction, situationGuide, situationTitle, momentFacts };

@@ -196,11 +196,15 @@ const opening = (t) => wordsOf(t).slice(0, 2).join(' ');
 // "Tonight?", "Special treatment?", "You want hotter?": his own words back with a
 // question mark. A reaction, not a question to him (but a habit when it's every reply).
 const ASKS_WORD = /^\W*(?:what|whats|how|where|when|who|why|which|do|does|did|are|is|was|were|can|could|would|will|have|has|should|wanna|want|may|shall)\b/i;
+// A short reaction with a question mark, not a question to him: his word back ("Tonight?"),
+// "Really?", or a little reaction like "Oh, a secret?" / "Ooh, a challenge?".
+const REACTION = /^\W*(?:oh+|ooh+|ohh+|wow|whoa|mm+|hmm+|aww*|so)\W+(?:a|an|the|your|that|this)?\s*[\p{L}'-]+(?:\s+[\p{L}'-]+)?\W*$/iu;
 function isEcho(sentence, his = '') {
   const w = wordsOf(sentence);
   if (!w.length || w.length > 4 || ASKS_WORD.test(straight(sentence).replace(/^you\s+/i, ''))) return false;
   const hisWords = new Set(wordsOf(his));
-  return w.some(x => x.length >= 3 && !STOPW.has(x) && hisWords.has(x)) || /^\W*(?:really|seriously|yeah|yes|no\s+way|oh|huh|right)\W*$/i.test(sentence);
+  return w.some(x => x.length >= 3 && !STOPW.has(x) && hisWords.has(x)) || /^\W*(?:really|seriously|yeah|yes|no\s+way|oh|huh|right)\W*$/i.test(sentence)
+    || REACTION.test(sentence);
 }
 // A message's sentences (an emoji before a capital letter ends one too: "Mike 😊 What…").
 const SENTENCE = /[^.!?…\n]+(?:[.!?…]+|(?=\n)|$)(?:\s*\p{Extended_Pictographic}\uFE0F?)*/gu;

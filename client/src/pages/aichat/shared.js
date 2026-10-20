@@ -24,10 +24,26 @@ export const shortDay = (iso) => (iso ? new Date(iso).toLocaleDateString([], { d
 export const KINDS = [
   ['about', 'About him'],
   ['likes', 'What he likes'],
-  ['avoid', 'Avoid'],
+  ['plan', 'Coming up for him'],
+  ['avoid', 'Never bring up first'],
   ['promise', 'What she promised him'],
   ['her', 'What she told him about herself'],
 ];
+
+// When he said something, in the words the AI uses: "today", "last week", "a few months ago".
+export const agoText = (iso) => {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = Math.floor((Date.now() - t) / 86400000);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'yesterday';
+  if (d < 7) return 'a few days ago';
+  if (d < 14) return 'last week';
+  if (d < 30) return 'a few weeks ago';
+  if (d < 60) return 'last month';
+  if (d < 180) return 'a few months ago';
+  return 'a long time ago';
+};
 
 // "Subscriber since 28 Jul · Spent $45 · 3 paid messages · 1 tip · last bought 2 Oct"
 export const moneyLine = (m) => {

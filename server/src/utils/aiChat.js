@@ -27,6 +27,7 @@ const { FAN_TYPES, fanType } = require('../ai/chat/fanTypes');
 const C = require('../ai/chat/content');
 const T = require('../ai/chat/trace');
 const Plan = require('../ai/chat/plan');
+const Mem = require('../ai/chat/memory');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -397,7 +398,10 @@ async function fanDetail(orgId, creatorId, fanUuid) {
   const win = windowFor(chat);             // exactly what the writer reads
   return {
     fan: { fan_uuid: fanUuid, display_name: person.display_name || null, fan_username: person.handle || null, fan_nickname: person.nickname || null, top_spender: !!person.is_top_spender },
-    memory: mem ? { facts: (mem.facts || []).map(f => ({ id: f.id, kind: f.kind, note: f.text, locked: !!f.locked })), summary: mem.story || '', built_at: mem.built_at, edited_at: mem.edited_at, covered_through: mem.covered_through } : null,
+    memory: mem ? {
+      facts: (mem.facts || []).map(f => ({ id: f.id, kind: f.kind, note: f.text, locked: !!f.locked, said_at: f.said_at || null, on: f.on || null })),
+      summary: mem.story || '', bond: mem.bond || null, built_at: mem.built_at, edited_at: mem.edited_at, covered_through: mem.covered_through,
+    } : null,
     money,
     total: chat.filter(m => !m.mass).length,
     long: win.long,
@@ -407,13 +411,50 @@ async function fanDetail(orgId, creatorId, fanUuid) {
 
 const KINDS = new Set(P.FACT_KINDS);
 const newId = () => crypto.randomBytes(5).toString('hex');
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+// A note: { id, kind, text, said_at (when he said it), on (a plan's day, YYYY-MM-DD), locked }.
 function cleanFacts(list, { keepIds = false } = {}) {
-  return (Array.isArray(list) ? list : []).map(f => ({
-    id: keepIds && /^[\w-]{1,24}$/.test(String(f?.id || '')) ? String(f.id) : newId(),
-    kind: KINDS.has(f?.kind) ? f.kind : 'about',
-    text: clean(f?.text ?? f?.note).slice(0, 200),
-    ...(f?.locked ? { locked: true } : {}),
-  })).filter(f => f.text);
+  return (Array.isArray(list) ? list : []).map((f) => {
+    const kind = KINDS.has(f?.kind) ? f.kind : 'about';
+    const said = f?.said_at && Number.isFinite(Date.parse(f.said_at)) ? new Date(f.said_at).toISOString() : null;
+    const on = kind === 'plan' && DATE.test(String(f?.on || '')) && Number.isFinite(Date.parse(f.on)) ? String(f.on) : null;
+    return {
+      id: keepIds && /^[\w-]{1,24}$/.test(String(f?.id || '')) ? String(f.id) : newId(),
+      kind, text: clean(f?.text ?? f?.note).slice(0, 200),
+      ...(said ? { said_at: said } : {}), ...(on ? { on } : {}),
+      ...(f?.locked ? { locked: true } : {}),
+    };
+  }).filter(f => f.text);
+}
+
+// Where each note of the memory model's answer came from (memoryPrompt): "K2" = a
+// current note (it keeps its id and when he said it), "#12" = a new message (its
+// date); otherwise the newest message's date.
+function sourced(list, open, part) {
+  const last = part[part.length - 1]?.at || new Date().toISOString();
+  const seen = new Set();
+  return (Array.isArray(list) ? list : []).map((f) => {
+    const src = clean(f?.from).toUpperCase();
+    const k = /^K(\d+)$/.exec(src), n = /^#?(\d+)$/.exec(src);
+    const old = k ? open[Number(k[1]) - 1] : null;
+    const msg = !old && n ? part[Number(n[1]) - 1] : null;
+    const id = old && !seen.has(old.id) ? old.id : undefined;      // a note split in two keeps its id once
+    if (id) seen.add(id);
+    return { kind: f?.kind, text: f?.text, on: f?.on, id, said_at: old ? old.said_at || null : msg?.at || last };
+  });
+}
+
+// A made-up fan's notes as typed in Practice: one per line, comma or semicolon.
+// "interview tomorrow" / "had a date yesterday" become plans on that day, so
+// "how did it go?" can be tried out.
+function madeUpNotes(text, timeZone = P.DEFAULT_TZ, now = new Date()) {
+  return clean(text).split(/\n|;|,(?!\d)/).map(clean).filter(Boolean).slice(0, 12).map((t) => {
+    if (/^\d{2}$/.test(t)) return { kind: 'about', text: `${t} years old` };        // "34, truck driver…": his age
+    const rel = /\b(yesterday|today|tonight|tomorrow)\b/i.exec(t)?.[1]?.toLowerCase();
+    if (!rel) return { kind: 'about', text: t.slice(0, 200) };
+    const shift = { yesterday: -1, today: 0, tonight: 0, tomorrow: 1 }[rel];
+    return { kind: 'plan', text: t.slice(0, 200), on: Mem.dayIn(new Date(now.getTime() + shift * 86400_000), timeZone) };
+  });
 }
 
 /** A manager's corrections to a fan's memory: { facts: [{ id, kind, note, locked }], summary }. */
@@ -421,9 +462,12 @@ async function saveMemory(orgId, creatorId, fanUuid, { facts, summary }) {
   const { account } = await pageAccount(orgId, creatorId);
   const cur = await memoryRow(account.id, fanUuid);
   const now = new Date().toISOString();
+  // when he said each thing stays as it was; a note the manager adds counts from now
+  const before = new Map((cur?.facts || []).map(f => [f.id, f]));
+  const list = (Array.isArray(facts) ? facts : []).map(f => ({ ...f, said_at: f?.said_at || before.get(f?.id)?.said_at || now }));
   const { error } = await supabaseAdmin.from('ai_fan_memory').upsert({
     account_id: account.id, fan_uuid: fanUuid, organisation_id: orgId,
-    facts: cleanFacts(facts, { keepIds: true }).slice(0, 60), story: clean(summary).slice(0, 2000) || null,
+    facts: cleanFacts(list, { keepIds: true }).slice(0, 60), story: clean(summary).slice(0, 2000) || null,
     covered_through: cur?.covered_through || null, messages_read: cur?.messages_read || 0, built_at: cur?.built_at || null,
     edited_at: now, updated_at: now,
   }, { onConflict: 'account_id,fan_uuid' });
@@ -448,27 +492,72 @@ async function buildMemory(orgId, creatorId, fanUuid, { full = false } = {}) {
   if (!fresh.length) return { updated: false, cost: 0 };
   let facts = full ? (mem?.facts || []).filter(f => f.locked) : (mem?.facts || []);
   let story = full ? '' : mem?.story || '';
+  let bond = full ? null : mem?.bond || null;             // how he treats her (closeness, Q16)
+  const timeZone = persona?.settings?.timezone || P.DEFAULT_TZ;
   let cost = 0;
   for (let i = 0; i < fresh.length; i += MEMORY_CHUNK) {
+    const part = fresh.slice(i, i + MEMORY_CHUNK);
+    const open = facts.filter(f => !f.locked);               // numbered K1, K2… in the prompt
     const res = await or.chat({
-      model, maxTokens: 1500, temperature: 0.2, fallbacks: or.backupsFor(model),
-      messages: P.memoryPrompt({ name: persona?.profile?.name, fan: { name: fanName(person) }, known: facts, story, chat: fresh.slice(i, i + MEMORY_CHUNK) }),
+      model, maxTokens: 3000, temperature: 0.2, fallbacks: or.backupsFor(model),
+      messages: P.memoryPrompt({ name: persona?.profile?.name, fan: { name: fanName(person) }, known: facts, story, bond, chat: part, timeZone }),
     });
     cost += res.usage.cost || 0;
     await logUsage(orgId, 'memory', res.model, res.usage, { creatorId, fanUuid });
     const j = P.parseJsonObject(res.text);
     if (!j || !Array.isArray(j.facts)) throw new AiChatError('The AI\'s notes came back unreadable: try again', 502);
-    facts = [...facts.filter(f => f.locked), ...cleanFacts(j.facts)].slice(0, 60);
+    facts = [...facts.filter(f => f.locked), ...cleanFacts(sourced(j.facts, open, part), { keepIds: true })].slice(0, 60);
     story = clean(j.story).slice(0, 2000) || story;
+    if (Mem.WARMTH.includes(j.warmth)) bond = { warmth: j.warmth, why: clean(j.warmth_why).slice(0, 200), at: new Date().toISOString() };
   }
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin.from('ai_fan_memory').upsert({
-    account_id: account.id, fan_uuid: fanUuid, organisation_id: orgId, facts, story: story || null,
+    account_id: account.id, fan_uuid: fanUuid, organisation_id: orgId, facts, story: story || null, bond,
     covered_through: fresh[fresh.length - 1].at, messages_read: (full ? 0 : mem?.messages_read || 0) + fresh.length,
     built_at: now, edited_at: mem?.edited_at || null, updated_at: now,
   }, { onConflict: 'account_id,fan_uuid' });
   check(error);
   return { updated: true, cost };
+}
+
+/**
+ * His notes after a conversation (Q14), run by the hourly Fanvue copy: fans who
+ * wrote in the last 7 days, whose chat has been quiet for 30 minutes and whose
+ * notes haven't read it yet, the longest waiting first, at most `max` a run. It
+ * only reads the copied chats; nothing goes to Fanvue. Returns { fans, updated,
+ * failed, cost } (or { skipped }).
+ */
+async function refreshMemories(accountId, { max = 25 } = {}) {
+  if (!or.configured()) return { skipped: 'no OpenRouter key' };
+  const { data: acc } = await supabaseAdmin.from('fanvue_accounts').select('id, organisation_id, creator_id').eq('id', accountId).maybeSingle();
+  if (!acc?.creator_id) return { skipped: 'not linked to a page' };
+  const persona = await loadPersona(acc.organisation_id, acc.creator_id);
+  if (!clean(persona?.profile?.name)) return { skipped: 'no profile yet' };
+  const now = Date.now();
+  const since = new Date(now - 7 * 86400_000).toISOString();
+  const quiet = now - 30 * 60_000;
+  const [wrote, people, mem] = await Promise.all([
+    all(() => supabaseAdmin.from('fanvue_messages').select('fan_uuid, sent_at').eq('account_id', accountId).eq('from_fan', true).gte('sent_at', since).order('sent_at').order('uuid')),
+    all(() => supabaseAdmin.from('fanvue_fans').select('fan_uuid, last_message_at').eq('account_id', accountId).gte('last_message_at', since).order('fan_uuid')),
+    all(() => supabaseAdmin.from('ai_fan_memory').select('fan_uuid, covered_through').eq('account_id', accountId).order('fan_uuid')),
+  ]);
+  const lastHis = {};
+  for (const m of wrote) if (m.sent_at && (!lastHis[m.fan_uuid] || Date.parse(m.sent_at) > lastHis[m.fan_uuid])) lastHis[m.fan_uuid] = Date.parse(m.sent_at);
+  const lastAny = Object.fromEntries(people.map(p => [p.fan_uuid, p.last_message_at ? Date.parse(p.last_message_at) : 0]));
+  const covered = Object.fromEntries(mem.map(m => [m.fan_uuid, m.covered_through ? Date.parse(m.covered_through) : 0]));
+  const todo = Object.entries(lastHis)
+    .filter(([fan, at]) => at > (covered[fan] || 0) && Math.max(at, lastAny[fan] || 0) <= quiet)
+    .sort((a, b) => a[1] - b[1]).slice(0, max);
+  const out = { fans: todo.length, updated: 0, failed: 0, cost: 0 };
+  for (const [fan] of todo) {
+    try {
+      const r = await buildMemory(acc.organisation_id, acc.creator_id, fan);
+      if (r.updated) out.updated += 1;
+      out.cost += r.cost;
+    } catch (e) { out.failed += 1; console.error('[ai-chat] notes after a chat:', e.message); }
+  }
+  if (todo.length) console.log('[ai-chat] notes after chats:', JSON.stringify({ ...out, cost: round(out.cost, 4) }));
+  return out;
 }
 
 // Memory for every fan who wrote, in the background: one job per page at a time.
@@ -702,7 +791,7 @@ async function pageMonthly(accountId) {
  * { type (a made-up fan's type), tier, mood, his (0–3), budget: 'used' }. `planOnly`:
  * decide but don't write (no writer is called).
  */
-async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false }) {
+async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [] }) {
   const { account } = await pageAccount(orgId, creatorId);
   const persona = await loadPersona(orgId, creatorId);
   if (!clean(persona?.profile?.name)) throw new AiChatError('Set up her profile first (Her profile)', 409);
@@ -710,20 +799,25 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const writers = [...new Set((models.length ? models : [persona.settings?.writer || or.DEFAULT_WRITER]).filter(or.isOffered))].slice(0, 3);
   if (!writers.length) writers.push(or.DEFAULT_WRITER);       // e.g. a writer that's no longer offered
 
-  let chat = [], card = [], story = '', money = null, fan = {}, long = false, type = null;
+  const timeZone = persona.settings?.timezone || P.DEFAULT_TZ;
+  let chat = [], card = [], story = '', money = null, fan = {}, long = false, type = null, bond = null;
   if (fanUuid) {
     const [person, mem, loaded] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid)]);
     chat = loaded.chat; money = loaded.money;
     fan = { name: fanName(person) };
     card = mem?.facts || [];
     story = mem?.story || '';
+    bond = mem?.bond || null;
   } else {
     fan = { name: clean(madeUp?.name).slice(0, 60) };
-    if (clean(madeUp?.notes)) card = [{ kind: 'about', text: clean(madeUp.notes).slice(0, 500) }];
+    if (clean(madeUp?.notes)) card = madeUpNotes(madeUp.notes, timeZone);
     // who he is (new subscriber, big spender, time waster…): his payments as Fanvue would show them
     type = fanType(whatIf?.type || madeUp?.type);
     if (type) money = moneyOf(type.payments, null, type.chatSince);
   }
+  // what she learned about him in this practice chat (from the replies you kept): only for this chat, never saved
+  const learnedHere = (Array.isArray(learned) ? learned : []).map(t => clean(typeof t === 'string' ? t : t?.text).slice(0, 200)).filter(Boolean).slice(-20);
+  if (learnedHere.length) card = [...card, ...learnedHere.map(text => ({ kind: 'about', text, said_at: new Date().toISOString(), practice: true }))];
   // selling (practice): her content list; the PPVs in the practice chat carry their status
   const content = selling ? (await loadContent(orgId, creatorId)).filter(it => it.active) : [];
   const typed = (Array.isArray(test) ? test : []).slice(-40).map((t) => {
@@ -737,6 +831,10 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   convo.forEach((m, i) => { if (!m.from_fan && !m.mass) lastHer = i; });
   const latest = convo.slice(lastHer + 1).filter(m => m.from_fan).map(m => m.text).filter(Boolean);
   if (!latest.length && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
+  // this conversation: since the last pause of 6 hours or more (memory.js)
+  const talk = Mem.conversation(convo);
+  if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
+  const now = new Date();
 
   // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
   const screen = latest.length ? await screenLatest(orgId, creatorId, fanUuid, latest) : { action: 'continue', reasons: [], notes: [], review: null };
@@ -747,7 +845,10 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
   const sell = content.length > 0;
-  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf });
+  // his notes the planner checks his latest message against (a contradiction: she checks with him,
+  // Q14): who he is first (where he lives, his job, family), then his plans and likes
+  const checkable = ['about', 'plan', 'likes'].flatMap(k => card.filter(f => f.kind === k && clean(f.text))).slice(0, 25);
+  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text) });
   // her last PPV in this practice chat: none new while it waits for him (unless he wants something else)
   const waiting = lastPpv(convo);
   const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status, open: false }));
@@ -755,36 +856,53 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // why no PPV can go out right now (then she mustn't promise one either)
   let noOffer = !sell ? '' : !level.warm ? 'you are still in the warm-up, so get to know him first.'
     : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : '';
-  const voice = voiceFor({ chat: convo, fan, latest, followUp });
+  const voice = voiceFor({ chat: convo, fan, latest, followUp, from: talk.start });
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
-  const sexting = await storyFor({ orgId, level, scene, said: latest.join(' '), content, convo, waiting, sell, noOffer, timeZone: persona.settings?.timezone || P.DEFAULT_TZ });
+  const sexting = await storyFor({ orgId, level, scene, said: latest.join(' '), content, convo, waiting, sell, noOffer, timeZone });
   const momentNotes = [...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })];
 
   // 3. the plan: who he is and what this reply should do, decided in code (plan.js)
-  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: await pageMonthly(account.id), offered, card, override: whatIf || {} });
+  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: await pageMonthly(account.id), offered, card, bond, from: talk.start, override: whatIf || {}, now });
   const match = sell && !asksAboutLastPpv(convo) ? C.matchRequest(latest.join(' '), content) : null;
   const lastSent = convo.map(m => !!m.media?.item).lastIndexOf(true);
   const gap = lastSent < 0 ? null : convo.slice(lastSent + 1).filter(m => !m.from_fan && !m.mass).length;
-  const replyPlan = Plan.planReply({ level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, herReplies: herReplies(convo).length, gap });
+  // what memory brings to this reply: a note to bring up (at most once every few days), a
+  // plan of his coming up (a goodbye's hook), a note he just contradicted
+  const here = convo.slice(talk.start);
+  const threeDays = now.getTime() - 3 * 86400_000;
+  // what was said lately: her messages of the last 3 days, and both sides of this conversation
+  const recent = convo.filter((m, i) => !m.mass && (i >= talk.start || (!m.from_fan && (!m.at || Date.parse(m.at) >= threeDays)))).map(m => m.text);
+  const callback = Mem.callbackFor({ card, recent, now, timeZone });
+  const hook = Mem.hookFor({ card, now, timeZone });
+  const clash = plan.contradicts ? checkable[plan.contradicts - 1] : null;
+  const hisBefore = here.slice(0, Math.max(0, here.length - latest.length)).filter(m => m.from_fan).map(m => m.text).join(' ');
+  const replyPlan = Plan.planReply({
+    level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
+    herReplies: herReplies(here).length, away: talk.away,
+    lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
+    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null,
+  });
   // the plan is enforced: no PPV (nor a promise of one) when it says so, no question when it says so, his length mirrored
   if (sell && !replyPlan.sell.allowed && !noOffer) noOffer = replyPlan.sell.why;
+  if (replyPlan.check) voice.noQuestion = '';                 // checking what she remembers is the one question
   if (!replyPlan.ask.allowed && !voice.noQuestion) voice.noQuestion = replyPlan.ask.why;
   voice.length = replyPlan.length.target;
+  if (replyPlan.level.max > level.max) level.max = replyPlan.level.max;   // close fans: a little flirting (Q16)
   // your marks from Practice that fit this moment: wording ones go to the writer, all go to Claude's check
   const lessons = lessonsFor(await loadLessons(orgId, creatorId), { said: latest.join(' '), goal: replyPlan.goal });
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
-    situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
+    situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone, now,
     selling: sell, content: sell ? C.contentText(content) : '', sales, lessons: lessons.filter(l => l.kind === 'wording'),
   };
   // the decision map: what was looked at and decided before any writer wrote a word
   const situations = plan.ids.map(strategy.situationTitle);
   const trace = [
     T.safetyStep(latest.length ? screen : null),
-    T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile }),
-    T.momentStep({ level, situations, herCount: win.messages.filter(m => !m.from_fan && !m.mass).length, warmUp: WARM_UP, phase, waiting, followUp }),
+    T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, now, timeZone }),
+    T.momentStep({ level, situations, herCount: win.messages.filter(m => !m.from_fan && !m.mass).length, warmUp: WARM_UP, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
@@ -816,7 +934,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   return {
     screen, results,
     used: {
-      messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
+      messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, learned: learnedHere.length, money: !!money,
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
       selling: sell, phase, sales: sales.length, follow_up: !!followUp,
       story: sexting ? { stage: sexting.stage, ideas: sexting.ideas.length, moves: sexting.moves?.moves.length || 0, setting: sexting.moves?.where || null, scene: !!sexting.scene } : null,
@@ -888,6 +1006,64 @@ async function setFeedbackActive(orgId, creatorId, id, active) {
   if (error) throw new Error(error.message);
   lessonCache.delete(`${orgId}|${creatorId}`);
   return listFeedback(orgId, creatorId);
+}
+
+// ── Claude's score (Q49) ─────────────────────────────────────────────────────
+// Claude's watch-only checks of Practice replies (ai_checks), added up: a score per
+// day (good = 1, okay = ½, weak = 0; declined ones don't count) and the most common
+// weak points, each with a few examples. Nothing is sent anywhere.
+const CHECK_POINTS = { answers_him: 'Answering him', fits_moment: 'Fitting the moment', notes_facts: 'His notes and her facts', selling: 'Selling', lessons: 'Repeating a marked mistake' };
+const scoreOf = (c) => {
+  const n = c.good + c.okay + c.weak;
+  return n ? Math.round((100 * (c.good + c.okay / 2)) / n) : null;
+};
+async function checkScore(orgId, creatorId, { days = 7 } = {}) {
+  await pageAccount(orgId, creatorId);
+  const span = Math.min(30, Math.max(1, Math.round(Number(days) || 7)));
+  const persona = await loadPersona(orgId, creatorId);
+  const timeZone = persona?.settings?.timezone || P.DEFAULT_TZ;
+  const today = Mem.dayIn(new Date(), timeZone);
+  // from the start of the first day, in her time zone (a day's margin, then cut by day)
+  const since = new Date(Date.parse(today) - span * 86400_000).toISOString();
+  let rows;
+  try {
+    rows = await all(() => supabaseAdmin.from('ai_checks').select('id, writer, overall, points, his, her, goal, cost_usd, created_at')
+      .eq('organisation_id', orgId).eq('creator_id', creatorId).gte('created_at', since).order('created_at', { ascending: false }).order('id'));
+  } catch (e) {
+    if (/ai_checks/.test(e.message)) throw new AiChatError(FEEDBACK_MISSING, 409);
+    throw e;
+  }
+  const first = Mem.dayIn(new Date(Date.parse(today) - (span - 1) * 86400_000 + 12 * 3600_000), timeZone);
+  rows = rows.map(r => ({ ...r, day: Mem.dayIn(r.created_at, timeZone) })).filter(r => r.day >= first);
+  const blank = () => ({ checked: 0, good: 0, okay: 0, weak: 0, declined: 0 });
+  const add = (c, r) => { c.checked += 1; if (c[r.overall] != null) c[r.overall] += 1; };
+  const total = { ...blank(), cost: 0 };
+  const byDay = new Map(), byGoal = new Map(), weak = new Map();
+  for (const r of rows) {
+    add(total, r);
+    total.cost += Number(r.cost_usd) || 0;
+    if (!byDay.has(r.day)) byDay.set(r.day, blank());
+    add(byDay.get(r.day), r);
+    const g = r.goal || 'unknown';
+    if (!byGoal.has(g)) byGoal.set(g, blank());
+    add(byGoal.get(g), r);
+    for (const [k, v] of Object.entries(r.points || {})) {
+      if (v?.verdict !== 'weak' || !CHECK_POINTS[k]) continue;
+      if (!weak.has(k)) weak.set(k, { point: k, label: CHECK_POINTS[k], count: 0, examples: [] });
+      const w = weak.get(k);
+      w.count += 1;
+      if (w.examples.length < 3) w.examples.push({ note: clean(v.note), his: clean(r.his).slice(0, 300), her: r.her || [], goal: r.goal, at: r.created_at });
+    }
+  }
+  const withScore = (c) => ({ ...c, score: scoreOf(c) });
+  return {
+    days: span, today,
+    total: { ...withScore(total), cost: round(total.cost, 4) },
+    today_score: withScore(byDay.get(today) || blank()),
+    by_day: [...byDay].sort((a, b) => b[0].localeCompare(a[0])).map(([day, c]) => ({ day, ...withScore(c) })),
+    weak_points: [...weak.values()].sort((a, b) => b.count - a.count),
+    by_goal: [...byGoal].map(([goal, c]) => ({ goal, ...withScore(c) })).sort((a, b) => b.weak - a.weak || b.checked - a.checked),
+  };
 }
 
 // ── Her sexting story ────────────────────────────────────────────────────────
@@ -1039,14 +1215,16 @@ function noQuestionWhy({ recent = [], latest = [] }) {
 /**
  * What her reply's voice is checked against (safety.voiceProblems) and told
  * (prompts.replyPrompt): her last replies, his recent words and name, and
- * whether to ask anything. `latest` = his newest messages.
+ * whether to ask anything. `latest` = his newest messages, `from` = where this
+ * conversation starts (the question rule looks at this conversation only: what
+ * she asked months ago doesn't count).
  */
-function voiceFor({ chat, fan = {}, latest = [], followUp = false }) {
+function voiceFor({ chat, fan = {}, latest = [], followUp = false, from = 0 }) {
   const recent = herReplies(chat).slice(-6);
   return {
     recent, names: hisNames(chat, fan),
     his: chat.filter(m => m.from_fan).slice(-6).map(m => clean(m.text)).join('\n'),
-    noQuestion: followUp ? '' : noQuestionWhy({ recent, latest }),
+    noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), latest }),
     openers: recent.slice(-4).map(r => r.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '')).filter(Boolean),
   };
 }
@@ -1185,8 +1363,8 @@ const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower'
  * mood (the picker), how sexual her reply may get and whether she leads, and
  * examples from the agency's good chats that fit. `chat` = the messages the writer reads.
  */
-async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false, override = null }) {
-  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling);
+async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false, override = null, notes = [] }) {
+  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling, notes);
   // what if (Practice): his mood or level as you set it, instead of the planner's read
   if (override?.mood && strategy.MOODS.includes(override.mood)) plan.mood.mood = override.mood;
   if (Number.isInteger(override?.his) && override.his >= 0 && override.his <= 3) plan.mood.his = override.his;
@@ -1296,15 +1474,16 @@ async function libraryExamples(orgId, { ids = [], his = 0, max = 0, mood = null,
 
 // Which Playbook situations fit this moment (none if the picker fails: the reply
 // still has the game plan).
-async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = false) {
+// `notes` = his notes (texts): the planner also says if his latest message contradicts one.
+async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = false, notes = []) {
   try {
-    const res = await or.chat({ model: PICKER, maxTokens: 160, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money, selling }) });
+    const res = await or.chat({ model: PICKER, maxTokens: 160, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money, selling, notes }) });
     await logUsage(orgId, 'plan', res.model, res.usage, { creatorId, fanUuid });
     const j = P.parseJsonObject(res.text);
-    return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), cost: res.usage.cost || 0 };
+    return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), contradicts: strategy.readContradiction(j, notes), cost: res.usage.cost || 0 };
   } catch (e) {
     console.error('[ai-chat] situations:', e.message);
-    return { ids: [], mood: strategy.readMood(null), cost: 0 };
+    return { ids: [], mood: strategy.readMood(null), contradicts: 0, cost: 0 };
   }
 }
 
@@ -1453,8 +1632,8 @@ async function usage(orgId) {
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
-  saveFeedback, listFeedback, setFeedbackActive,
-  _test: { windowFor, moneyOf, cleanProfile, cleanFacts, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
+  saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore,
+  _test: { windowFor, moneyOf, cleanProfile, cleanFacts, sourced, madeUpNotes, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
 };

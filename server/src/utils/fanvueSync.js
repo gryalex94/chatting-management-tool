@@ -272,7 +272,12 @@ async function runFanvueSync(accountId, { full = false, attempt = 1 } = {}) {
 // Every connected account (the hourly job on the live server).
 async function syncAllFanvue() {
   const { data } = await supabaseAdmin.from('fanvue_accounts').select('id').eq('status', 'connected');
-  for (const a of data || []) await runFanvueSync(a.id);
+  for (const a of data || []) {
+    await runFanvueSync(a.id);
+    // then the AI chat's notes on fans whose conversation has ended (reads only; sends nothing)
+    try { await require('./aiChat').refreshMemories(a.id); }
+    catch (e) { console.error('[FanvueSync] notes after chats:', e.message); }
+  }
 }
 
 const fanvueProgress = (id) => running.get(id) || null;

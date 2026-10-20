@@ -15,6 +15,7 @@ const { GAME_PLAN } = require('./strategy');
 const { mediaNote, emptyBody } = require('./notes');
 const { isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW } = require('./safety');
 const { planText } = require('./plan');
+const { ago, planWhen } = require('./memory');
 
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
@@ -35,7 +36,10 @@ const GENERATE_OPTIONS = {
     { id: 'hot', label: 'Hot', hint: 'very open about sex and explicit when he wants it, still keeping every house rule' },
   ],
 };
-const FACT_KINDS = ['about', 'likes', 'avoid', 'promise', 'her'];
+// "plan": something coming up for him (or that just happened) with a day: an
+// interview, a trip, a game (`on`: YYYY-MM-DD). Every note also keeps when he
+// said it (`said_at`), so she can say "a while ago you told me…" (Q13).
+const FACT_KINDS = ['about', 'likes', 'plan', 'avoid', 'promise', 'her'];
 
 // Rules for every reply. Not editable in the tool.
 const HOUSE_RULES = [
@@ -92,7 +96,7 @@ const CHAT_GUIDE = [
   'You only know your own time. Don\'t guess his time of day or what he is doing ("up early", "up late") unless he told you.',
   'Vary how you start. Don\'t open with "hehe", "mmm" or "hey" (your worst habit), never start two replies the same way or reuse a phrase you already sent him, and once you are chatting don\'t greet him again.',
   'Emojis are rare: most replies have none, never more than one, never the same one twice in a row. No dashes (— or –), no ~, no *stars*, no lists.',
-  'Use his name rarely (at most once every few replies), only if it is in the chat or your notes, and never invent things you did or talked about together.',
+  'Use his name or a pet name (babe, baby, hun) rarely: at most once every few replies. Use his name only if it is in the chat or your notes, and never invent things you did or talked about together.',
   'Don\'t be needy or pushy. After a hot moment, be warm and personal.',
   'When he is into it and you are past the warm-up, lead: say what you are doing or would do, one step at a time like a little story, instead of asking him what he wants again and again.',
 ];
@@ -174,13 +178,28 @@ function chatLine(m, timeZone = DEFAULT_TZ) {
   return `[${m.at ? when(m.at, timeZone) : 'just now'}] ${who}: ${clean(m.text) || emptyBody(m)}${note ? ` [${note}]` : ''}`;
 }
 
-const kindLabel = { about: 'About him', likes: 'What he likes', avoid: 'Avoid', promise: 'What you promised him', her: 'What you told him about yourself' };
-function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
+const kindLabel = {
+  about: 'About him', likes: 'What he likes', plan: 'Coming up for him (or just happened)',
+  avoid: 'Never bring these up yourself (only if he wants to talk about them)', promise: 'What you promised him', her: 'What you told him about yourself (stay consistent with it)',
+};
+// His notes as the writer reads them, each with when he said it ("told you last
+// week") and, for plans, when it happens ("tomorrow", "was yesterday").
+function cardText(card = [], money = null, timeZone = DEFAULT_TZ, now = new Date()) {
   const out = [];
+  let dated = false;
   for (const kind of FACT_KINDS) {
     const facts = card.filter(f => f.kind === kind && clean(f.text));
-    if (facts.length) out.push(`${kindLabel[kind]}:\n${facts.map(f => `- ${clean(f.text)}`).join('\n')}`);
+    if (!facts.length) continue;
+    const one = (f) => {
+      const w = kind === 'plan' && f.on ? planWhen(f.on, now, timeZone) : null;
+      const said = !w && f.said_at ? ago(f.said_at, now) : '';
+      const tag = w ? w.text : said ? `${kind === 'her' || kind === 'promise' ? 'you said it' : 'he told you'} ${said}` : '';
+      if (tag) dated = true;
+      return `- ${clean(f.text)}${tag ? ` (${tag})` : ''}`;
+    };
+    out.push(`${kindLabel[kind]}:\n${facts.map(one).join('\n')}`);
   }
+  if (dated) out.push('When you bring up something he told you, never say an exact date or day: "a while ago you said…", "last time you told me…".');
   if (money?.standing?.text) out.push(money.standing.text);
   if (money) {
     const bits = [`spent $${money.spent} in total`];
@@ -201,7 +220,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  */
 function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
-  const about = cardText(card, money, timeZone);
+  const about = cardText(card, money, timeZone, now);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
   if (clean(story)) parts.push(`# Your story with him so far\n${clean(story)}`);
   parts.push(`# The chat, oldest first\n${chat.length ? chat.map(m => chatLine(m, timeZone)).join('\n') : '(No messages yet: this is the start of your chat.)'}`);
@@ -278,13 +297,19 @@ function maxLevel({ his = 0, heat = '', lead = false, match = false }) {
 }
 
 /**
- * Update what she remembers about a fan. `known` = current facts (locked ones are
- * kept word for word), `story`, `chat` = the new messages, oldest first.
+ * Update what she remembers about a fan. `known` = current notes (locked ones are
+ * kept word for word, outside the model's list), `story`, `bond` = how he treats
+ * her so far ({ warmth, why }), `chat` = the new messages, oldest first. Messages
+ * are numbered and dated, so each note says where it comes from (`from`: "K2" = a
+ * current note, "#12" = a new message) and so when he said it.
  */
-function memoryPrompt({ name, fan = {}, known = [], story = '', chat = [] }) {
+function memoryPrompt({ name, fan = {}, known = [], story = '', bond = null, chat = [], timeZone = DEFAULT_TZ, now = new Date() }) {
   const her = clean(name) || 'the creator';
   const locked = known.filter(f => f.locked), open = known.filter(f => !f.locked);
-  const list = (facts) => facts.map(f => `- (${f.kind}) ${clean(f.text)}`).join('\n');
+  const date = (iso) => new Date(iso).toLocaleDateString('en-GB', { timeZone, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const note = (f) => `(${f.kind}${f.on ? `, on ${f.on}` : ''}${f.said_at ? `, said ${date(f.said_at)}` : ''}) ${clean(f.text)}`;
+  const dated = chat.filter(m => m.at);
+  const span = dated.length ? `from ${date(dated[0].at)} to ${date(dated[dated.length - 1].at)}; today is ${date(now)}` : `today is ${date(now)}`;
   return [
     {
       role: 'system',
@@ -294,19 +319,25 @@ function memoryPrompt({ name, fan = {}, known = [], story = '', chat = [] }) {
       role: 'user',
       content: [
         `Fan: ${fan.name || 'unknown name'}`,
-        locked.length ? `Notes the manager fixed (keep these out of your list, they stay as they are):\n${list(locked)}` : '',
-        `Current notes:\n${open.length ? list(open) : '(none yet)'}`,
+        locked.length ? `Notes the manager fixed (keep these out of your list, they stay as they are):\n${locked.map(f => `- ${note(f)}`).join('\n')}` : '',
+        `Current notes:\n${open.length ? open.map((f, i) => `K${i + 1} ${note(f)}`).join('\n') : '(none yet)'}`,
+        `How he treats ${her} so far: ${bond?.warmth ? `${bond.warmth}${clean(bond.why) ? ` (${clean(bond.why)})` : ''}` : '(not rated yet)'}`,
         `Story so far:\n${clean(story) || '(none yet)'}`,
-        `New messages, oldest first:\n${chat.map(chatLine).join('\n')}`,
+        `New messages, oldest first (${span}):\n${chat.map((m, i) => `#${i + 1} ${chatLine(m, timeZone)}`).join('\n')}`,
         'Update the notes with what the new messages show. Reply with JSON only:\n'
-          + '{"facts": [{"kind": "about", "text": "..."}], "story": "..."}\n'
-          + '- kind "about": who he is (the name he likes, where he lives or his time zone, job, family situation, hobbies, routine).\n'
+          + '{"facts": [{"kind": "about", "text": "...", "from": "K1"}], "story": "...", "warmth": "warm", "warmth_why": "..."}\n'
+          + '- facts: the whole list of notes after this update: the current ones that are still true, plus what is new.\n'
+          + '- from: where each note comes from: "K3" for a current note you keep (also when you reword it), "#12" for the new message he said it in (the latest one, if he said it more than once).\n'
+          + '- When a new message contradicts a current note (he has no dog now, he moved, he changed jobs, he corrected what she remembered), keep only the new version, with "from" its message.\n'
+          + '- kind "about": who he is (the name he likes, where he lives or his time zone, job, family situation, pets, hobbies, routine) and everyday problems he shared (work stress, a breakup).\n'
           + '- kind "likes": what he enjoys talking about, how he likes to flirt, what turns him on.\n'
-          + '- kind "avoid": topics he dislikes or that upset him.\n'
+          + '- kind "plan": something coming up for him, or that just happened, on a certain day: an interview, a trip, a game, a birthday. Add "on": that day as YYYY-MM-DD when the message\'s date tells you ("tomorrow" said on Tue 13 Oct 2026 is "2026-10-14"); leave "on" out if you can\'t tell. Drop plans that were over more than 2 weeks ago.\n'
+          + '- kind "avoid": things he called a bad memory or that upset him, and topics he dislikes.\n'
           + `- kind "promise": what ${her} promised or said she would do for him.\n`
-          + `- kind "her": what ${her} told him about herself.\n`
-          + '- Keep every note that is still true, change what changed, drop what is no longer true. At most 30 notes, each under 15 words.\n'
-          + `- story: 2 to 5 sentences on how things are going between him and ${her}: running jokes, anything in progress. Under 100 words.`,
+          + `- kind "her": what ${her} told him about herself: every detail she gave (where she is, her day, her pets, her plans), so she stays consistent.\n`
+          + '- Keep every note that is still true, change what changed, drop what is no longer true. At most 40 notes, each under 15 words.\n'
+          + `- story: 2 to 5 sentences on how things are going between him and ${her}: running jokes, anything in progress. Under 100 words.\n`
+          + `- warmth: how he treats ${her}, all messages so far considered: "cold" (short, distant or rude), "normal" (friendly), "warm" (compliments, interest in her, glad to talk), "affectionate" (misses her, sweet names, talks to her like a girlfriend). warmth_why: a few words on why.`,
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -421,6 +452,19 @@ function dropName(t, name) {
   if (out === t || out.trim().split(/\s+/).length < 2) return t;
   return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
+// A pet name said to him ("babe, …", "…, babe?", "hey babe"): left out when one of
+// her last 2 replies had one (a pet name in every reply sounds scripted).
+const PETS = 'babe|baby|hun|honey|sweetie|sweetheart|darling|cutie';
+const PET_RE = new RegExp(`\\b(?:${PETS})\\b`, 'i');
+function dropPet(t) {
+  const out = t
+    .replace(new RegExp(`\\b(hey|hi|hello|aww*|oh|mm+|ok(?:ay)?|yes|night)\\s+(?:${PETS})\\b`, 'gi'), '$1')
+    .replace(new RegExp(`^\\s*(?:${PETS})\\s*[,!.…]+\\s*`, 'i'), '')
+    .replace(new RegExp(`,\\s*(?:${PETS})\\s*,`, 'gi'), ',')
+    .replace(new RegExp(`,\\s*(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '');
+  if (out === t || out.trim().split(/\s+/).length < 2) return t;
+  return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+}
 const emojisIn = (t) => String(t).match(EMOJI) || [];
 /**
  * Her messages tidied in code. `recent` = her last replies (newest last), each one
@@ -432,11 +476,13 @@ function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = true
   // never the same emoji as in her last replies
   const lately = new Set(recent.slice(-3).flatMap(emojisIn).map(e => e.replace(/️/g, '')));
   const namesLately = names.filter(n => recent.slice(-3).some(r => new RegExp(`\\b${escRe(n)}\\b`, 'i').test(r)));
+  const petLately = recent.slice(-2).some(r => PET_RE.test(r));
   return list.map((m, i) => {
     let t = String(m);
     if (i === 0 && dropOpener && HABIT_OPENER.test(t)) t = dropFirst(t, HABIT_OPENER);
     if (i === 0 && used.has(firstWord(t))) t = dropFirst(t, /^\s*[\p{L}]+[\s,.!?…]*/u);
     for (const n of namesLately) t = dropName(t, n);
+    if (petLately) t = dropPet(t);
     t = toHim(t.replace(/[‘’]/g, '\''));                  // straight apostrophes: every check reads them the same
     return t
       // the PPV card shows these: never in her text ("[PPV: c4]", "[price]")

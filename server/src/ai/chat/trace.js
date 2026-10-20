@@ -7,7 +7,17 @@
  *  - quotes: message texts (drafts), shown as they were written
  * Pure (no database, no network).
  */
+const { ago, planWhen, awayText } = require('./memory');
+
 const LEVEL_WORD = ['friendly', 'flirty', 'suggestive', 'explicit'];
+const KIND_WORD = { about: 'about him', likes: 'he likes', plan: 'his plan', avoid: 'never bring up', promise: 'she promised', her: 'she told him' };
+// when a note was said, or when his plan happens
+const noteWhen = (f, now, timeZone) => {
+  if (f.practice) return ' (learned in this practice chat)';
+  const w = f.kind === 'plan' && f.on ? planWhen(f.on, now, timeZone) : null;
+  if (w) return ` (${w.text})`;
+  return f.said_at ? ` (${ago(f.said_at, now)})` : '';
+};
 const clean = (s) => String(s ?? '').trim();
 const step = (id, title, { status = 'info', result = '', why = '', tags = [], details = [], quotes = [] } = {}) => ({
   id, title, status, result, why, tags, details: details.filter(d => d && clean(d.value)), quotes: quotes.filter(Boolean),
@@ -35,7 +45,7 @@ function safetyStep(screen) {
 }
 
 /** 2. Who he is: his tier and flags (plan.fanProfile), a made-up fan's type, or a real fan's numbers and notes. */
-function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false, profile = null }) {
+function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false, profile = null, bond = null, now = new Date(), timeZone = 'America/New_York' }) {
   const bits = [];
   if (profile) bits.push(profile.tier_label);
   if (m?.standing?.label) bits.push(m.standing.label);
@@ -44,6 +54,8 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
   const kinds = {};
   for (const f of card) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
   const flags = profile ? [profile.new_sub ? 'new subscriber' : null, profile.time_waster ? 'time waster' : null, profile.suspicious ? 'suspicious' : null].filter(Boolean) : [];
+  const close = profile?.close;
+  if (close) bits.push(close.level);
   return step('him', 'Who he is', {
     result: bits.filter(Boolean).join(' · ') || (real ? 'Nothing known about him' : 'Not set'),
     why: type?.approach || '',
@@ -51,22 +63,26 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
     details: [
       profile ? { label: 'Tier', value: `${profile.tier_label}: ${profile.tier_why}` } : null,
       flags.length ? { label: 'Marked', value: flags.join(', ') } : null,
-      profile ? { label: 'Closeness', value: `${profile.closeness} (a rough estimate from his type, spending and this chat, until his memory rates it)` } : null,
-      profile ? { label: 'Free talk budget', value: `${profile.budget.used} of ${profile.budget.limit} of her small-talk messages since his last purchase (Q26b)` } : null,
+      close ? {
+        label: 'Closeness',
+        value: close.what_if ? `${close.level} (what if)` : `${close.level}, ${close.score} of 10 points: ${close.signals.map(s => `${s.label.toLowerCase()} ${s.points > 0 ? '+' : ''}${s.points} (${s.why})`).join(' · ')}`,
+      } : null,
+      bond?.warmth ? { label: 'How he treats her', value: `${bond.warmth}${bond.why ? `: ${bond.why}` : ''} (his memory's read${bond.at ? `, ${ago(bond.at, now)}` : ''})` } : null,
+      profile ? { label: 'Free talk budget', value: `${profile.budget.used} of ${profile.budget.limit} of her small-talk messages in this conversation, since his last purchase (Q26b)` } : null,
       profile?.avg_price ? { label: 'Usually pays', value: `about $${profile.avg_price} a PPV` } : null,
       type ? { label: 'Practice type', value: type.label } : null,
       fan.name ? { label: 'Name', value: fan.name } : null,
       m?.standing?.text ? { label: 'Standing', value: m.standing.text } : null,
       m && (m.paid_messages || m.tips) ? { label: 'Buys', value: `${m.paid_messages || 0} paid message${m.paid_messages === 1 ? '' : 's'}, ${m.tips || 0} tip${m.tips === 1 ? '' : 's'}` } : null,
       card.length ? { label: 'Notes about him', value: `${card.length} (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(', ')})` } : null,
-      ...card.slice(0, 8).map(f => ({ label: `· ${f.kind}`, value: f.text })),
+      ...card.slice(-10).map(f => ({ label: `· ${KIND_WORD[f.kind] || f.kind}`, value: `${f.text}${noteWhen(f, now, timeZone)}` })),
       long && clean(story) ? { label: 'Story so far', value: clean(story).slice(0, 300) } : null,
     ],
   });
 }
 
 /** 3. The moment: the planner's read of him, and where the chat is. */
-function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false }) {
+function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null }) {
   const phaseWord = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[phase];
   return step('moment', 'The moment', {
     result: followUp ? 'He has gone quiet: she writes first'
@@ -74,6 +90,8 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
     tags: ['Planner (Ministral 8B)'],
     details: [
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
+      herHere != null ? { label: 'This conversation', value: `${herHere} of her replies so far${away ? `; he was away ${awayText(away)} before it` : ''}` } : null,
+      clash ? { label: 'Doesn\'t fit his notes', value: `his latest message contradicts "${clash}"` } : null,
       { label: 'Warm-up', value: herCount >= warmUp ? `done (${herCount} of her messages)` : `${herCount} of ${warmUp} of her messages` },
       level.since ? { label: 'Since he got sexual', value: `${level.since} of her replies` } : null,
       phaseWord ? { label: 'Selling', value: phaseWord } : null,
@@ -99,9 +117,17 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         plan.price_hint ? { label: 'Price', value: plan.price_hint } : null,
         { label: 'Questions', value: plan.ask.allowed ? plan.ask.why : `none: ${plan.ask.why}` },
         { label: 'Length', value: `${plan.length.text} (${plan.length.why})` },
+        // what memory brings to this reply, near the top
+        plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,
+        plan.callback ? { label: 'From his notes', value: `"${plan.callback.note}" (${plan.callback.ask}): ${plan.callback.why}` } : null,
+        plan.hook ? { label: 'Hook for next time', value: `"${plan.hook.note}" (${plan.hook.when})` } : null,
+        plan.back ? { label: 'Back after', value: `${plan.back}: she shows she's glad he's back (Q7)` } : null,
+        plan.opener ? { label: 'Welcome back with', value: `${{ callback: 'something from his notes', pick_up: 'where they left off', fresh: 'a fresh opener' }[plan.opener.kind]}: ${plan.opener.why}` } : null,
+        plan.tone ? { label: 'Tone', value: `${plan.tone} (from how close they are: Q16)` } : null,
         { label: 'How far she may go', value: `${plan.level.word}: ${how}. Her heat setting: ${kind}${kind === 'medium' ? ' (explicit only when he is)' : ''}.` },
+        plan.level.why ? { label: 'Flirting', value: plan.level.why } : null,
         { label: 'Leads', value: plan.lead ? 'yes: she says what she does next' : 'no: she follows him' },
-        plan.callback ? { label: 'From his notes', value: `"${plan.callback.note}": ${plan.callback.why}` } : null,
+        plan.likes?.length ? { label: 'What he likes', value: plan.likes.join('; ') } : null,
         plan.story ? { label: 'Story move', value: `"${plan.story.move}"` } : null,
         voice?.openers?.length ? { label: 'Don\'t start like', value: voice.openers.map(o => `"${o}…"`).join(', ') } : null,
         ...notes.map(n => ({ label: 'Note for her', value: n })),

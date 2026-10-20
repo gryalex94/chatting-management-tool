@@ -8,6 +8,7 @@
 const { client } = require('../agentRunner');
 const { HOUSE_RULES } = require('./prompts');
 const { mediaNote, emptyBody } = require('./notes');
+const { ago } = require('./memory');
 
 const MODEL = 'claude-haiku-5-5';
 const PRICE = [0.10, 0.50];            // $ per million tokens in / out (prompts up to 100K tokens)
@@ -164,8 +165,10 @@ async function coachCheck({ profile = {}, fan = null, card = [], plan = null, ch
   const r = await ask(
     'You coach the chat replies of an AI character on Fanvue, a subscription site for verified adults; flirting and sex talk between adults are allowed. You judge one reply against the agency\'s rules, the plan made for it and the manager\'s notes. You never rewrite it. Be specific and short.',
     `The creator: ${who || 'unknown'}\n\nWho he is: ${him}\n`
-      + `His notes: ${card.map(f => `(${f.kind}) ${f.text}`).join('; ') || 'none'}\n\n`
-      + (plan ? `The plan made for this reply: ${plan.goal_text} (because ${plan.why}). PPV: ${plan.sell.allowed ? 'allowed' : `none (${plan.sell.why})`}. Questions: ${plan.ask.allowed ? 'one at most' : `none (${plan.ask.why})`}. Length: ${plan.length.text}.${plan.callback ? ` Callback: "${plan.callback.note}".` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}\n\n` : '')
+      + `His notes: ${card.map(f => `(${f.kind}${f.on ? `, on ${f.on}` : f.said_at ? `, said ${ago(f.said_at)}` : ''}) ${f.text}`).join('; ') || 'none'}\n\n`
+      + (plan ? `The plan made for this reply: ${plan.goal_text} (because ${plan.why}). PPV: ${plan.sell.allowed ? 'allowed' : `none (${plan.sell.why})`}. Questions: ${plan.ask.allowed ? 'one at most' : `none (${plan.ask.why})`}. Length: ${plan.length.text}.`
+        + `${plan.tone ? ` Tone: ${plan.tone}.` : ''}${plan.callback ? ` Bring up from his notes: "${plan.callback.note}" (${plan.callback.ask}).` : ''}${plan.check ? ` Check with him: he just contradicted the note "${plan.check.note}".` : ''}`
+        + `${plan.hook ? ` Hook for next time: "${plan.hook.note}" (${plan.hook.when}).` : ''}${plan.back ? ` He's back after ${plan.back}.` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}\n\n` : '')
       + `The chat (oldest first, the last part):\n${chat.slice(-24).map(line).join('\n')}\n\n`
       + `Her reply:\n${messages.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n')}${ppv ? `\n[with a PPV: "${ppv.title}", $${ppv.price}, ${ppv.what}]` : ''}\n\n`
       + `The agency's rules:\n${rules.map(x => `- ${x}`).join('\n')}\n\n`

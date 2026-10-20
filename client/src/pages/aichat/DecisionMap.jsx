@@ -102,6 +102,7 @@ const CHOICES = {
   mood: { label: 'His mood', options: ['chatty', 'flirty', 'horny', 'romantic', 'joking', 'sad', 'tired', 'annoyed', 'suspicious', 'brief'].map(m => [m, m]) },
   his: { label: 'How sexual he is', options: [['0', 'friendly'], ['1', 'flirty'], ['2', 'suggestive'], ['3', 'explicit']] },
   budget: { label: 'Free talk', options: [['used', 'used up']] },
+  closeness: { label: 'How close', options: ['new', 'friendly', 'flirty', 'intimate', 'girlfriend'].map(c => [c, c]) },
 };
 const describe = (o) => Object.entries(o).map(([k, v]) => `${CHOICES[k].label.toLowerCase()}: ${CHOICES[k].options.find(x => String(x[0]) === String(v))?.[1] || v}`).join(' · ');
 
@@ -134,7 +135,7 @@ function WhatIfTry({ entry, original }) {
 }
 
 function WhatIf({ round, onWhatIf, busy }) {
-  const [pick, setPick] = useState({ tier: AS_READ, mood: AS_READ, his: AS_READ, budget: AS_READ });
+  const [pick, setPick] = useState({ tier: AS_READ, mood: AS_READ, his: AS_READ, budget: AS_READ, closeness: AS_READ });
   const overrides = Object.fromEntries(Object.entries(pick).filter(([, v]) => v !== AS_READ).map(([k, v]) => [k, k === 'his' ? Number(v) : v]));
   const any = Object.keys(overrides).length > 0;
   if (!round.body) return null;

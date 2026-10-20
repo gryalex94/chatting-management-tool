@@ -96,18 +96,25 @@ router.get('/pages/:creatorId/memory', (req, res) => res.json({ job: A.memoryJob
 // room. Only shown in the tool; nothing is sent to Fanvue.
 router.post('/pages/:creatorId/reply', async (req, res) => {
   try {
-    const { fan_uuid: fanUuid, made_up: madeUp, test, models, selling, follow_up: followUp, what_if: whatIf, plan_only: planOnly } = req.body || {};
+    const { fan_uuid: fanUuid, made_up: madeUp, test, models, selling, follow_up: followUp, what_if: whatIf, plan_only: planOnly, learned } = req.body || {};
     if (fanUuid != null && !FAN_RE.test(String(fanUuid))) return res.status(400).json({ error: 'Fan not found' });
     res.json(await A.reply(org(req), req.params.creatorId, {
       fanUuid: fanUuid || null, madeUp: madeUp && typeof madeUp === 'object' ? madeUp : null,
       test: Array.isArray(test) ? test : [], models: Array.isArray(models) ? models : [],
       selling: selling === true, followUp: followUp === true,
       whatIf: whatIf && typeof whatIf === 'object' ? whatIf : null, planOnly: planOnly === true,
+      learned: Array.isArray(learned) ? learned : [],
     }));
   } catch (e) { fail(res, e, 'draft a reply'); }
 });
 
 // ── Your marks on replies (database change 044): teaching from Practice ──────
+// GET /pages/:creatorId/checks?days=7 — Claude's checks of Practice replies, added up:
+// a score per day and the most common weak points (Q49).
+router.get('/pages/:creatorId/checks', async (req, res) => {
+  try { res.json(await A.checkScore(org(req), req.params.creatorId, { days: req.query.days })); } catch (e) { fail(res, e, 'load Claude\'s score'); }
+});
+
 // POST /pages/:creatorId/feedback { kind, step, note, better, his, her, goal, context }
 router.post('/pages/:creatorId/feedback', async (req, res) => {
   try { res.json(await A.saveFeedback(org(req), req.params.creatorId, req.user?.id, req.body || {})); } catch (e) { fail(res, e, 'save your note'); }

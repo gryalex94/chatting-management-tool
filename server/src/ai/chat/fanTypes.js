@@ -46,18 +46,21 @@ const FAN_TYPES = [
     approach: 'He chats a lot but in three months he has never bought anything or tipped (only his subscription). Keep it short and friendly: don\'t invest in long chats and give nothing away for free (no free sexting or explicit descriptions). Never cold or rude.',
   },
   {
-    id: 'returning', label: 'Back after a break', hint: 'quiet for weeks, writes again', situation: 'returns', chatSince: 100,
+    id: 'returning', label: 'Back after a break', hint: 'quiet for weeks, writes again', situation: 'returns', chatSince: 100, awayDays: 21,
     payments: (now) => [sub(now, 100), ...renewals(now, 100), ...buys(now, [20, 25, 30], 80, 28)],
     approach: 'He hasn\'t written for about three weeks; you chatted before and he bought a few things then. Welcome him back warmly and catch up for a few messages; don\'t make him feel guilty for being away.',
   },
 ];
 const byId = Object.fromEntries(FAN_TYPES.map(t => [t.id, t]));
 
-/** A made-up fan's type: { situation, approach, payments, chatSince (ISO) }, or null. */
+/** A made-up fan's type: { situation, approach, payments, chatSince (ISO), away (ms he was gone, or null) }, or null. */
 function fanType(id, now = Date.now()) {
   const t = byId[id];
   if (!t) return null;
-  return { id: t.id, label: t.label, situation: t.situation, approach: t.approach, payments: t.payments(now), chatSince: new Date(now - t.chatSince * DAY).toISOString() };
+  return {
+    id: t.id, label: t.label, situation: t.situation, approach: t.approach, payments: t.payments(now),
+    chatSince: new Date(now - t.chatSince * DAY).toISOString(), away: t.awayDays ? t.awayDays * DAY : null,
+  };
 }
 
 module.exports = { FAN_TYPES: FAN_TYPES.map(({ id, label, hint }) => ({ id, label, hint })), fanType };

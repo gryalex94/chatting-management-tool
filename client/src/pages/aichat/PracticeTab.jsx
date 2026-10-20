@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { cost, dayTime, errMsg, fanName, moneyLine, shortDay } from './shared';
 import Thumbs from './Thumbs';
 import DecisionMap from './DecisionMap';
+import ClaudeScore from './ClaudeScore';
 
 const MADE_UP = 'made-up';
 const clean = (s) => String(s ?? '').trim();
@@ -201,6 +202,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const [test, setTest] = useState([]);               // typed here: { from: 'fan' | 'her', text, label?, ppv?, scene?, roundId? }
   const [rounds, setRounds] = useState([]);           // the AI's answers: { id, at (after test[at - 1]), screen, results, used, kept }
   const [mapId, setMapId] = useState(null);           // the reply whose decision map is shown
+  const [learned, setLearned] = useState([]);         // what she learned about him from the replies kept (this chat only)
   const [models, setModels] = useState([page.writer]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -235,7 +237,8 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     const before = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const onKey = (e) => {
-      if (e.key === 'Escape' && !document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]')) onClose?.();
+      // a menu or dialog inside handles its own Esc (it marks the key as handled)
+      if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"]')) onClose?.();
     };
     window.addEventListener('keydown', onKey);
     setTimeout(() => composer.current?.focus(), 0);
@@ -244,9 +247,11 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
 
   const pick = (id) => {
     if (busy) return;
-    setFanId(id); setTest([]); setRounds([]); setMapId(null); setDetail(id === MADE_UP ? null : undefined);
+    setFanId(id); setTest([]); setRounds([]); setMapId(null); setLearned([]); setDetail(id === MADE_UP ? null : undefined);
   };
-  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); } };
+  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); setLearned([]); } };
+  // a kept reply's new facts about him join what she knows for the rest of this chat
+  const withLearned = (list, result) => [...new Set([...list, ...(result?.learned || []).map(l => l.note).filter(Boolean)])].slice(-20);
   const shown = useMemo(() => {
     const q = search.trim().toLowerCase();
     return (fans || []).filter(f => !q || [f.display_name, f.fan_username, f.fan_nickname].some(v => String(v || '').toLowerCase().includes(q)));
@@ -258,7 +263,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const blocked = !page.has_profile || !ready.writer || !ready.tables;
 
   const sells = selling && contentCount > 0;
-  const ask = async (nextTest, { followUp = false } = {}) => {
+  const ask = async (nextTest, { followUp = false, known = learned } = {}) => {
     const askedAt = Date.now();         // her timing counts from when he wrote
     setBusy(true);
     // kept with the reply, so "what if" can ask again about the same moment
@@ -266,7 +271,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       fan_uuid: real ? fanId : null,
       made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
       test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
-      models, selling: sells, follow_up: followUp,
+      models, selling: sells, follow_up: followUp, learned: known,
     };
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, body);
@@ -300,37 +305,41 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   // no reply picked for his last message: the first one that passed counts, so
   // the chat goes on from her answer (otherwise she'd never have answered)
   const withKept = () => {
-    let next = [...test];
+    let next = [...test], known = learned;
     const last = rounds[rounds.length - 1];
     if (last && !last.kept && last.at === test.length) {
       const first = (last.results || []).find(r => ['ok', 'check'].includes(r.status) && r.replies.length);
       if (first) {
         next = [...next, ...keptMessages(first, last.id)];
+        known = withLearned(learned, first);
+        setLearned(known);
         setRounds(rs => rs.map(r => (r === last ? { ...r, kept: first.model } : r)));
       }
     }
-    return next;
+    return { next, known };
   };
   const send = () => {
     const t = text.trim();
     if (!t || busy || blocked) return;
-    const next = [...withKept(), { from: 'fan', text: t }];
+    const kept = withKept();
+    const next = [...kept.next, { from: 'fan', text: t }];
     setTest(next);
     setText('');
-    ask(next);
+    ask(next, { known: kept.known });
   };
   // she writes without a new message from him (he went quiet, or just bought)
   const followUp = () => {
     if (busy || blocked) return;
-    const next = withKept();
+    const { next, known } = withKept();
     setTest(next);
-    ask(next, { followUp: true });
+    ask(next, { followUp: true, known });
   };
   // what he did with her PPV (the practice room plays him)
   const setPpv = (i, status, speed = null) => setTest(t => t.map((m, k) => (k === i ? { ...m, ppv: { ...m.ppv, status, speed } } : m)));
   const lastPpvAt = test.map(m => !!m.ppv).lastIndexOf(true);
   const keep = (round, result) => {
     setTest(t => [...t, ...keptMessages(result, round.id)]);
+    setLearned(l => withLearned(l, result));
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
   };
   // keep the newest message in view while her messages arrive one by one
@@ -390,7 +399,8 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           </div>
           <div className='grid gap-1.5'>
             <Label htmlFor='mu-notes'>What she knows about him</Label>
-            <Textarea id='mu-notes' rows={2} value={madeUp.notes} onChange={e => setMadeUp(m => ({ ...m, notes: e.target.value }))} placeholder='34, truck driver from Texas, has a dog called Max' disabled={test.length > 0} className='min-h-0 resize-none' />
+            <Textarea id='mu-notes' rows={2} value={madeUp.notes} onChange={e => setMadeUp(m => ({ ...m, notes: e.target.value }))} placeholder='34, truck driver from Texas, has a dog called Max, job interview tomorrow' disabled={test.length > 0} className='min-h-0 resize-none' />
+            <span className='text-xs text-muted-foreground'>One note per comma. &quot;Interview tomorrow&quot; or &quot;a date yesterday&quot; become plans with a day.</span>
           </div>
           {test.length > 0 && <span className='text-xs text-muted-foreground'>Start over to change him.</span>}
         </div>
@@ -402,6 +412,13 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='text-xs text-muted-foreground'>{detail.memory ? `${detail.memory.facts.length} notes in memory${detail.memory.built_at ? ` (${shortDay(detail.memory.built_at)})` : ''}` : 'No memory yet (Fan memory tab)'}</span>
         </div>
       ))}
+      {learned.length > 0 && (
+        <div className='flex flex-col gap-1 rounded-md border border-dashed p-2.5'>
+          <span className='text-xs font-medium'>She learned in this chat</span>
+          <ul className='list-disc ps-4 text-xs text-muted-foreground'>{learned.map(l => <li key={l}>{l}</li>)}</ul>
+          <span className='text-[11px] text-muted-foreground'>Used for the rest of this practice chat only; never saved to his memory.</span>
+        </div>
+      )}
     </div>
   );
   // the real fans to pick from
@@ -527,6 +544,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
             <span className='truncate text-sm text-muted-foreground'>{page.name} · with {fanLabel} · nothing is sent to Fanvue</span>
           </div>
           <div className='flex items-center gap-2'>
+            {open && <ClaudeScore creatorId={page.creator_id} version={rounds.length} />}
             {(test.length > 0 || rounds.length > 0) && <Button size='sm' variant='ghost' onClick={startOver} disabled={busy}><RotateCcw />Start over</Button>}
             <Button size='icon' variant='ghost' onClick={onClose} aria-label='Close practice'><X /></Button>
           </div>

@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
-import { cost, dayTime, errMsg, fanName, KINDS, moneyLine, shortDay } from './shared';
+import { agoText, cost, dayTime, errMsg, fanName, KINDS, moneyLine, shortDay } from './shared';
 
 const status = (f) => (!f.memory ? { label: 'no memory', tone: 'text-muted-foreground' }
   : f.memory.behind ? { label: 'new messages since', tone: 'text-warn' }
@@ -19,9 +19,10 @@ const status = (f) => (!f.memory ? { label: 'no memory', tone: 'text-muted-foreg
 function MemoryEditor({ detail, busy, onSave, onBuild }) {
   const [facts, setFacts] = useState(() => (detail.memory?.facts || []).map(f => ({ ...f })));
   const [summary, setSummary] = useState(detail.memory?.summary || '');
-  const savedFacts = JSON.stringify((detail.memory?.facts || []).map(({ kind, note, locked }) => ({ kind, note, locked: !!locked })));
-  const dirty = summary !== (detail.memory?.summary || '') || JSON.stringify(facts.map(({ kind, note, locked }) => ({ kind, note, locked: !!locked }))) !== savedFacts;
+  const shape = (list) => JSON.stringify(list.map(({ kind, note, locked, on }) => ({ kind, note, locked: !!locked, on: on || null })));
+  const dirty = summary !== (detail.memory?.summary || '') || shape(facts) !== shape(detail.memory?.facts || []);
   const change = (i, patch) => setFacts(fs => fs.map((f, j) => (j === i ? { ...f, ...patch } : f)));
+  const bond = detail.memory?.bond;
 
   return (
     <div className='flex flex-col gap-4'>
@@ -32,6 +33,7 @@ function MemoryEditor({ detail, busy, onSave, onBuild }) {
             {moneyLine(detail.money)} (Fanvue&apos;s numbers) · {detail.total} messages
             {detail.memory?.built_at ? ` · memory updated ${dayTime(detail.memory.built_at)}` : ''}{detail.memory?.edited_at ? ` · corrected ${dayTime(detail.memory.edited_at)}` : ''}
           </p>
+          {bond?.warmth && <p className='text-xs text-muted-foreground'>How he treats her: <span className='text-foreground'>{bond.warmth}</span>{bond.why ? ` (${bond.why})` : ''}. Part of how close they are.</p>}
         </div>
         <div className='flex flex-wrap gap-2'>
           <Button size='sm' variant='outline' onClick={() => onBuild(false)} disabled={!!busy}>
@@ -49,11 +51,17 @@ function MemoryEditor({ detail, busy, onSave, onBuild }) {
         <div key={kind} className='flex flex-col gap-1.5'>
           <div className='flex items-center justify-between'>
             <Label>{label}</Label>
-            <Button size='sm' variant='ghost' className='h-7' onClick={() => setFacts(fs => [...fs, { id: null, kind, note: '', locked: true }])}><Plus />Add</Button>
+            <Button size='sm' variant='ghost' className='h-7' onClick={() => setFacts(fs => [...fs, { id: null, kind, note: '', locked: true, on: null }])}><Plus />Add</Button>
           </div>
           {facts.map((f, i) => f.kind === kind && (
             <div key={f.id || `new-${i}`} className='flex items-center gap-1.5'>
               <Input value={f.note} onChange={e => change(i, { note: e.target.value, locked: true })} aria-label={`${label} note`} className='h-8' />
+              {kind === 'plan' && (
+                <Input type='date' value={f.on || ''} onChange={e => change(i, { on: e.target.value || null, locked: true })} aria-label='The day it happens' title='The day it happens' className='h-8 w-36 shrink-0' />
+              )}
+              <span className='hidden w-24 shrink-0 text-[11px] text-muted-foreground sm:inline' title={f.said_at ? `He said it ${dayTime(f.said_at)}` : 'No date yet'}>
+                {f.said_at ? agoText(f.said_at) : ''}
+              </span>
               <Button size='icon' variant='ghost' className='size-8 shrink-0' onClick={() => change(i, { locked: !f.locked })}
                 aria-label={f.locked ? 'Unlock: the AI may change this note' : 'Lock: the AI keeps this note as it is'} title={f.locked ? 'Locked: the AI keeps it as it is' : 'The AI may update this'}>
                 {f.locked ? <Lock className='text-primary' /> : <LockOpen className='text-muted-foreground' />}
@@ -72,7 +80,7 @@ function MemoryEditor({ detail, busy, onSave, onBuild }) {
       </div>
 
       <div className='flex items-center justify-between gap-2'>
-        <span className='text-xs text-muted-foreground'>Notes you add or change are locked, so the AI won&apos;t overwrite them.</span>
+        <span className='text-xs text-muted-foreground'>Notes you add or change are locked, so the AI won&apos;t overwrite them. New messages update the notes by themselves about half an hour after a chat goes quiet.</span>
         <Button onClick={() => onSave(facts, summary)} disabled={!dirty || !!busy}>{busy === 'save' ? 'Saving…' : dirty ? 'Save' : 'Saved'}</Button>
       </div>
     </div>
@@ -135,7 +143,7 @@ export default function MemoryTab({ page, ready, onSpent }) {
     setBusy('save');
     try {
       const { data } = await api.put(`/api/ai-chat/pages/${page.creator_id}/fans/${fanId}/memory`, {
-        facts: facts.filter(f => f.note.trim()).map(f => ({ id: f.id, kind: f.kind, note: f.note, locked: !!f.locked })), summary,
+        facts: facts.filter(f => f.note.trim()).map(f => ({ id: f.id, kind: f.kind, note: f.note, locked: !!f.locked, on: f.kind === 'plan' ? f.on || null : null })), summary,
       });
       setDetail(data);
       toast.success('Memory saved');
