@@ -59,7 +59,7 @@ function screenFan(texts) {
   }
   const notes = [];
   if (has(ASKS_REAL, all)) notes.push('He is asking whether you are real. Answer honestly that you are an AI character, warmly and in your own style, then keep chatting.');
-  if (has(WANTS_MEET, all)) notes.push('He wants to meet, call or talk somewhere else. Say no kindly and playfully: you only chat here on Fanvue. Never share contact details.');
+  if (has(WANTS_MEET, all)) notes.push('He wants to meet, call or talk somewhere else. Never a yes and never a flat no: playful and open-ended ("who knows, maybe one day if you keep being this sweet", "I need more time for decisions like that", "I got hurt before by being naive, so I take my time"). Never a plan, a place or a time; if he pushes, "for now I\'m all yours here". Never share contact details, and if he asks outright whether you\'re real, say honestly you\'re an AI character.');
   if (has(WANTS_STOP, all)) notes.push('He wants you to stop. Respect it: a short, kind goodbye, no flirting, no questions.');
   if (has(WANTS_MEDIA, all)) notes.push('He wants a photo, video or voice note. You can\'t send any here: tease and keep chatting, and never promise one.');
   if (has(UNDER_18, all)) {
@@ -124,7 +124,7 @@ const PROMISES_SHOW = /\b(?:how\s+about\s+i\s+(?:show|send|give)|let\s+me\s+(?:s
  * go out now (then she mustn't promise one either). `voice`: what her reply is
  * checked against for how it sounds (see voiceProblems); returned as `style`.
  */
-function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, selling = false, offering = false, noOffer = '', voice = null } = {}) {
+function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, selling = false, offering = false, noOffer = '', voice = null, maxChars = MAX_CHARS } = {}) {
   const list = (messages || []).map(m => String(m || '').trim()).filter(Boolean);
   if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'], style: [] };
   const all = straight(list.join('\n'));
@@ -144,7 +144,7 @@ function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, sel
   if (has(LIVE_CLAIM, all)) block.push('It says she is making or filming something right now. Her content is already made.');
   if (selling && !offering && noOffer && has(PROMISES_SHOW, all)) block.push(`It promises to show or send him something, but no PPV can go with it now: ${noOffer}`);
   if (list.length > MAX_MESSAGES) block.push(`It has ${list.length} messages; the most is ${MAX_MESSAGES}.`);
-  if (list.some(m => m.length > MAX_CHARS)) block.push('A message is too long for a chat.');
+  if (list.some(m => m.length > maxChars)) block.push('A message is too long for a chat.');
   if (list.some(m => LOOKS_LIKE_CODE.test(m))) block.push('It came out as code (brackets, quotes or "messages"), not a chat message.');
   if (chatting && GREETS.test(list[0])) block.push('It greets him again, but you are already chatting.');
   if (replyLevel(all) >= 2 && replyLevel(all) > maxLevel + (offering ? 1 : 0)) block.push(`It is more sexual than he is right now: keep it ${['friendly, no flirting', 'flirty at most, nothing sexual', 'suggestive at most, nothing explicit'][maxLevel]}.`);

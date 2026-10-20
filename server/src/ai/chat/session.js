@@ -218,6 +218,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     aim, aim_text: AIMS[aim], why, warm_up: WARM_UP[profile.closeness] ?? WARM_UP.new, closeness: profile.closeness,
     started_at: now.toISOString(), mood: null, lighter: 0, no_sell: '', changes: [],
     mood_day, event: pickEvent({ profile, aim, mood: mood_day, newItem, rand }), diary_add: [],
+    pending: null, service: null, roleplay: null, custom_asked: 0,
   };
 }
 
@@ -232,6 +233,17 @@ function resumeSession(s) {
     mood_day: clean(s.mood_day).slice(0, 80),
     event: s.event && EVENTS[s.event.kind] ? { kind: s.event.kind, ...EVENTS[s.event.kind], text: clean(s.event.text).slice(0, 300) || EVENTS[s.event.kind].text, item: clean(s.event.item).slice(0, 120) || undefined, done: s.event.done === true } : null,
     diary_add: Array.isArray(s.diary_add) ? s.diary_add.map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-20) : [],
+    // paid requests (services.js, D1–D4): an unusual ask waiting for a manager, a service offered or paid, a roleplay going on
+    pending: s.pending && typeof s.pending === 'object' && ['hesitant', 'waiting', 'approved', 'refused'].includes(s.pending.state)
+      ? { text: clean(s.pending.text).slice(0, 300), what: clean(s.pending.what).slice(0, 80), exchanges: Number.isInteger(s.pending.exchanges) ? s.pending.exchanges : 0, state: s.pending.state, terms: clean(s.pending.terms).slice(0, 300), id: Number.isInteger(s.pending.id) ? s.pending.id : null }
+      : null,
+    service: s.service && typeof s.service === 'object' && clean(s.service.kind) && ['offered', 'paid', 'delivered'].includes(s.service.state)
+      ? { kind: clean(s.service.kind), label: clean(s.service.label).slice(0, 60), price: Math.max(0, Math.round(Number(s.service.price) || 0)), state: s.service.state, tip: Math.max(0, Math.round(Number(s.service.tip) || 0)) }
+      : null,
+    roleplay: s.roleplay && typeof s.roleplay === 'object' && s.roleplay.on === true
+      ? { on: true, tip: Math.max(0, Math.round(Number(s.roleplay.tip) || 0)), total: Math.max(1, Math.round(Number(s.roleplay.total) || 250)), exchanges: Number.isInteger(s.roleplay.exchanges) ? s.roleplay.exchanges : 0 }
+      : null,
+    custom_asked: Number.isInteger(s.custom_asked) ? s.custom_asked : 0,
   };
 }
 

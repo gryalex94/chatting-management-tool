@@ -58,12 +58,12 @@ function mediaNote(m) {
     return `${what}, free`;
   }
   if (m.paid) return `paid message, he bought it for $${m.paid}`;
-  if (m.tip) return 'tip';
+  if (m.tip) return m.tip_amount ? `tip of $${m.tip_amount}` : 'tip';
   return '';
 }
 
 /** What a message shows when it has no text. */
-const emptyBody = (m) => (m.gif ? '(a gif)' : mediaWhat(m.media) ? `(${mediaWhat(m.media)})` : '(a photo or video)');
+const emptyBody = (m) => (m.gif ? '(a gif)' : m.tip ? '(a tip)' : mediaWhat(m.media) ? `(${mediaWhat(m.media)})` : '(a photo or video)');
 
 /**
  * Where he stood with her at `at` (ms, default now), from his subscription

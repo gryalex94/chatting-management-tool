@@ -122,6 +122,20 @@ router.post('/pages/:creatorId/media', lookUpload.single('file'), async (req, re
   } catch (e) { fail(res, e, 'look at the file'); }
 });
 
+// Services and requests (D1–D9): what she sells besides PPVs, and fans' requests a manager decides on.
+router.get('/pages/:creatorId/services', async (req, res) => {
+  try { res.json(await A.getServices(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her services'); }
+});
+router.put('/pages/:creatorId/services', async (req, res) => {
+  try { res.json(await A.saveServices(org(req), req.params.creatorId, req.body || {})); } catch (e) { fail(res, e, 'save her services'); }
+});
+router.get('/pages/:creatorId/requests', async (req, res) => {
+  try { res.json(await A.listRequests(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load the requests'); }
+});
+router.patch('/pages/:creatorId/requests/:id', async (req, res) => {
+  try { res.json(await A.decideRequest(org(req), req.params.creatorId, req.params.id, { status: req.body?.status, terms: req.body?.terms })); } catch (e) { fail(res, e, 'decide the request'); }
+});
+
 // Her diary (B9): what she has told fans about herself, the same for everyone.
 router.get('/pages/:creatorId/diary', async (req, res) => {
   try { res.json(await A.diary(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her diary'); }

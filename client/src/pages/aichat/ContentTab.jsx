@@ -96,6 +96,85 @@ function Vault({ page }) {
  * truthfully, and when he asks for something that isn't here, says so and offers
  * the closest item. "Her vault" shows every file and where it is.
  */
+// Services (D1–D4) and requests (D1, D8, D9): what she sells besides PPVs, paid by a tip
+// first, with a base price the manager sets; and fans' requests the AI couldn't decide.
+const REQUEST_STATUS = { pending: ['Waiting for you', 'text-warn'], approved: ['Approved', 'text-good'], refused: ['Refused', 'text-muted-foreground'], noted: ['Missing content, noted', 'text-muted-foreground'] };
+function Services({ page }) {
+  const [data, setData] = useState(null);
+  const [form, setForm] = useState(null);
+  const [requests, setRequests] = useState(null);
+  const [busy, setBusy] = useState('');
+  const [terms, setTerms] = useState({});
+  const url = `/api/ai-chat/pages/${page.creator_id}`;
+  useEffect(() => {
+    api.get(`${url}/services`).then(r => { setData(r.data); setForm({ services: r.data.services, session_total: r.data.session_total }); }).catch(e => toast.error(errMsg(e, 'Could not load her services')));
+    api.get(`${url}/requests`).then(r => setRequests(r.data.requests)).catch(() => setRequests([]));
+  }, [url]);
+  const save = async () => {
+    setBusy('save');
+    try { const { data: d } = await api.put(`${url}/services`, form); setData(d); setForm({ services: d.services, session_total: d.session_total }); toast.success('Services saved'); }
+    catch (e) { toast.error(errMsg(e, 'Could not save')); }
+    finally { setBusy(''); }
+  };
+  const decide = async (r, status) => {
+    setBusy(`r${r.id}`);
+    try { const { data: d } = await api.patch(`${url}/requests/${r.id}`, { status, terms: terms[r.id] || '' }); setRequests(d.requests); }
+    catch (e) { toast.error(errMsg(e, 'Could not save your decision')); }
+    finally { setBusy(''); }
+  };
+  if (!form) return <Skeleton className='h-40 w-full' />;
+  const dirty = JSON.stringify(form) !== JSON.stringify({ services: data.services, session_total: data.session_total });
+  const set = (k, patch) => setForm(f => ({ ...f, services: { ...f.services, [k]: { ...f.services[k], ...patch } } }));
+  return (
+    <div className='flex flex-col gap-5'>
+      <div className='flex flex-col gap-3 rounded-lg border p-4'>
+        <div className='flex flex-col gap-1'>
+          <p className='text-sm font-medium'>Services she sells, paid by a tip first</p>
+          <p className='max-w-2xl text-xs text-muted-foreground'>When he asks for one, she says yes, names the price and asks him to tip it; she delivers once the tip is in. The price is what he usually pays for a PPV, never below the base here. The one time she asks for a tip.</p>
+        </div>
+        <div className='grid gap-2 sm:grid-cols-2'>
+          {Object.entries(form.services).map(([k, s]) => (
+            <div key={k} className='flex items-center justify-between gap-3 rounded-md border px-3 py-2'>
+              <label className='flex min-w-0 items-center gap-2 text-sm'>
+                <Checkbox checked={s.on} onCheckedChange={v => set(k, { on: v === true })} aria-label={s.label} />
+                <span className='flex flex-col'><span>{s.label}</span><span className='text-xs text-muted-foreground'>{s.what}</span></span>
+              </label>
+              <label className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'>from $<Input type='number' min='1' value={s.min} onChange={e => set(k, { min: e.target.value })} className='h-8 w-20' aria-label={`${s.label}: base price`} /></label>
+            </div>
+          ))}
+        </div>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <label className='flex items-center gap-2 text-sm'>A full roleplay session is worth about $<Input type='number' min='1' value={form.session_total} onChange={e => setForm(f => ({ ...f, session_total: e.target.value }))} className='h-8 w-24' aria-label='Roleplay session total' /><span className='text-xs text-muted-foreground'>his pre-tip counts toward it, so PPVs inside cost less</span></label>
+          <Button onClick={save} disabled={!dirty || !!busy}>{busy === 'save' ? 'Saving…' : dirty ? 'Save' : 'Saved'}</Button>
+        </div>
+      </div>
+      <div className='flex flex-col gap-2 rounded-lg border p-4'>
+        <p className='text-sm font-medium'>Requests the AI couldn&apos;t decide</p>
+        <p className='max-w-2xl text-xs text-muted-foreground'>An unusual request: she hesitated, then the conversation waits for your yes or no, with your terms. Visual content she doesn&apos;t have: noted here as missing content.</p>
+        {requests === null ? <Skeleton className='h-10 w-full' /> : !requests.length ? <p className='text-xs text-muted-foreground'>Nothing yet.</p> : (
+          <ul className='flex flex-col gap-2'>
+            {requests.map(r => (
+              <li key={r.id} className='flex flex-col gap-1.5 rounded-md border px-3 py-2 text-sm'>
+                <div className='flex flex-wrap items-baseline justify-between gap-2'>
+                  <span className='min-w-0'>{r.kind === 'content' ? 'Content: ' : 'Service: '}{r.text}</span>
+                  <span className={cn('text-xs', REQUEST_STATUS[r.status]?.[1])}>{REQUEST_STATUS[r.status]?.[0] || r.status}{r.terms ? ` · ${r.terms}` : ''} · {new Date(r.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' })}{r.source === 'practice' ? ' · practice' : ''}</span>
+                </div>
+                {r.status === 'pending' && (
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <Input value={terms[r.id] || ''} onChange={e => setTerms(t => ({ ...t, [r.id]: e.target.value }))} placeholder='Your terms (a price, what exactly), or why not' className='h-8 flex-1 min-w-48' aria-label='Terms' />
+                    <Button size='sm' variant='outline' className='h-8' onClick={() => decide(r, 'approved')} disabled={busy === `r${r.id}`}>Approve</Button>
+                    <Button size='sm' variant='outline' className='h-8' onClick={() => decide(r, 'refused')} disabled={busy === `r${r.id}`}>Refuse</Button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ContentTab({ page, onChanged }) {
   const [data, setData] = useState(null);               // { ready, items, options }
   const [form, setForm] = useState(null);               // the item being added or changed
@@ -175,12 +254,13 @@ export default function ContentTab({ page, onChanged }) {
         </div>
       )}
       <div className='flex gap-1 self-start rounded-md bg-muted p-1'>
-        {[['items', `What she sells (${data.items.length})`], ['vault', 'Her vault: what is where']].map(([k, l]) => (
+        {[['items', `What she sells (${data.items.length})`], ['vault', 'Her vault: what is where'], ['services', 'Services and requests']].map(([k, l]) => (
           <button key={k} type='button' onClick={() => setView(k)} aria-pressed={view === k}
             className={cn('rounded px-3 py-1 text-sm', view === k ? 'bg-background shadow-sm' : 'text-muted-foreground')}>{l}</button>
         ))}
       </div>
       {view === 'vault' && <Vault page={page} />}
+      {view === 'services' && <Services page={page} />}
 
       {form && (
         <div className='flex flex-col gap-4 rounded-lg border border-primary/40 p-4'>

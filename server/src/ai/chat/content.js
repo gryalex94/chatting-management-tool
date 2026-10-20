@@ -124,7 +124,8 @@ function contentText(items) {
  * open }: open = still waiting for him, so no new one yet), `level` = { his, max },
  * `warm` = past the warm-up. Returns { item, price } or { problem }.
  */
-function checkOffer({ ppv, items, offered = [], level, warm }) {
+// `lowestShare`: inside a paid roleplay, PPVs may go down to this share of the list price (D4).
+function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null }) {
   const id = Number(String(ppv?.item || '').replace(/^c/i, ''));
   const item = items.find(it => it.id === id && it.active !== false);
   if (!item) return { problem: 'It attached content that isn\'t in her content list. Only offer what\'s in the list; if nothing fits, say so and offer the closest item.' };
@@ -142,7 +143,8 @@ function checkOffer({ ppv, items, offered = [], level, warm }) {
   }
   if (levelOf(item) > (level?.max ?? 0) + 1) return { problem: `"${item.title}" is ${LEVEL_WORD[levelOf(item)]}: far spicier than the chat is now. Build it up first, or offer something softer.` };
   const price = Number(ppv.price) || Number(item.price);
-  if (price < lowest(item)) return { problem: `${money(price)} is below the lowest price for "${item.title}" (${money(lowest(item))}).` };
+  const floor = lowestShare ? Math.min(lowest(item), Math.round(Number(item.price) * lowestShare)) : lowest(item);
+  if (price < floor) return { problem: `${money(price)} is below the lowest price for "${item.title}" (${money(floor)}).` };
   if (price > Number(item.price) * 1.2) return { problem: `${money(price)} is more than "${item.title}" costs (${money(item.price)}).` };
   return { item, price: Math.round(price * 100) / 100 };
 }

@@ -18,6 +18,7 @@ const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
 const fv = require('../integrations/fanvue');
 const V = require('../ai/chat/vision');
+const Sv = require('../ai/chat/services');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, coachCheck, MODEL: CHECK_MODEL } = require('../ai/chat/review');
@@ -349,11 +350,14 @@ async function lookAt(orgId, creatorId, { buffer, mimetype = '', name = '' }) {
 // A fan's messages as the writer reads them: each with what came with it and,
 // for a paid message, when he bought it.
 function chatOf(rows, earn, media, fanUuid) {
-  const paid = {};
-  for (const e of earn) if (e.source === 'message' && e.message_uuid) paid[e.message_uuid] = { amount: (e.gross_cents || 0) / 100, at: e.paid_at };
+  const paid = {}, tips = {};
+  for (const e of earn) {
+    if (e.source === 'message' && e.message_uuid) paid[e.message_uuid] = { amount: (e.gross_cents || 0) / 100, at: e.paid_at };
+    if (e.source === 'tip' && e.message_uuid) tips[e.message_uuid] = (tips[e.message_uuid] || 0) + Math.abs(e.gross_cents || 0) / 100;
+  }
   return rows.map(m => ({
     uuid: m.uuid, at: m.sent_at, from_fan: m.from_fan, text: m.text || '', type: m.type,
-    mass: !m.from_fan && isMass(m.type), tip: m.type === 'TIP', gif: !!m.gif,
+    mass: !m.from_fan && isMass(m.type), tip: m.type === 'TIP' || !!tips[m.uuid], tip_amount: tips[m.uuid] ? Math.round(tips[m.uuid]) : null, gif: !!m.gif,
     paid: paid[m.uuid]?.amount || null, paid_at: paid[m.uuid]?.at || null, media: media[`${fanUuid}|${m.uuid}`] || null,
   }));
 }
@@ -916,8 +920,10 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       };
       m.media = { photos: seen.video ? 0 : 1, videos: seen.video ? 1 : 0, other: 0, price: null, bought_at: null, seen: [seen] };
     }
+    // a tip he sent (the practice room plays him): "[tip of $25]"
+    if (m.from_fan && Number(t?.tip) > 0) { m.tip = true; m.tip_amount = Math.round(Number(t.tip)); }
     return m;
-  }).filter(t => t.text || t.media);
+  }).filter(t => t.text || t.media || t.tip);
   // a real fan's photos and videos not looked at yet, in his latest messages (C1): seen now
   if (fanUuid && chat.slice(-12).some(m => m.from_fan && m.media?.unseen?.length)) await describeFanMedia(orgId, creatorId, account.id, fanUuid, chat.slice(-12));
   const convo = [...chat, ...typed];
@@ -926,7 +932,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const latestMsgs = convo.slice(lastHer + 1).filter(m => m.from_fan);
   const latest = latestMsgs.map(m => m.text).filter(Boolean);
   const latestSeen = latestMsgs.flatMap(m => m.media?.seen || []);        // what his newest photos or videos showed
-  if (!latest.length && !latestSeen.length && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
+  const latestTip = latestMsgs.reduce((s, m) => s + (m.tip_amount || 0), 0);
+  if (!latest.length && !latestSeen.length && !latestTip && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
   // this conversation: since the last pause of 6 hours or more (memory.js)
   const talk = Mem.conversation(convo);
   if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
@@ -968,6 +975,36 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const turn = S.nextTurn(session, { read: level.mood, said: latest.join(' '), suspicious: first.suspicious || level.mood === 'suspicious', timeWaster: first.time_waster });
   session = turn.session;
   level.mood = turn.mood;
+  // paid requests, refusals and unusual asks (services.js, D1–D9), and what they change in the session
+  const services = Sv.servicesOf(persona.settings);
+  const lastSeen = [...convo.slice(talk.start)].reverse().flatMap(m => (m.from_fan ? m.media?.seen || [] : [])).find(s => s.description && !s.flagged) || null;
+  let request = latest.length || latestSeen.length ? Sv.requestOf(latest.join(' '), { media: latestSeen, services }) : null;
+  // she asked what custom content he'd want exactly: his next message is the answer (D8, step 2)
+  if (!request && session.custom_asked === 1 && latest.length) request = { kind: 'custom', what: latest.join(' ').slice(0, 120), described: true };
+  if (request && services[request.kind]) request.price = Sv.priceFor(request.kind, { services, avgPrice: first.avg_price });
+  let requestRow = null;
+  const noteRequest = async (kind, text, status) => {
+    try {
+      const { data } = await supabaseAdmin.from('ai_requests').insert({ organisation_id: orgId, creator_id: creatorId, fan_uuid: fanUuid, source: 'practice', kind, text: clean(text).slice(0, 500), status }).select('id').single();
+      return data?.id || null;
+    } catch { return null; }
+  };
+  session = { ...session, pending: session.pending ? { ...session.pending } : null, service: session.service ? { ...session.service } : null, roleplay: session.roleplay ? { ...session.roleplay } : null };
+  if (!whatIf) {
+    if (request?.kind === 'unknown' && !session.pending) session.pending = { text: latest.join(' ').slice(0, 300), what: request.what, exchanges: 0, state: 'hesitant', terms: '', id: null };
+    else if (session.pending?.state === 'hesitant' && latest.length) {
+      session.pending.exchanges += 1;
+      if (session.pending.exchanges >= 2) { session.pending.state = 'waiting'; if (!planOnly) requestRow = session.pending.id = await noteRequest('service', `${session.pending.what}: ${session.pending.text}`, 'pending'); }
+    }
+    if (request && services[request.kind] && !session.service) session.service = { kind: request.kind, label: services[request.kind].label, price: request.price, state: 'offered', tip: 0 };
+    if (session.service?.state === 'offered' && latestTip > 0) { session.service.tip += latestTip; if (Sv.covers(session.service.tip, session.service.price)) session.service.state = 'paid'; }
+    if (session.roleplay?.on && latest.length) session.roleplay.exchanges += 1;
+  }
+  // an unusual request after her hesitation: the conversation stops until a manager decides (D1)
+  if (session.pending?.state === 'waiting') {
+    const screenWait = { action: 'wait', reasons: [`He asked for something not in her menu ("${session.pending.what}"). She said nothing more: the conversation waits for your decision, then goes on with your terms (D1).`], notes: [], review: null };
+    return { screen: screenWait, results: [], used: { trace: [T.safetyStep(screenWait)], session, request_id: session.pending.id || requestRow } };
+  }
   // an explicit photo or video of him counts as explicit, whatever his words were (C4)
   const seenLevel = latestSeen.some(s => s.sexual === 'explicit') ? 3 : latestSeen.some(s => s.sexual === 'suggestive') ? 2 : 0;
   if (seenLevel > level.his) { level.his = seenLevel; level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match }); }
@@ -999,8 +1036,20 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
-    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen,
+    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
   });
+  // what this reply settles: a service delivered (a roleplay starts), a manager's decision used
+  if (!whatIf) {
+    if (replyPlan.goal === 'service_deliver' && session.service) {
+      session.service.state = 'delivered';
+      if (session.service.kind === 'roleplay') session.roleplay = { on: true, tip: session.service.tip, total: Math.max(session.service.tip, Number(persona.settings?.services?.session_total) || 250), exchanges: 0 };
+    }
+    if (['request_approved', 'request_refused'].includes(replyPlan.goal)) session.pending = null;
+    if (replyPlan.goal === 'custom_content') {
+      session.custom_asked = (session.custom_asked || 0) + 1;
+      if (session.custom_asked === 2 && !planOnly) await noteRequest('content', latest.join(' '), 'noted');   // missing content, for you (Q38)
+    }
+  }
   if (replyPlan.event && session.event) session = { ...session, event: { ...session.event, done: true } };   // her moment is used once
   // the plan is enforced: no PPV (nor a promise of one) when it says so, no question when it says so, his length mirrored
   if (sell && !replyPlan.sell.allowed && !noOffer) noOffer = replyPlan.sell.why;
@@ -1034,7 +1083,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const speed = persona.settings?.typing || 'normal';
   const emojis = persona.settings?.emojis || 'rarely';
   const results = await Promise.all(writers.map(model => writeOne({
-    orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sell ? { items: content, offered } : null,
+    orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sell ? { items: content, offered, lowestShare: session.roleplay?.on ? 0.3 : null } : null,
   })));
   // 4. Claude's watch-only check of each reply (Practice): never blocks or rewrites; kept for a daily score
   await Promise.all(results.map(async (r) => {
@@ -1164,6 +1213,42 @@ async function loadDiary(orgId, creatorId, accountId, persona) {
   diaryCache.set(key, { at: Date.now(), list });
   return list;
 }
+// ── Services and requests (D1–D9) ─────────────────────────────────────────────
+/** Her services as set up (on/off, base price) and the roleplay session total. */
+async function getServices(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const persona = await loadPersona(orgId, creatorId);
+  return { services: Sv.servicesOf(persona?.settings), session_total: Number(persona?.settings?.services?.session_total) || 250 };
+}
+async function saveServices(orgId, creatorId, { services = {}, session_total: total } = {}) {
+  await pageAccount(orgId, creatorId);
+  const cur = await loadPersona(orgId, creatorId);
+  if (!cur) throw new AiChatError('Set up her profile first', 409);
+  const next = {};
+  for (const k of Sv.KINDS) {
+    const s = services?.[k] || {};
+    next[k] = { on: s.on !== false, min: Number(s.min) > 0 ? Math.round(Number(s.min)) : Sv.SERVICES[k].min };
+  }
+  next.session_total = Number(total) > 0 ? Math.round(Number(total)) : 250;
+  const { error } = await supabaseAdmin.from('ai_personas').update({ settings: { ...(cur.settings || {}), services: next }, updated_at: new Date().toISOString() }).eq('creator_id', creatorId);
+  check(error);
+  return getServices(orgId, creatorId);
+}
+/** Fans' requests a manager decides on (an unusual service) or should know about (missing content). */
+async function listRequests(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_requests').select('*').eq('organisation_id', orgId).eq('creator_id', creatorId).order('created_at', { ascending: false }).limit(200);
+  if (error) throw new AiChatError(/ai_requests/.test(error.message) ? 'Run database change 048 (requests) in Supabase first' : error.message, 409);
+  return { requests: data };
+}
+async function decideRequest(orgId, creatorId, id, { status, terms }) {
+  await pageAccount(orgId, creatorId);
+  if (!['approved', 'refused', 'noted'].includes(status)) throw new AiChatError('Approve or refuse it');
+  const { error } = await supabaseAdmin.from('ai_requests').update({ status, terms: clean(terms).slice(0, 300) || null, decided_at: new Date().toISOString() }).eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
+  check(error);
+  return listRequests(orgId, creatorId);
+}
+
 /** Her diary for the tool: every fact with how many fans heard it, and whether it's switched off. */
 async function diary(orgId, creatorId) {
   const { account } = await pageAccount(orgId, creatorId);
@@ -1701,7 +1786,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     const steps = [];                                       // each draft, for the decision map
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
-      const res = await or.chat({ model, maxTokens: 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
+      const piece = base.plan?.length?.target === 'piece';                    // a paid written piece: more room (D1)
+      const res = await or.chat({ model, maxTokens: piece ? 1000 : 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
       drafts += 1;
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
@@ -1712,7 +1798,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       let offerProblem = null;
       draft.offer = null;
       if (sell && draft.ppv) {
-        const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm });
+        const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm, lowestShare: sell.lowestShare || null });
         // the plan says no PPV with this reply (he's sad, suspicious…)
         if (!o.problem && base.plan && !base.plan.sell.allowed) o.problem = `It attached a PPV, but none should go with this reply: ${base.plan.sell.why}`;
         if (o.problem) offerProblem = o.problem; else draft.offer = o;
@@ -1732,7 +1818,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       }
       const c = checkReply(draft.messages, {
         recent: recentHer, chatting: recentHer.length > 0, maxLevel, selling: !!sell, offering: !!draft.offer,
-        noOffer: draft.offer || draft.ppv ? '' : noPpv || base.noOffer || '', voice,
+        noOffer: draft.offer || draft.ppv ? '' : noPpv || base.noOffer || '', voice, maxChars: piece ? 900 : undefined,
       });
       let verdict = c.verdict, problems = [...c.problems], review = null;
       if (offerProblem) { verdict = 'block'; problems = [offerProblem, ...problems]; }
@@ -1753,6 +1839,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       }
       const now = { draft, verdict, problems, review, style: [...(c.style || [])], index: attempt };
       if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
+      // a paid written piece that's too thin for the money (D1)
+      if (piece && (draft.messages.join(' ').match(/[\p{L}\p{N}']+/gu) || []).length < 70) now.style.push('It\'s too thin for something he paid for: give him real detail and build-up, 60–120 words a message.');
       // sexting: a reply that doesn't move the story on (stands still, or only reacts)
       // (a PPV sent as part of the story counts as a step, and so does a step the writer names, like "undresses")
       const named = draft.scene?.beat && draft.scene.beat !== 'reacts_to_him';
@@ -1839,7 +1927,7 @@ async function usage(orgId) {
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
-  saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia,
+  saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia, getServices, saveServices, listRequests, decideRequest,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts, sourced, madeUpNotes, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },

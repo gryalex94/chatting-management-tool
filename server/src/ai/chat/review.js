@@ -69,7 +69,7 @@ async function reviewReply({ fanTexts = [], messages = [], flags = [] }) {
       + `His latest message(s):\n${fanTexts.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n') || '(none)'}\n\n`
       + `The reply she would send:\n${messages.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n')}\n\n`
       + `The automatic check flagged: ${flags.join(' ') || 'nothing'}\n\n`
-      + 'Does the reply break a house rule? ok = true if it doesn\'t. A playful "I wish" about meeting is fine as long as she doesn\'t agree to meet or suggest she could. List each problem in one short plain sentence.',
+      + 'Does the reply break a house rule? ok = true if it doesn\'t. Playful, open-ended lines about meeting ("maybe one day", "I need more time for decisions like that") are fine; she must not agree to meet, name a place or time, or share contact details. List each problem in one short plain sentence.',
     REPLY_SCHEMA);
   if (r.declined) return { ok: false, declined: true, problems: ['Claude declined to check this reply, so a person should look at it.'], usage: r.usage };
   return { ok: !!r.answer.ok, problems: (r.answer.problems || []).map(String).filter(Boolean), usage: r.usage };

@@ -113,10 +113,14 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
+  // paid requests and refusals (services.js, D1–D9): what's going on in this conversation
+  const pend = session?.pending || null, svc = session?.service || null, rp = session?.roleplay || null;
+  const svcAsk = request && services[request.kind] ? request.kind : null;
+  p.request = request ? { kind: request.kind, what: request.what } : null;
   // a photo or video he just sent (vision.js): what it showed, or that it couldn't be seen (C4, C5, C9)
   const photo = (media || []).find(s => s.description && !s.flagged) || null;
   const unseen = !photo ? (media || []).find(s => s.failed || !s.description) || null : null;
@@ -136,6 +140,16 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   if (followUp && aim === 'short') goal('follow_up', 'He went quiet, and he\'s a time waster at the bottom: no chasing; if you must write, one dry, friendly line', 'he hasn\'t answered, and he gets no follow-ups (Q19b)', ['Q6e-2', 'Q19b']);
   else if (followUp) goal('follow_up', 'He went quiet: one short, light message to get him talking again', 'he hasn\'t answered', ['Q6']);
   else if (profile.time_waster && FREE_ASK.test(said)) goal('no_freebies', 'Friendly but short: nothing for free; if anything, a small, cheap offer', 'a time waster asking for free things', ['Q19', 'Q31']);
+  else if (request?.kind === 'refuse') goal('refuse', `He asks for something she never does ("${request.what}"): a light, unbothered no in one line, no lecture, then straight on to something she does do`, 'it\'s on the refusal list', ['D5', 'D6']);
+  else if (pend?.state === 'approved') goal('request_approved', `The manager said yes to his request ("${pend.text}")${pend.terms ? ` on these terms: ${pend.terms}` : ''}. Say yes in her own way and go on with it on those terms`, 'a manager approved it', ['D1']);
+  else if (pend?.state === 'refused') goal('request_refused', `The manager said no to his request ("${pend.text}")${pend.terms ? ` (${pend.terms})` : ''}: a light, unbothered no, no lecture, then a redirect to something she does`, 'a manager refused it', ['D1', 'D6']);
+  else if (pend?.state === 'hesitant') goal('request_hesitate', `He asked for something unusual ("${pend.what || pend.text}"): sound hesitant but curious, ask what exactly he means or wants; neither a yes nor a no yet`, `an unusual request: exchange ${Math.min(2, pend.exchanges + 1)} of 2 before a manager decides`, ['D1']);
+  else if (svc?.state === 'paid') goal('service_deliver', `He tipped $${svc.tip} for ${svc.label.toLowerCase()}: deliver it now, in full, in her voice${svc.kind === 'roleplay' ? '. Start the roleplay: set the scene and play her part' : svc.kind === 'dick_rating' || svc.kind === 'rate_me' ? `, from what his photo showed${lastSeen ? ` (${lastSeen.description})` : ''}` : ''}`, 'he paid for it', ['D1', 'D2']);
+  else if (svcAsk && (!svc || (svc.state === 'offered' && svc.kind === svcAsk))) goal('service_offer', `He asks for ${request.what}: say yes playfully, name the price ($${svc?.price || request.price}) and ask him to tip it first; she delivers once the tip is in`, svc ? 'he asks again: the price stands, the tip comes first' : 'a service she sells, paid by a tip first', ['D1', 'D2', 'D3']);
+  else if (request?.kind === 'off') goal('honest_no', `He asks for ${request.what}, which she doesn't offer: say so lightly and offer something she does`, 'a service that is switched off', ['D1']);
+  else if (request?.kind === 'custom') goal('custom_content', (session?.custom_asked || 0) <= 1
+    ? 'He asks for visual content made for him: "I might do it… tell me exactly what you\'d want", curious and open; promise nothing'
+    : 'He described the custom content he wants: "that\'s kinda hot, I\'ve never actually done it, I might give it a try one day, but not right now"; warm, no promise', 'visual content she doesn\'t have is never sold', ['D8', 'Q38']);
   else if (waiting?.p?.status === 'bought' && !waiting.herAfter) goal('after_buy', 'He just bought: react to it, and keep the mood going', 'he bought her last PPV', ['Q34']);
   else if (sexting?.on && sexting.stage === 'after') goal('aftercare', 'He finished: aftercare, warm and personal', 'he says he finished', ['Q44']);
   else if (leaving) {
@@ -152,6 +166,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (match && !match.full.length) goal('honest_no', 'Say honestly she doesn\'t have that exactly (maybe she\'ll make something like it), ask what exactly he\'d want, offer the closest', 'he asks for something she doesn\'t have', ['Q38']);
   else if (match?.full.length && sell && !noOffer) goal('offer', 'He asked for something she has: say yes and offer it', 'he asks for something in her content', ['Q23']);
   else if (photo?.sexual === 'explicit' && !sexting?.on) goal('react_photo', `He sent an explicit ${photo.video ? 'video' : 'photo'} of himself: react to it at the chat's level, name one specific thing you see, and build from there`, 'he sent explicit content of himself', ['C4']);
+  else if (rp?.on) goal('roleplay', `A roleplay he paid for (${rp.exchanges} exchange${rp.exchanges === 1 ? '' : 's'} so far): play her part in the scenario, one step at a time, keep him in it${rp.exchanges >= 3 && sell ? '; a PPV may go now, sold as "want to see what I\'m doing right now? special price for you since you tipped"' : ''}`, 'a paid roleplay session', ['D4']);
   else if (sexting?.on && level.lead) goal('lead_story', 'Lead the sexting story one step on: what she does now, then tease', 'they\'re sexting and she leads', ['Q41', 'Q42b']);
   else if (level.his >= 2) goal('tease', 'He got sexual: say yes playfully and tease; don\'t stall', 'he got sexual first', ['Q1']);
   else if (back) {
@@ -168,12 +183,17 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (profile.new_sub) goal('get_to_know', 'Get to know him: welcome him, react to what he says', 'a new subscriber', ['Q21']);
   else goal('chat', 'Keep him talking: real interest in what he said, a small story of hers, or a new topic', 'small talk', ['Q5', 'Q5b']);
 
+  // a service offered and not paid yet: nothing is delivered before his tip (D2)
+  p.tip_first = svc?.state === 'offered' && p.goal !== 'service_offer' ? `You've named $${svc.price} for ${svc.label.toLowerCase()} and he hasn't tipped yet: don't deliver any of it; if he brings it up, remind him lightly that the tip comes first.` : '';
   // 2. selling: may a PPV go with this reply?
   const noSell = {
     comfort: 'he\'s sad: comfort first (Q24)', reassure: 'he\'s suspicious: no selling unless he asks (Q24c)', calm: 'he\'s annoyed (Q1)', ease_off: 'he\'s slowing down',
     aftercare: 'aftercare first (Q44)', point_to_ppv: 'her last PPV is still unopened', answer_ppv: 'her last PPV is still unopened',
     welcome_back: 'he just came back: welcome him first (Q7)',
     goodbye: p.bye === 'mid_sexting' ? null : 'he\'s leaving: no new PPV now (Q8)',
+    refuse: 'he asked for something she never does: no selling in the same breath', request_hesitate: 'an unusual request is being looked at', request_refused: 'a manager refused his request: no selling in the same breath',
+    service_offer: 'the service is paid by a tip first, not a PPV (D2)', service_deliver: 'she delivers what he paid for first', custom_content: 'she answers his request first (D8)',
+    roleplay: rp && rp.exchanges < 3 ? 'play along first: a PPV only after a few exchanges (D4)' : null,
   }[p.goal];
   // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b)
   if (aim === 'short' && !['offer', 'lead_story'].includes(p.goal)) p.short = 'a time waster at the bottom: friendly, short, nothing for free (Q19b)';
@@ -186,6 +206,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     if (match?.full.length) p.offer = { items: match.full.slice(0, 3), why: `he asked for ${match.wants.join(' + ')}` };
     else if (sexting?.next && (gap == null || gap >= 2)) p.offer = { next: sexting.next, why: `the next step of her set${gap != null ? ` (${gap} of her messages since the last PPV)` : ''}` };
     if (profile.avg_price) p.price_hint = `he usually pays about $${profile.avg_price}: stay close to that, slightly above (Q23)`;
+    // inside a roleplay he pre-tipped for: the tip is credit toward the session (D4)
+    if (rp?.on) p.price_hint = `the session price: ${Math.round(100 * Math.max(0.3, 1 - rp.tip / rp.total))}% of the list price (his $${rp.tip} tip counts toward a $${rp.total} session; never under 30%); say it's a special price because he tipped (D4)`;
     // a whale who hasn't bought lately: a personal discount (A6), never below the lowest price
     if (profile.tier === 'whale' && aim === 'sell') p.price_hint = `${p.price_hint ? `${p.price_hint}; ` : ''}a personal discount for him, 10–20% off, because he hasn't bought lately (A6)`;
   }
@@ -197,6 +219,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // 3. questions
   const noAskGoal = {
     lead_story: 'she leads the story instead', tease: 'he said what he wants: play along', offer: 'he asked: say yes', point_to_ppv: 'no question, just point him to it',
+    service_deliver: 'she delivers, no question', refuse: 'a light no, then on to something else', request_refused: 'a light no, then on to something else',
     goodbye: ['keep_ppv', 'mid_sexting'].includes(p.bye) ? null : 'he\'s leaving: no question to hold him',
   }[p.goal];
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
@@ -205,14 +228,14 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
   const n = words(said);
-  const roomy = p.goal === 'lead_story' || p.goal === 'welcome_back' || ['personal', 'stronger_hook'].includes(p.bye);
-  const target = followUp || p.short ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
+  const roomy = p.goal === 'lead_story' || p.goal === 'welcome_back' || p.goal === 'roleplay' || ['personal', 'stronger_hook'].includes(p.bye);
+  const target = p.goal === 'service_deliver' ? 'piece' : followUp || p.short ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
   p.length = {
     target,
-    why: followUp ? 'a light nudge' : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
-      : p.goal === 'goodbye' ? (roomy ? 'a goodbye with a little more to it' : 'he\'s leaving: keep it short') : `he wrote ${n} word${n === 1 ? '' : 's'}: mirror him (Q4)`),
+    why: p.goal === 'service_deliver' ? 'he paid for a written piece' : followUp ? 'a light nudge' : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
+      : p.goal === 'roleplay' ? 'room to play the scene' : p.goal === 'goodbye' ? (roomy ? 'a goodbye with a little more to it' : 'he\'s leaving: keep it short') : `he wrote ${n} word${n === 1 ? '' : 's'}: mirror him (Q4)`),
   };
-  p.length.text = { short: 'short: one message, about 5–15 words, but not a bare one-word reply', medium: 'one or two short messages', long: 'two or three messages, with some substance' }[target];
+  p.length.text = { short: 'short: one message, about 5–15 words, but not a bare one-word reply', medium: 'one or two short messages', long: 'two or three messages, with some substance', piece: 'a proper written piece: up to three messages of 60–120 words each, specific and personal, worth what he paid' }[target];
 
   // 5. how far she may go, and whether she leads (decided by the warm-up rules); close
   //    fans get a little flirting even in small talk (Q16)
@@ -265,6 +288,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
 function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
   if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
+  if (p.request?.kind === 'refuse') lines.push('Never explain the rules or lecture him: one light line ("that\'s not my thing, babe") and move on to something you do.');
+  if (p.tip_first) lines.push(p.tip_first);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
   if (p.media?.failed) lines.push(`His ${p.media.video ? 'video' : 'photo'} wouldn't load for you: say so playfully and ask what it is; don't pretend you saw it.`);
   else if (p.media) lines.push(`He sent ${p.media.text}. React to one specific thing you see in it (${p.media.details.slice(0, 3).map(d => `"${d}"`).join(', ') || 'a real detail'}), so he knows you looked${p.media.sexual === 'none' ? '; a question about it is fine if you ask one' : ''}.`);

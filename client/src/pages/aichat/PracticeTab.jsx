@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, UserRoundPlus, X } from 'lucide-react';
+import { Check, Coins, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, UserRoundPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -175,13 +175,25 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId, onMa
 }
 
 // The safety screen stopped his message before any AI saw it.
-function Stopped({ screen }) {
+function Stopped({ screen, decided = null, onDecide = null }) {
+  const [terms, setTerms] = useState('');
+  const waiting = screen.action === 'wait';
   return (
     <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 p-3 text-sm'>
       <ShieldAlert className='mt-0.5 size-4 shrink-0 text-warn' />
-      <div className='flex flex-col gap-1'>
-        <span className='font-medium'>{screen.action === 'stop' ? 'Stopped: no AI saw this message.' : 'A person takes over: the AI doesn\'t answer this.'}</span>
+      <div className='flex min-w-0 flex-1 flex-col gap-1'>
+        <span className='font-medium'>{screen.action === 'stop' ? 'Stopped: no AI saw this message.' : waiting ? 'Waiting for your decision: she says nothing until you decide.' : 'A person takes over: the AI doesn\'t answer this.'}</span>
         {screen.reasons.map((r, i) => <span key={i} className='text-muted-foreground'>{r}</span>)}
+        {waiting && decided && <span className='text-xs font-medium text-good'>You {decided}: write his next message and she goes on with your terms.</span>}
+        {waiting && !decided && onDecide && (
+          <div className='mt-1 flex flex-col gap-1.5'>
+            <Input value={terms} onChange={e => setTerms(e.target.value)} placeholder='Your terms (a price, what exactly), or why not' className='h-8' aria-label='Your terms' />
+            <div className='flex flex-wrap gap-1.5'>
+              <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onDecide('approved', terms)}>Approve</Button>
+              <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onDecide('refused', terms)}>Refuse</Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -214,6 +226,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const composer = useRef(null);
   const fileInput = useRef(null);
   const [looking, setLooking] = useState(false);       // a photo or video of his being looked at
+  const [tip, setTip] = useState('');                   // a tip he sends (the practice room plays him)
   const mapPanel = useRef(null);
 
   useEffect(() => {
@@ -289,7 +302,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     const body = {
       fan_uuid: real ? fanId : null,
       made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
-      test: nextTest.map(({ from, text: t, ppv, scene, media }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}), ...(media ? { media } : {}) })),
+      test: nextTest.map(({ from, text: t, ppv, scene, media, tip: tipped }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}), ...(media ? { media } : {}), ...(tipped ? { tip: tipped } : {}) })),
       models, selling: sells, follow_up: followUp, learned: known, session, outcome,
     };
     try {
@@ -367,6 +380,25 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     } catch (e) { toast.error(errMsg(e, 'Could not look at the file')); }
     finally { setLooking(false); if (fileInput.current) fileInput.current.value = ''; }
   };
+  // a tip he sends, with or without words (the practice room plays him)
+  const sendTip = () => {
+    const amount = Math.round(Number(tip));
+    if (!amount || amount <= 0 || busy || blocked) return;
+    const outcome = outcomeOf(false);
+    const kept = withKept();
+    const next = [...kept.next, { from: 'fan', text: text.trim(), tip: amount }];
+    setTest(next);
+    setText('');
+    setTip('');
+    ask(next, { known: kept.known, outcome });
+  };
+  // your decision on a request the AI couldn't decide (D1): she goes on with your terms
+  const decide = async (round, status, terms) => {
+    setSession(s => (s?.pending ? { ...s, pending: { ...s.pending, state: status, terms } } : s));
+    setRounds(rs => rs.map(r => (r.id === round.id ? { ...r, decided: status } : r)));
+    const id = round.used?.request_id;
+    if (id) { try { await api.patch(`/api/ai-chat/pages/${page.creator_id}/requests/${id}`, { status, terms }); } catch (e) { toast.error(errMsg(e, 'Could not save your decision')); } }
+  };
   // she writes without a new message from him (he went quiet, or just bought)
   const followUp = () => {
     if (busy || blocked) return;
@@ -391,9 +423,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   // a kept reply shows once, as her message in the chat (its map link under it), so its card goes
   const roundsAt = (n) => rounds.filter(r => r.at === n && !r.kept).map(round => (
     <div key={round.id} className='flex flex-col gap-2'>
-      {round.screen && ['stop', 'handover'].includes(round.screen.action) ? (
-        <div className='flex flex-col items-start gap-1'>
-          <Stopped screen={round.screen} />
+      {round.screen && ['stop', 'handover', 'wait'].includes(round.screen.action) ? (
+        <div className='flex flex-col items-stretch gap-1'>
+          <Stopped screen={round.screen} decided={round.decided || null} onDecide={round === rounds[rounds.length - 1] ? (status, terms) => decide(round, status, terms) : null} />
           <MapLink onClick={() => setMapId(round.id)} active={mapId === round.id} />
         </div>
       ) : (
@@ -452,6 +484,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='font-medium'>This conversation: {session.aim.replace(/_/g, ' ')}</span>
           <span className='text-muted-foreground'>{session.aim_text}. Because {session.why}.</span>
           {session.no_sell && <span className='text-warn'>{session.no_sell}.</span>}
+          {session.service && <span>{session.service.label}, ${session.service.price}: {session.service.state === 'offered' ? 'waiting for his tip' : session.service.state === 'paid' ? `tipped $${session.service.tip}, she delivers` : 'delivered'}</span>}
+          {session.roleplay?.on && <span>Roleplay on: {session.roleplay.exchanges} exchange{session.roleplay.exchanges === 1 ? '' : 's'}, PPVs at {Math.round(100 * Math.max(0.3, 1 - session.roleplay.tip / session.roleplay.total))}% of list</span>}
+          {session.pending && <span className='text-warn'>An unusual request ("{session.pending.what || session.pending.text}"): {session.pending.state}</span>}
         </div>
       )}
       {real && (detail === undefined ? <Skeleton className='h-16 w-full' /> : detail && (
@@ -539,6 +574,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}
             onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}>
             {m.text}
+            {m.tip && <span className={cn('flex items-center gap-1 text-xs text-good', m.text && 'mt-1')}><Coins className='size-3' aria-hidden />Tipped ${m.tip}</span>}
             {m.media && (
               <span className={cn('flex items-start gap-1 text-xs', m.text && 'mt-1', m.media.flagged ? 'text-bad' : 'text-muted-foreground')}>
                 <Paperclip className='mt-0.5 size-3 shrink-0' aria-hidden />
@@ -587,7 +623,11 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         </Button>
         <Button onClick={send} disabled={busy || blocked || !text.trim() || (real && !detail)} className='self-end'><Send />Send</Button>
       </div>
-      <div className='flex flex-wrap gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <div className='flex items-center gap-1'>
+          <Input type='number' min='1' value={tip} onChange={e => setTip(e.target.value)} placeholder='$' className='h-8 w-20' aria-label='Tip amount' disabled={busy || blocked} />
+          <Button size='sm' variant='outline' onClick={sendTip} disabled={busy || blocked || !Number(tip) || (real && !detail)} title='He sends a tip (with the words in the box, if any)'><Coins />He tips</Button>
+        </div>
         {canAnswerLast && <Button size='sm' variant='outline' onClick={() => ask([])} disabled={busy || blocked}><MessageSquareReply />Answer his last message</Button>}
         {(test.length > 0 || rounds.length > 0) && (
           <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />He&apos;s quiet: let her write first</Button>

@@ -30,10 +30,10 @@ const heatKind = (heat) => /\b(mild|medium|hot)\b/i.exec(String(heat || ''))?.[1
 /** 1. The safety screen on his latest message(s). */
 function safetyStep(screen) {
   if (!screen) return step('safety', 'Safety screen', { result: 'Nothing to screen: she writes first' });
-  const stopped = screen.action === 'stop' || screen.action === 'handover';
-  return step('safety', 'Safety screen', {
+  const stopped = screen.action === 'stop' || screen.action === 'handover' || screen.action === 'wait';
+  return step('safety', screen.action === 'wait' ? 'Waiting for a manager' : 'Safety screen', {
     status: stopped ? 'stop' : screen.review ? 'warn' : 'ok',
-    result: stopped ? (screen.action === 'stop' ? 'Stopped: no AI saw his message' : 'A person takes over')
+    result: stopped ? (screen.action === 'stop' ? 'Stopped: no AI saw his message' : screen.action === 'wait' ? 'The conversation waits for your decision' : 'A person takes over')
       : screen.notes.length ? `Passed, with ${screen.notes.length} note${screen.notes.length === 1 ? '' : 's'} for her` : 'Passed: nothing flagged',
     why: [...(screen.reasons || [])].join(' '),
     tags: ['House rules', ...(screen.review ? ['Claude'] : [])],
@@ -100,6 +100,9 @@ function sessionStep({ session = null, state = null, herHere = 0 }) {
       session.mood ? { label: 'Mood that sticks', value: `${session.mood}, until he sounds lighter twice in a row (${session.lighter} of 2 so far)` } : null,
       session.no_sell ? { label: 'No selling', value: session.no_sell } : null,
       ...(session.changes || []).map(c => ({ label: 'Plan changed', value: `${aimWord(c.aim)}: ${c.why}` })),
+      session.pending ? { label: 'An unusual request', value: `"${session.pending.what || session.pending.text}": ${{ hesitant: `she hesitates (${session.pending.exchanges} of 2 exchanges), then a manager decides`, waiting: 'waiting for a manager\'s decision; she says nothing until then', approved: `approved${session.pending.terms ? `: ${session.pending.terms}` : ''}`, refused: `refused${session.pending.terms ? `: ${session.pending.terms}` : ''}` }[session.pending.state]} (D1)` } : null,
+      session.service ? { label: 'A service', value: `${session.service.label}, $${session.service.price}: ${{ offered: 'offered, waiting for his tip', paid: `he tipped $${session.service.tip}: she delivers`, delivered: 'delivered' }[session.service.state]} (D1–D3)` } : null,
+      session.roleplay?.on ? { label: 'Roleplay', value: `on, ${session.roleplay.exchanges} exchange${session.roleplay.exchanges === 1 ? '' : 's'}; his $${session.roleplay.tip} tip counts toward a $${session.roleplay.total} session, so PPVs cost ${Math.round(100 * Math.max(0.3, 1 - session.roleplay.tip / session.roleplay.total))}% of list (D4)` } : null,
       state?.last ? { label: 'Last conversation', value: `${state.last.ended ? `${day(state.last.ended)}: ` : ''}${state.last.text}` } : null,
       state ? { label: 'Conversations before', value: String(state.conversations) } : null,
     ],
@@ -146,6 +149,7 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         plan.touch ? { label: 'Also, in passing', value: `${plan.touch.text}: ${plan.touch.why}` } : null,
         plan.event ? { label: 'A moment of hers', value: `${plan.event.kind.replace(/_/g, ' ')}: ${plan.event.text}` } : null,
         plan.media ? { label: plan.media.failed ? 'His file' : 'His photo', value: plan.media.failed ? 'it wouldn\'t load: she says so and asks what it is (C9)' : `react to a real detail: ${plan.media.details.slice(0, 3).join(' · ') || plan.media.kind} (${plan.media.sexual === 'explicit' ? 'C4' : 'C5'})` } : null,
+        plan.request ? { label: 'He asks for', value: `${plan.request.what} (${{ refuse: 'on the refusal list: a light no', custom: 'custom content: never made', unknown: 'not in her menu: a manager decides', off: 'a service switched off' }[plan.request.kind] || 'a service she sells'})` } : null,
         plan.budget ? { label: 'Free talk', value: `${plan.budget.used} of ${plan.budget.limit} small-talk messages${plan.aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}` } : null,
         // what memory brings to this reply, near the top
         plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,
