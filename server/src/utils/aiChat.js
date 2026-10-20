@@ -18,11 +18,12 @@ const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
 const { screenFan, checkReply, personaProblems } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
-const { reviewFan, reviewReply, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { reviewFan, reviewReply, reviewOffer, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
 const { mediaNote, emptyBody, standingAt } = require('../ai/chat/notes');
 const { FAN_TYPES, fanType } = require('../ai/chat/fanTypes');
+const C = require('../ai/chat/content');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -484,6 +485,83 @@ async function buildAllMemory(orgId, creatorId) {
   return job;
 }
 
+// ── Her content (ai_content, database change 041) ─────────────────────────────
+const CONTENT_MISSING = 'Run database change 041 (her content) in Supabase first';
+const num = (v) => (v == null || v === '' ? null : Number(v));
+async function loadContent(orgId, creatorId) {
+  const { data, error } = await supabaseAdmin.from('ai_content').select('*').eq('organisation_id', orgId).eq('creator_id', creatorId).order('sort').order('id');
+  if (error) {
+    if (/ai_content/.test(error.message)) return [];
+    throw new Error(error.message);
+  }
+  return data.map(r => ({ ...r, price: Number(r.price), min_price: num(r.min_price), minutes: num(r.minutes) }));
+}
+
+/** Her content list, each item with how spicy it is, and the choices for the form. */
+async function contentList(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const { error } = await supabaseAdmin.from('ai_content').select('id').limit(1);
+  const items = error ? [] : await loadContent(orgId, creatorId);
+  return {
+    ready: !error, items: items.map(it => ({ ...it, level: C.levelOf(it), lowest: C.lowest(it) })),
+    options: { nudity: C.NUDITY.map(id => ({ id, label: C.NUDITY_LABEL[id] })) },
+  };
+}
+
+// An item as typed, checked: precise enough for the AI to match and describe truthfully.
+function cleanItem(raw = {}) {
+  const text = (v, max = 300) => clean(v).slice(0, max);
+  const it = {
+    title: text(raw.title, 80), kind: ['photos', 'video', 'bundle'].includes(raw.kind) ? raw.kind : 'photos',
+    amount: Number.isInteger(Number(raw.amount)) && Number(raw.amount) > 0 ? Math.min(500, Number(raw.amount)) : null,
+    minutes: Number(raw.minutes) > 0 ? Math.min(600, Math.round(Number(raw.minutes) * 10) / 10) : null,
+    nudity: C.NUDITY.includes(raw.nudity) ? raw.nudity : 'dressed',
+    focus: text(raw.focus), outfit: text(raw.outfit), setting: text(raw.setting), action: text(raw.action, 400),
+    face: raw.face !== false,
+    tags: [...new Set((Array.isArray(raw.tags) ? raw.tags : String(raw.tags || '').split(',')).map(t => text(t, 40).toLowerCase()).filter(Boolean))].slice(0, 15),
+    description: text(raw.description, 1200), price: Number(raw.price), min_price: num(raw.min_price),
+    notes: text(raw.notes, 400), active: raw.active !== false,
+  };
+  if (!it.title) throw new AiChatError('Give the item a name');
+  if (it.description.split(/\s+/).length < 8) throw new AiChatError('Describe exactly what\'s inside (at least a sentence): the AI only offers what\'s described');
+  if (!(it.price >= 1 && it.price <= 1000)) throw new AiChatError('Give it a price between $1 and $1,000');
+  if (it.min_price != null && !(it.min_price >= 1 && it.min_price <= it.price)) throw new AiChatError('The lowest price must be between $1 and the price');
+  const young = personaProblems([it.title, it.description, it.focus, it.outfit, it.setting, it.action, it.tags.join(' ')].join('\n'));
+  if (young.length) throw new AiChatError(young[0]);
+  return it;
+}
+
+/** Add or change an item (`raw.id` = change that one). Returns the list. */
+async function saveContent(orgId, creatorId, raw, userId) {
+  await pageAccount(orgId, creatorId);
+  const it = cleanItem(raw);
+  const now = new Date().toISOString();
+  const id = Number(raw.id) || null;
+  const q = id
+    ? supabaseAdmin.from('ai_content').update({ ...it, updated_at: now }).eq('id', id).eq('organisation_id', orgId).eq('creator_id', creatorId)
+    : supabaseAdmin.from('ai_content').insert({ ...it, organisation_id: orgId, creator_id: creatorId, sort: Date.now() % 2147483647, created_at: now, updated_at: now });
+  const { error } = await q;
+  if (error) throw new AiChatError(/ai_content/.test(error.message) ? CONTENT_MISSING : error.message, /ai_content/.test(error.message) ? 409 : 400);
+  void userId;
+  return contentList(orgId, creatorId);
+}
+
+async function deleteContent(orgId, creatorId, id) {
+  await pageAccount(orgId, creatorId);
+  const { error } = await supabaseAdmin.from('ai_content').delete().eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
+  if (error) throw new Error(error.message);
+  return contentList(orgId, creatorId);
+}
+
+/** Add the starter list (an example to change to what she really has). */
+async function addStarterContent(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const now = new Date().toISOString();
+  const { error } = await supabaseAdmin.from('ai_content').insert(C.STARTER.map((it, i) => ({ ...it, organisation_id: orgId, creator_id: creatorId, sort: i, created_at: now, updated_at: now })));
+  if (error) throw new AiChatError(/ai_content/.test(error.message) ? CONTENT_MISSING : error.message, /ai_content/.test(error.message) ? 409 : 400);
+  return contentList(orgId, creatorId);
+}
+
 // ── A reply ──────────────────────────────────────────────────────────────────
 /**
  * Draft her reply in the practice room. `fanUuid` = a real fan (his chat, memory
@@ -492,7 +570,7 @@ async function buildAllMemory(orgId, creatorId) {
  * messages typed in the practice room after that ({ from: 'fan' | 'her', text });
  * `models` = 1 to 3 writers to compare. Returns { screen, results, used }.
  */
-async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [] }) {
+async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false }) {
   const { account } = await pageAccount(orgId, creatorId);
   const persona = await loadPersona(orgId, creatorId);
   if (!clean(persona?.profile?.name)) throw new AiChatError('Set up her profile first (Her profile)', 409);
@@ -514,40 +592,84 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     type = fanType(madeUp?.type);
     if (type) money = moneyOf(type.payments, null, type.chatSince);
   }
-  const typed = (Array.isArray(test) ? test : []).slice(-40)
-    .map(t => ({ at: null, from_fan: t?.from === 'fan', text: clean(t?.text).slice(0, 1000), mass: false }))
-    .filter(t => t.text);
+  // selling (practice): her content list; the PPVs in the practice chat carry their status
+  const content = selling ? (await loadContent(orgId, creatorId)).filter(it => it.active) : [];
+  const typed = (Array.isArray(test) ? test : []).slice(-40).map((t) => {
+    const m = { at: null, from_fan: t?.from === 'fan', text: clean(t?.text).slice(0, 1000), mass: false };
+    if (!m.from_fan && t?.ppv && typeof t.ppv === 'object') m.media = practicePpv(t.ppv, content);
+    return m;
+  }).filter(t => t.text || t.media);
   const convo = [...chat, ...typed];
   let lastHer = -1;
   convo.forEach((m, i) => { if (!m.from_fan && !m.mass) lastHer = i; });
   const latest = convo.slice(lastHer + 1).filter(m => m.from_fan).map(m => m.text).filter(Boolean);
-  if (!latest.length) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
+  if (!latest.length && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
 
-  // 1. the safety screen, before any writer sees anything
-  const screen = await screenLatest(orgId, creatorId, fanUuid, latest);
+  // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
+  const screen = latest.length ? await screenLatest(orgId, creatorId, fanUuid, latest) : { action: 'continue', reasons: [], notes: [], review: null };
   if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: null };
 
   // 2. the briefing, with the Playbook situations that fit this moment
   const win = windowFor(convo);
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
-  const { plan, level, library } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [] });
+  const sell = content.length > 0;
+  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell });
   const base = {
-    profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages, notes: [type?.approach, ...screen.notes].filter(Boolean),
+    profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
+    notes: [type?.approach, ...screen.notes, ...ppvNotes(convo, followUp), sell && !level.warm ? 'No PPV yet: you are still in the warm-up. Get to know him and build it up first.' : null].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
+    selling: sell, content: sell ? C.contentText(content) : '', sales,
   };
+  // the PPVs already in this practice chat: no repeats, and none while one is unopened
+  const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status }));
 
   // 3. each writer drafts; every draft is checked, and rewritten once if it breaks a rule
   const speed = persona.settings?.typing || 'normal';
   const emojis = persona.settings?.emojis || 'rarely';
-  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis })));
+  const results = await Promise.all(writers.map(model => writeOne({
+    orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis, sell: sell ? { items: content, offered } : null,
+  })));
   return {
     screen, results,
     used: {
       messages: win.messages.length, of: convo.filter(m => !m.mass).length, long, story: long && !!clean(story), facts: card.length, money: !!money,
       situations: plan.ids.map(strategy.situationTitle), examples: library.length, level, fan_type: type?.label || null,
+      selling: sell, phase, sales: sales.length, follow_up: !!followUp,
     },
   };
+}
+
+// A PPV in the practice chat, as the writer reads it (like a real one from Fanvue).
+function practicePpv(p, content) {
+  const id = Number(String(p.item || '').replace(/^c/i, ''));
+  const it = content.find(x => x.id === id) || {};
+  const kind = it.kind || p.kind;
+  const amount = Number(it.amount ?? p.amount) || 0;
+  return {
+    item: `c${id}`, title: clean(it.title || p.title).slice(0, 80), price: Number(p.price) || Number(it.price) || null,
+    photos: kind === 'video' ? 0 : kind === 'bundle' ? Math.max(1, amount - 2) : amount || 1, videos: kind === 'video' ? 1 : kind === 'bundle' ? 2 : 0, other: 0,
+    status: ['bought', 'not_bought'].includes(p.status) ? p.status : 'pending', speed: p.speed === 'slow' ? 'slow' : 'fast', bought_at: null,
+  };
+}
+
+// What just happened with her last PPV (practice), and what she should do about it.
+function ppvNotes(convo, followUp) {
+  const i = convo.map(m => !!m.media?.item).lastIndexOf(true);
+  const herAfter = i >= 0 && convo.slice(i + 1).some(m => !m.from_fan && !m.mass);
+  const hisAfter = i >= 0 && convo.slice(i + 1).some(m => m.from_fan);
+  const p = i >= 0 ? convo[i].media : null;
+  const out = [];
+  if (p && !herAfter) {
+    const name = `"${p.title}"`;
+    if (p.status === 'bought') out.push(`He just bought your PPV ${name}${p.speed === 'slow' ? ' after a while' : ' right away'}. React to it: ask what he liked, keep the mood going${p.speed === 'slow' ? '' : ', and while he\'s into it tease the next step'}.`);
+    else if (p.status === 'not_bought') out.push(`He didn't buy your PPV ${name}. Don't beg or resend it; find out what's in the way, or keep chatting and try something else later.`);
+    else if (followUp && !hisAfter) out.push(`He hasn't opened your PPV ${name} and has gone quiet. One light, playful follow-up; no begging, no new PPV.`);
+    else out.push(`Your PPV ${name} is still unopened.`);
+  }
+  if (followUp && !(p && !herAfter)) out.push('He hasn\'t replied for a while. Write one short, light follow-up to get him talking again; don\'t be pushy or needy.');
+  if (followUp && p && !herAfter && p.status !== 'pending') out.push('He hasn\'t written anything since: you write first.');
+  return out;
 }
 
 // The safety screen on his latest message(s); Claude judges the doubtful ones.
@@ -575,11 +697,11 @@ const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower'
  * mood (the picker), how sexual her reply may get, and examples from the agency's
  * good chats that fit. `chat` = the messages the writer reads.
  */
-async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [] }) {
-  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money);
+async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false }) {
+  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling);
   // a situation known for sure (a made-up fan's type) comes first, and the picker's
   // guesses about who he is (new, spender, back after a break…) go
-  if (extraIds.length) plan.ids = strategy.readPick({ ids: [...extraIds, ...plan.ids.filter(id => !WHO_HE_IS.has(id))] });
+  if (extraIds.length) plan.ids = strategy.readPick({ ids: [...extraIds, ...plan.ids.filter(id => !WHO_HE_IS.has(id))] }, { selling });
   const { his, mood, pulled_back } = plan.mood;
   const warm = chat.filter(m => !m.from_fan && !m.mass).length >= WARM_UP;
   const max = P.maxLevel({ his, heat: persona?.profile?.heat, warm: warm && !pulled_back });
@@ -588,7 +710,39 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
   while (last > 0 && chat[last - 1].from_fan) last -= 1;
   const said = chat.slice(last).map(m => m.text).join(' ');               // his latest message(s)
   const library = await libraryExamples(orgId, { ids: plan.ids, his, max, mood, said });
-  return { plan, level, library };
+  // selling: which moment it is (making an offer, after a buy, after a no) and examples of it
+  let phase = null;
+  if (selling) {
+    const i = chat.map(m => !!(m.media?.price && !m.from_fan)).lastIndexOf(true);
+    const herAfter = i >= 0 && chat.slice(i + 1).some(m => !m.from_fan && !m.mass);
+    const status = i >= 0 ? chat[i].media.status || (chat[i].media.bought_at ? 'bought' : 'not_bought') : null;
+    if (status && !herAfter) phase = status === 'bought' ? 'after_buy' : 'no_buy';
+    else if (warm && his >= 2 && !pulled_back) phase = 'offer';
+  }
+  const sales = phase ? await sellingExamples(orgId, { phase, ids: plan.ids, his, max, mood, said }) : [];
+  return { plan, level: { ...level, warm }, library, phase, sales };
+}
+
+/**
+ * Selling examples from the agency's chats for this phase: two that worked and one
+ * that didn't (offer: bought / not bought; after a buy: bought the next one or
+ * not; after a no: sold or kept him / lost him).
+ */
+const PHASES = {
+  offer: { kind: 'offer', good: ['bought_fast', 'bought'], bad: ['not_bought'] },
+  after_buy: { kind: 'after_buy', good: ['bought_next', 'no_next_offer'], bad: ['next_not_bought'] },
+  no_buy: { kind: 'turning', good: ['sold', 'kept_him'], bad: ['lost'] },
+};
+async function sellingExamples(orgId, { phase, ids = [], his = 0, max = 0, mood = null, said = '' }) {
+  const P_ = PHASES[phase];
+  if (!P_) return [];
+  const want = new Set(ids);
+  const his_ = wordsOf(said);
+  const rows = (await libraryRows(orgId)).filter(r => r.kind === P_.kind && Math.abs(r.his_level - his) <= 1 && r.her_level <= Math.min(3, max + 1));
+  const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
+  const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + Math.random() * 1.5;
+  const best = (outcomes, n) => rows.filter(r => outcomes.includes(r.outcome)).map(r => [score(r), r]).sort((a, b) => b[0] - a[0]).slice(0, n).map(([, r]) => r);
+  return [...best(P_.good, 2), ...best(P_.bad, 1)].map(r => ({ moment: r.moment, him: r.him, reply: r.reply, outcome: r.outcome, offer_what: r.offer_what }));
 }
 
 // The example library (ai_examples, database change 040): real moments from the
@@ -599,7 +753,7 @@ async function libraryRows(orgId) {
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
   let rows = [];
   try {
-    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, dialogue, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
+    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
   } catch { rows = []; }                                     // none before database change 040
   libraryCache.set(orgId, { at: Date.now(), rows });
   return rows;
@@ -615,7 +769,7 @@ const wordsOf = (t) => new Set(String(t || '').toLowerCase().match(/[a-z]{4,}/g)
 async function libraryExamples(orgId, { ids = [], his = 0, max = 0, mood = null, said = '', n = 4 }) {
   const want = new Set(ids);
   const his_ = wordsOf(said);
-  const rows = (await libraryRows(orgId)).filter(r => r.her_level <= max && Math.abs(r.his_level - his) <= 1);
+  const rows = (await libraryRows(orgId)).filter(r => (r.kind || 'chat') === 'chat' && r.her_level <= max && Math.abs(r.his_level - his) <= 1);
   // the same words as his message (what he talks about) count most, then the situation, his level and mood
   const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
   const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + Math.random() * 1.5;
@@ -631,33 +785,51 @@ async function libraryExamples(orgId, { ids = [], his = 0, max = 0, mood = null,
 
 // Which Playbook situations fit this moment (none if the picker fails: the reply
 // still has the game plan).
-async function pickSituations(orgId, creatorId, fanUuid, chat, money) {
+async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = false) {
   try {
-    const res = await or.chat({ model: PICKER, maxTokens: 160, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money }) });
+    const res = await or.chat({ model: PICKER, maxTokens: 160, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money, selling }) });
     await logUsage(orgId, 'plan', res.model, res.usage, { creatorId, fanUuid });
     const j = P.parseJsonObject(res.text);
-    return { ids: strategy.readPick(j), mood: strategy.readMood(j), cost: res.usage.cost || 0 };
+    return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), cost: res.usage.cost || 0 };
   } catch (e) {
     console.error('[ai-chat] situations:', e.message);
     return { ids: [], mood: strategy.readMood(null), cost: 0 };
   }
 }
 
-async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis }) {
+async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, speed, emojis, sell = null }) {
   const started = Date.now();
   const out = { model, label: or.writerLabel(model), cost: 0 };
   try {
-    let retry = null, draft, verdict, problems = [], review = null, first = null;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    let retry = null, draft, verdict, problems = [], review = null, first = null, offerProblemSeen = null;
+    // one rewrite if a draft breaks a rule; two when only the PPV offer was wrong (wrong item, not truthful)
+    let tries = 2;
+    for (let attempt = 0; attempt < tries; attempt += 1) {
       const res = await or.chat({ model, maxTokens: 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry }) });
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
       draft = P.readReply(res.text);
+      // a PPV she attached: is it in her list, and allowed right now?
+      let offerProblem = null;
+      offerProblemSeen = null;
+      draft.offer = null;
+      if (sell && draft.ppv) {
+        const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm });
+        if (o.problem) { offerProblem = o.problem; offerProblemSeen = o.problem; } else draft.offer = o;
+      }
       // her habit openers ("hehe", "mmm"): kept only now and then, never twice in a row
       const dropOpener = recentHer.some(r => /^\s*(?:he(?:he)+|m{2,}|hm+)\b/i.test(r)) || Math.random() < 0.6;
-      draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel: base.level?.max ?? 3, dropOpener });
+      draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel: base.level?.max ?? 3, dropOpener, recent: recentHer });
       if (draft.handover) return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started };
-      const c = checkReply(draft.messages, { recent: recentHer, chatting: recentHer.length > 0, maxLevel: base.level?.max ?? 3 });
+      const c = checkReply(draft.messages, { recent: recentHer, chatting: recentHer.length > 0, maxLevel: base.level?.max ?? 3, selling: !!sell, offering: !!draft.offer });
+      if (offerProblem) { c.verdict = 'block'; c.problems = [offerProblem, ...c.problems]; }
+      // a PPV that passed the code checks: Claude checks it's truthful about what's inside
+      if (draft.offer && c.verdict !== 'block') {
+        const r = await reviewOffer({ fanTexts: latest, messages: draft.messages, item: { ...draft.offer.item, what: C.what(draft.offer.item) } });
+        out.cost += r.usage.cost;
+        await logUsage(orgId, 'check', CHECK_MODEL, r.usage, { creatorId, fanUuid });
+        if (!r.ok) { c.verdict = 'block'; c.problems = [...r.problems.map(x => `Offer: ${x}`), ...c.problems]; }
+      }
       verdict = c.verdict; problems = c.problems; review = null;
       if (verdict === 'review') {
         const r = await reviewReply({ fanTexts: latest, messages: draft.messages, flags: c.problems });
@@ -667,7 +839,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         verdict = r.ok ? 'ok' : r.declined ? 'person' : 'block';
         problems = r.ok ? [] : r.problems;
       }
-      if (verdict !== 'block' || attempt === 1) break;
+      if (verdict === 'block' && attempt === 0 && problems.length && problems.every(x => /^Offer: /.test(x) || x === offerProblemSeen)) tries = 3;
+      if (verdict !== 'block' || attempt === tries - 1) break;
       first = problems;
       retry = problems.join(' ');
     }
@@ -675,6 +848,11 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       ...out,
       status: verdict === 'ok' ? 'ok' : verdict === 'person' ? 'check' : 'blocked',
       replies: draft.messages.map(m => ({ creator_message: m })),
+      // the PPV on her last message (only when the reply passed)
+      ppv: verdict !== 'block' && draft.offer ? {
+        item: `c${draft.offer.item.id}`, price: draft.offer.price, title: draft.offer.item.title, kind: draft.offer.item.kind, amount: draft.offer.item.amount,
+        minutes: draft.offer.item.minutes, what: C.what(draft.offer.item), description: draft.offer.item.description,
+      } : null,
       // one message at a time, at her typing speed (never all in the same second)
       timing: typingPlan(draft.messages, { speed, theirText: latest.join(' ') }),
       learned: draft.learned.map(t => ({ note: t })),
@@ -706,7 +884,7 @@ async function usage(orgId) {
 
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
-  buildMemory, buildAllMemory, memoryJob, reply, usage,
+  buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf },

@@ -116,4 +116,21 @@ async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) 
   return { better: r.answer.better, reason: String(r.answer.reason || ''), usage: r.usage };
 }
 
-module.exports = { reviewFan, reviewReply, judgeDuel, MODEL };
+/**
+ * A PPV she is about to send: does the caption promise only what's really in the
+ * item, and if he asked for something specific, does the item match it (or does
+ * she say honestly that it's different)? Returns { ok, problems, declined, usage }.
+ */
+async function reviewOffer({ fanTexts = [], messages = [], item }) {
+  const r = await ask(
+    'You check PPV offers an AI creator sends fans on Fanvue, a subscription site for verified adults. Adult content is allowed. You only check that the offer is truthful about what the content really is. You never rewrite anything.',
+    `His last messages:\n${fanTexts.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n') || '(none)'}\n\n`
+      + `What she writes with the PPV:\n${messages.map(t => `"${String(t).replace(/\s+/g, ' ').trim()}"`).join('\n')}\n\n`
+      + `What the PPV really is: "${item.title}", ${item.what}. Inside: ${item.description}\n\n`
+      + 'ok = true only if (1) what she writes promises or implies nothing that isn\'t in it (a video when it\'s photos, a toy, an act, a place, an outfit that isn\'t described), and (2) if he asked for something specific, either this item really is that, or she says plainly that it\'s not exactly that and offers it as the closest thing. Teasing and leaving details out is fine. List each problem in one short plain sentence.',
+    REPLY_SCHEMA);
+  if (r.declined) return { ok: true, declined: true, problems: [], usage: r.usage };
+  return { ok: !!r.answer.ok, problems: (r.answer.problems || []).map(String).filter(Boolean), usage: r.usage };
+}
+
+module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, MODEL };

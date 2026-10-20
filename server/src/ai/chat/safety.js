@@ -89,20 +89,27 @@ const normText = (s) => String(s || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu
  */
 // The writer's answer format leaking into a message: {"messages": [" … "]}.
 const LOOKS_LIKE_CODE = /^\s*[{[]\s*"|"\s*[\]}]|"(?:messages|learned|handover)"|"\w+"\s*:\s*[[{"]/;
-// Openers the AI leans on: greeting again mid-chat, and the same first word as her
-// last messages ("hehe… hehe… hehe…"). Repeated letters count as one (mmm = mm).
+// Greeting him again mid-chat (a repeated first word is dropped in prompts.tidyMessages).
 const GREETS = /^\s*(?:he+y+|hi+|hello+)\b/i;
-const TICS = new Set(['hehe', 'haha', 'm', 'hm', 'aw', 'oh', 'ok', 'lol', 'well', 'so']);
-const firstWord = (t) => ((String(t).toLowerCase().match(/^[\p{L}]+/u) || [''])[0]).replace(/(.)\1+/g, '$1');
 
 // How sexual a reply is, roughly (0 friendly … 3 explicit), to hold it to his level.
 // Only suggestive and explicit are held in code; pet names like "babe" are just warmth.
-const EXPLICIT = /\b(?:cock|dick|pussy|cum(?:ming)?|fuck\w*|tits|clit|blowjob|deepthroat|orgasm|naked|nude|horny)\b|🍆|💦/i;
+const EXPLICIT = /\b(?:cock|dick|pussy|cum(?:ming)?|fuck\w*|tits|clit|blowjob|deepthroat|orgasm|naked|nude|horny|strok(?:e|es|ing)\s+(?:it|yourself|your)|jerk\w*\s+(?:it|off)|touch(?:ing)?\s+yourself)\b|🍆|💦/i;
 const SUGGESTIVE = /\b(?:naughty|wet|hard for|strip\w*|undress\w*|lingerie|what i'?m wearing|in bed with|kinky|spicy|turn(?:s|ed)? (?:me|you) on|sexy|dirty)\b|😈|🥵|🍑|👅/i;
 const FLIRTY = /\b(?:cutie|handsome|gorgeous|tease|teasing|flirt\w*|kiss\w*|crush)\b|😘|😏|😉|😍/i;
 const replyLevel = (t) => (EXPLICIT.test(t) ? 3 : SUGGESTIVE.test(t) ? 2 : FLIRTY.test(t) ? 1 : 0);
 
-function checkReply(messages, { recent = [], chatting = false, maxLevel = 3 } = {}) {
+// Asking for money outside a PPV: never, selling or not.
+const ASKS_MONEY = /\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips?\b|\bpay\s+me\b|\b(?:cash\s?app|venmo|paypal|zelle)\b/i;
+// What only a real person could say: she's an AI creator, her content isn't made live.
+const LIVE_CLAIM = /\b(?:just|literally)\s+(?:took|shot|filmed|recorded|made)\s+(?:this|it|these)\b|\b(?:taking|filming|recording|shooting)\s+(?:it|this|one|them|a\s+\w+)\s+(?:right\s+)?now\b|\block(?:ing)?\s+the\s+door\b|\bmade\s+(?:it|this)\s+(?:right\s+now|live)\b/i;
+
+/**
+ * A drafted reply against the house rules. `selling`: she may sell through a PPV;
+ * `offering`: this reply carries one (then price and content talk is its caption,
+ * and the caption may be one step spicier than the chat).
+ */
+function checkReply(messages, { recent = [], chatting = false, maxLevel = 3, selling = false, offering = false } = {}) {
   const list = (messages || []).map(m => String(m || '').trim()).filter(Boolean);
   if (!list.length) return { verdict: 'block', problems: ['The reply was empty.'] };
   const all = list.join('\n');
@@ -110,17 +117,19 @@ function checkReply(messages, { recent = [], chatting = false, maxLevel = 3 } = 
   if (has(UNDER_18, all) || has(MINOR_WORDS, all)) block.push('It mentions someone under 18.');
   for (const [re, what] of CONTACT) if (re.test(all)) block.push(`It contains ${what}: she only chats on Fanvue.`);
   if (has(CLAIMS_HUMAN, all)) block.push('It says or suggests she is a real person. She is an AI character.');
-  if (has(SELLS, all)) block.push('It sells, names a price or asks for a tip. Selling is off for now.');
-  if (has(PROMISES_MEDIA, all) || has(PROMISES_CONTENT, all)) block.push('It promises or teases a photo, video or content. She can\'t send any (and doesn\'t sell yet).');
+  if (has(ASKS_MONEY, all)) block.push('It asks for a tip or money. She only sells through a PPV.');
+  else if (!selling && has(SELLS, all)) block.push('It sells, names a price or asks for a tip. Selling is off for now.');
+  // selling: teasing what she has is the build-up to an offer; voice notes she never has
+  if (selling ? /\bvoice\s+(?:notes?|messages?|memos?)\b/i.test(all) && has(PROMISES_MEDIA, all)
+    : has(PROMISES_MEDIA, all) || has(PROMISES_CONTENT, all)) {
+    block.push(selling ? 'It promises a voice note. She can\'t send any.' : 'It promises or teases a photo, video or content. She can\'t send any (and doesn\'t sell yet).');
+  }
+  if (has(LIVE_CLAIM, all)) block.push('It says she is making or filming something right now, or something only a real person could do. She is an AI character.');
   if (list.length > MAX_MESSAGES) block.push(`It has ${list.length} messages; the most is ${MAX_MESSAGES}.`);
   if (list.some(m => m.length > MAX_CHARS)) block.push('A message is too long for a chat.');
   if (list.some(m => LOOKS_LIKE_CODE.test(m))) block.push('It came out as code (brackets, quotes or "messages"), not a chat message.');
   if (chatting && GREETS.test(list[0])) block.push('It greets him again, but you are already chatting.');
-  const opener = firstWord(list[0]);
-  if (TICS.has(opener) && recent.slice(-3).some(r => firstWord(r) === opener)) {
-    block.push(`It starts with "${list[0].split(/\s|,/)[0]}" again, like your last messages: start differently.`);
-  }
-  if (replyLevel(all) >= 2 && replyLevel(all) > maxLevel) block.push(`It is more sexual than he is right now: keep it ${['friendly, no flirting', 'flirty at most, nothing sexual', 'suggestive at most, nothing explicit'][maxLevel]}.`);
+  if (replyLevel(all) >= 2 && replyLevel(all) > maxLevel + (offering ? 1 : 0)) block.push(`It is more sexual than he is right now: keep it ${['friendly, no flirting', 'flirty at most, nothing sexual', 'suggestive at most, nothing explicit'][maxLevel]}.`);
   const seen = new Set(recent.map(normText).filter(t => t.length >= 12));
   if (list.some(m => seen.has(normText(m)))) block.push('It repeats something she already sent him.');
   if (has(MEETING, all)) review.push('It talks about meeting in person.');

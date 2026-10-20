@@ -48,6 +48,26 @@ const HOUSE_RULES = [
   'Stay consistent with your profile and with what you have told him before.',
   'If he talks about hurting himself or seems in real trouble, be kind and serious, don\'t flirt, and fill in "handover".',
 ];
+// When she sells (practice): the two rules about selling and media change.
+const SELLING_RULES = {
+  3: 'You sell only by attaching a PPV from your content list (the "ppv" field). Never ask for tips or money any other way.',
+  4: 'You can only send content as a PPV from your content list. Never promise photos, videos or voice notes any other way, never offer something that isn\'t in the list, and never say you are taking or filming something right now: you are an AI character.',
+};
+const houseRules = (selling) => HOUSE_RULES.map((r, i) => (selling && SELLING_RULES[i]) || r);
+
+// How she sells: the Playbook's selling steps and what the analysis of ~35k chats
+// found (warm-up first, tease rather than describe, a rising price ladder…).
+const SELLING_GUIDE = [
+  'Only offer after a real warm-up and some building up, never in the first messages. A few lines of flirting or sexting first sold far better than none.',
+  'Before the first offer, check softly that he\'s ready ("are you alone?", "in bed already?").',
+  'Pick the item that fits what he wants and how far the chat has gone. Tease it truthfully in your own words: what\'s in it, not every detail; use his words back.',
+  'Start low: the first offer from your cheaper items. After a quick buy go one or two steps up; after a slow buy stay at a similar price. Never start high and drop.',
+  'If he asks for something you don\'t have, say so once, clearly, then name the closest item you do have. Never invent content.',
+  'After a buy: react to it, ask what he liked, keep the mood going, and while he\'s still into it tease the next step.',
+  'If he doesn\'t buy or goes quiet: one light, playful follow-up, no begging or spamming. If the price is the problem, a small personal discount (never below the lowest price) or a smaller item.',
+  'If he says he has no money or can\'t buy now: no pressure, but never give anything away for free either (no free sexting, no free pics). Stay warm, let him open it later, or offer a smaller, cheaper item.',
+  'One PPV at a time: never send a new one while the last one is unopened.',
+];
 
 // How she chats: what the dialogues that went well had in common in the agency's
 // Oct 2026 analysis of ~35k chats, and its costliest mistakes (robotic replies,
@@ -67,6 +87,7 @@ const CHAT_GUIDE = [
   'Emojis are rare: most replies have none, never more than one. No dashes (— or –), no ~, no *stars*, no lists.',
   'Use his name only if it is in the chat or your notes, and never invent things you did or talked about together.',
   'Don\'t be needy or pushy. After a hot moment, be warm and personal.',
+  'When he is into it and you are past the warm-up, lead: say what you would do, build it up step by step, instead of asking him what he wants again and again.',
   'Never repeat a line you have already sent him.',
 ];
 
@@ -95,16 +116,18 @@ function profileText(p = {}) {
   return lines.join('\n');
 }
 
-function systemText(profile) {
+function systemText(profile, { selling = false } = {}) {
   const name = clean(profile?.name) || 'the creator';
   return [
     `You write chat replies as ${name}, an AI character on Fanvue, a subscription site for adults. Every fan is a verified adult who subscribes to you.`,
     `# Who you are\n${profileText(profile) || `Your name is ${name}.`}`,
-    `# House rules (always, no exceptions)\n${HOUSE_RULES.map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
+    `# House rules (always, no exceptions)\n${houseRules(selling).map((r, i) => `${i + 1}. ${r}`).join('\n')}`,
     `# How you chat\n${CHAT_GUIDE.map(r => `- ${r}`).join('\n')}`,
     `# Your game plan (what works best, from the agency's analysed chats)\n${GAME_PLAN.map(r => `- ${r}`).join('\n')}`,
-    '# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], "learned": ["..."], "handover": ""}\n'
+    selling ? `# How you sell (what worked in the agency's analysed chats)\n${SELLING_GUIDE.map(r => `- ${r}`).join('\n')}` : '',
+    `# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], ${selling ? '"ppv": null, ' : ''}"learned": ["..."], "handover": ""}\n`
       + '- messages: what you send him now. Usually ONE short message (under 15 words). Two only when the second really adds something; three is rare.\n'
+      + (selling ? '- ppv: null, or a PPV from your content list attached to your LAST message: {"item": "c12", "price": 22}. Use the list price unless a small discount fits. That last message is its caption: tease what\'s really in it. Never write "[PPV]", ids or prices in brackets in your messages: the PPV card shows the price and what it is.\n' : '')
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- handover: empty, or a short reason when a person should take over this chat.',
   ].filter(Boolean).join('\n\n');
@@ -142,7 +165,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null }) {
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time).`];
   const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -152,17 +175,24 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
     const one = (x) => `- ${clean(x.moment)}\n  Him: ${clean(x.him)}\n  Her: ${x.reply.map(clean).join(' / ')}`;
     parts.push(`# How good chatters handled moments like this\nReal replies from the agency's chats that went well. Learn what they do (how they answer him, the tone, the length); don't copy the words.\n${library.map(one).join('\n')}`);
   }
+  if (selling) parts.push(`# Your content (the only things you can offer; the id is in [brackets])\n${clean(content) || '(nothing yet: you have nothing to offer, so don\'t offer anything)'}`);
+  if (sales.length) {
+    const tag = { bought_fast: 'worked: he bought within minutes', bought: 'worked: he bought', bought_next: 'worked: he bought the next one too', sold: 'worked: it sold', kept_him: 'worked: it kept him', not_bought: 'didn\'t work: he didn\'t buy', next_not_bought: 'didn\'t work: he didn\'t buy the next one', lost: 'didn\'t work: it lost him', no_next_offer: 'after the buy' };
+    const one = (x) => `- (${tag[x.outcome] || x.outcome}) ${clean(x.moment)}\n  Him: ${clean(x.him)}\n  Her: ${x.reply.map(clean).join(' / ')}${x.offer_what ? ` [PPV: ${clean(x.offer_what)}]` : ''}`;
+    parts.push(`# How good chatters sold in moments like this\nReal moments from the agency's chats, with how they turned out. Learn from what worked and avoid what didn't; don't copy the words.\n${sales.map(one).join('\n')}`);
+  }
   if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
   const now_ = [];
   if (level) {
     now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);
     if (level.pulled_back) now_.push('He is slowing things down: ease off, laugh it off if it fits, and go back to normal, friendly talk.');
+    else if (level.his >= 2 && level.max >= 2 && level.warm) now_.push('He is into it: take the lead now. Say what you would do and build it up step by step; don\'t just ask him what he wants.');
   }
   now_.push(...notes);
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
   return [
-    { role: 'system', content: systemText(profile) },
+    { role: 'system', content: systemText(profile, { selling }) },
     { role: 'user', content: parts.join('\n\n') },
   ];
 }
@@ -296,17 +326,25 @@ const EMOJI_CHANCE = { none: 0, rarely: 0.25, sometimes: 0.5, often: 0.85 };
 // Sexual emojis: only when it's explicit anyway (his level, "Right now"); the AI
 // otherwise puts 😈 on every other reply.
 const SEXY_EMOJI = /(?:😈|🥵|💦|👅|🍆|🍑|🤤|😩)\uFE0F?/gu;
-// The AI's favourite openers ("Hehe, …", "Mmm, …", "Hmm …"): dropped when asked.
+// The AI's favourite openers ("Hehe, …", "Mmm, …", "Hmm …"): dropped when asked,
+// and so is any first word she opened her last replies with ("Oh… Oh… Oh…").
 const HABIT_OPENER = /^\s*(?:he(?:he)+|m{2,}|hm+)\b[\s,.!…]*/i;
-function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = false } = {}) {
+const firstWord = (t) => ((String(t).toLowerCase().match(/^[\p{L}]+/u) || [''])[0]).replace(/(.)\1+/g, '$1');
+const dropFirst = (t, re) => {
+  const rest = t.replace(re, '');
+  if (rest.split(/\s+/).length < 2) return t;
+  return /^[A-Z]/.test(t) ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest;
+};
+function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = false, recent = [] } = {}) {
   let seen = Math.random() < (EMOJI_CHANCE[emojis] ?? EMOJI_CHANCE.rarely) ? 0 : 1;   // 1 = none this time
+  const used = new Set(recent.slice(-3).map(firstWord).filter(w => ['oh', 'hehe', 'haha', 'm', 'hm', 'aw', 'well', 'so', 'ok', 'lol'].includes(w)));
   return list.map((m, i) => {
     let t = String(m);
-    if (dropOpener && i === 0 && HABIT_OPENER.test(t)) {
-      const rest = t.replace(HABIT_OPENER, '');
-      if (rest.split(/\s+/).length >= 2) t = /^[A-Z]/.test(t) ? rest.charAt(0).toUpperCase() + rest.slice(1) : rest;
-    }
+    if (i === 0 && dropOpener && HABIT_OPENER.test(t)) t = dropFirst(t, HABIT_OPENER);
+    if (i === 0 && used.has(firstWord(t))) t = dropFirst(t, /^\s*[\p{L}]+[\s,.!?…]*/u);
     return t
+      // the PPV card shows these: never in her text ("[PPV: c4]", "[price]")
+      .replace(/\[\s*(?:ppv|price|item|c\d+)\b[^\]]*\]/gi, '')
       .replace(maxLevel < 3 ? SEXY_EMOJI : /(?!)/gu, '\u0000')
       .replace(/\*([^*\n]+)\*/g, '$1')
       .replace(/\s*[—–]\s*/g, ', ')
@@ -366,17 +404,18 @@ function readReply(text) {
   const j = parseJsonObject(text);
   const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
   if (j && (Array.isArray(j.messages) || typeof j.messages === 'string')) {
-    return { messages: strings(j.messages), learned: strings(j.learned).slice(0, 10), handover: clean(j.handover), format_ok: true };
+    const ppv = j.ppv && typeof j.ppv === 'object' && j.ppv.item ? { item: clean(j.ppv.item), price: Number(j.ppv.price) || null } : null;
+    return { messages: strings(j.messages), ppv, learned: strings(j.learned).slice(0, 10), handover: clean(j.handover), format_ok: true };
   }
   // broken JSON (cut off, a stray quote): the texts inside "messages", if they can be found
   const inside = /"messages"\s*:\s*\[([\s\S]*?)(?:\]|$)/.exec(String(text || ''));
   if (inside) {
     const texts = [...inside[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(x => tryJson(`"${escapeRawBreaks(x[1])}"`) ?? x[1]);
-    if (texts.length) return { messages: strings(texts), learned: [], handover: '', format_ok: false };
+    if (texts.length) return { messages: strings(texts), ppv: null, learned: [], handover: '', format_ok: false };
   }
   // not the JSON asked for: the whole answer is the reply, one message per line
   const lines = clean(text).split(/\n+/).map(clean).filter(Boolean);
-  return { messages: lines, learned: [], handover: '', format_ok: false };
+  return { messages: lines, ppv: null, learned: [], handover: '', format_ok: false };
 }
 
 module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, tidyMessages, chatLine };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Check, Loader2, MessageSquareReply, RotateCcw, Search, Send, ShieldAlert, UserRoundPlus } from 'lucide-react';
+import { Check, Hourglass, Loader2, Lock, MessageSquareReply, RotateCcw, Search, Send, ShieldAlert, UserRoundPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { cost, dayTime, errMsg, fanName, moneyLine, shortDay } from './shared';
 
@@ -46,17 +47,35 @@ const readLine = (u) => {
   const level = u.level ? ` He seemed ${u.level.mood}, ${LEVEL[u.level.his]}${u.level.pulled_back ? ' and slowing down' : ''}: she could go up to ${LEVEL[u.level.max]}.` : '';
   const examples = u.examples ? ` ${u.examples} examples from the agency's good chats.` : '';
   const type = u.fan_type ? ` Treated him as: ${u.fan_type.toLowerCase()}.` : '';
-  return `The AI read ${bits.join(', ')}.${type}${level}${examples}`;
+  const phase = { offer: 'time to offer', after_buy: 'after a buy', no_buy: 'after a no' }[u.phase];
+  const selling = u.selling ? ` Selling${phase ? `: ${phase}` : ''}${u.sales ? `, ${u.sales} selling examples` : ''}.` : '';
+  return `The AI read ${bits.join(', ')}.${type}${level}${examples}${selling}`;
 };
 // Under a kept reply: which writer, the checks, the cost, what it would remember.
 const keptNote = (result, used) => [
   `kept · ${result.label}`, STATUS[result.status]?.label?.toLowerCase(), cost(result.cost),
   result.learned?.length ? `would remember: ${result.learned.map(l => l.note).join(' · ')}` : null,
 ].filter(Boolean).join(' · ') + (used ? `\n${readLine(used)}` : '');
-// Her reply as messages in the practice chat; the details go under the last one.
+// Her reply as messages in the practice chat; the details (and a PPV) go on the last one.
 const keptMessages = (result, used) => result.replies.map((r, i, all) => ({
   from: 'her', text: r.creator_message, label: result.label, note: i === all.length - 1 ? keptNote(result, used) : null,
+  ...(i === all.length - 1 && result.ppv ? { ppv: { ...result.ppv, status: 'pending' } } : {}),
 }));
+
+// A PPV she sent: price, what it is, exactly what's inside, and what he did with it.
+const PPV_STATUS = { pending: 'Not opened yet', bought: 'He bought it', not_bought: 'He didn\'t buy it' };
+function PpvCard({ ppv, children }) {
+  return (
+    <div className='flex max-w-[85%] flex-col gap-1 self-end rounded-xl border border-dashed border-warn/50 bg-warn/5 px-3 py-2 text-xs'>
+      <span className='flex items-center gap-1.5 font-medium'><Lock className='size-3.5 text-warn' />PPV ${ppv.price} · {ppv.title} · {ppv.what}</span>
+      <span className='text-muted-foreground'>{ppv.description}</span>
+      {ppv.status && <span className={cn('font-medium', ppv.status === 'bought' ? 'text-good' : ppv.status === 'not_bought' ? 'text-bad' : 'text-muted-foreground')}>
+        {PPV_STATUS[ppv.status]}{ppv.status === 'bought' ? (ppv.speed === 'slow' ? ' after a while' : ' right away') : ''}
+      </span>}
+      {children}
+    </div>
+  );
+}
 
 // When each of her messages starts and finishes being typed, counted from when he
 // wrote (`startAt`); played back as it would happen, unless skipped.
@@ -113,6 +132,7 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow }) {
               meta={live && result.timing ? `arrived after ${play.arrivedAfter[i]} s` : null}>{r.creator_message}</Bubble>
           ))}
           {play.typing && <Typing />}
+          {play.done && result.ppv && <PpvCard ppv={result.ppv} />}
           {!play.done && (
             <button type='button' onClick={play.skip} className='self-end text-xs text-link hover:underline'>
               {play.shown ? 'Skip the wait' : `${result.replies.length} message${result.replies.length === 1 ? '' : 's'} on the way · skip the wait`}
@@ -161,12 +181,14 @@ function Stopped({ screen }) {
  * and spending) or a made-up one, write as him, and see her reply from up to
  * three writers side by side, with the safety checks and the cost.
  */
-export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpent, onSetUp }) {
+export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpent, onSetUp, onContent, contentVersion = 0 }) {
   const [fans, setFans] = useState(null);
   const [search, setSearch] = useState('');
   const [fanId, setFanId] = useState(MADE_UP);
   const [detail, setDetail] = useState(null);         // the real fan: what the AI reads; undefined while loading
   const [madeUp, setMadeUp] = useState({ name: '', notes: '', type: 'none' });   // type: who he is (new subscriber, time waster…)
+  const [selling, setSelling] = useState(true);        // she may sell: PPVs from her content list
+  const [contentCount, setContentCount] = useState(null);
   const [test, setTest] = useState([]);               // typed here: { from: 'fan' | 'her', text, label? }
   const [rounds, setRounds] = useState([]);           // the AI's answers: { at (after test[at - 1]), screen, results, used, kept }
   const [models, setModels] = useState([page.writer]);
@@ -174,6 +196,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const [busy, setBusy] = useState(false);
   const scroller = useRef(null);
 
+  useEffect(() => {
+    api.get(`/api/ai-chat/pages/${page.creator_id}/content`).then(r => setContentCount(r.data.items.filter(it => it.active).length)).catch(() => setContentCount(0));
+  }, [page.creator_id, contentVersion]);
   useEffect(() => {
     api.get(`/api/ai-chat/pages/${page.creator_id}/fans`).then(r => setFans(r.data.fans))
       .catch(e => { setFans([]); toast.error(errMsg(e, 'Could not load the fans')); });
@@ -205,26 +230,25 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const canAnswerLast = real && !test.length && !rounds.length && lastReal?.from_fan;
   const blocked = !page.has_profile || !ready.writer || !ready.tables;
 
-  const ask = async (nextTest) => {
+  const sells = selling && contentCount > 0;
+  const ask = async (nextTest, { followUp = false } = {}) => {
     const askedAt = Date.now();         // her timing counts from when he wrote
     setBusy(true);
     try {
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, {
         fan_uuid: real ? fanId : null,
         made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
-        test: nextTest.map(({ from, text: t }) => ({ from, text: t })),
-        models,
+        test: nextTest.map(({ from, text: t, ppv }) => ({ from, text: t, ...(ppv ? { ppv } : {}) })),
+        models, selling: sells, follow_up: followUp,
       });
       setRounds(r => [...r, { at: nextTest.length, askedAt, ...data, kept: null }]);
       onSpent?.();
     } catch (e) { toast.error(errMsg(e, 'Could not get a reply')); }
     finally { setBusy(false); }
   };
-  const send = () => {
-    const t = text.trim();
-    if (!t || busy || blocked) return;
-    // no reply picked for his last message: the first one that passed counts, so
-    // the chat goes on from her answer (otherwise she'd never have answered)
+  // no reply picked for his last message: the first one that passed counts, so
+  // the chat goes on from her answer (otherwise she'd never have answered)
+  const withKept = () => {
     let next = [...test];
     const last = rounds[rounds.length - 1];
     if (last && !last.kept && last.at === test.length) {
@@ -234,11 +258,26 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         setRounds(rs => rs.map(r => (r === last ? { ...r, kept: first.model } : r)));
       }
     }
-    next = [...next, { from: 'fan', text: t }];
+    return next;
+  };
+  const send = () => {
+    const t = text.trim();
+    if (!t || busy || blocked) return;
+    const next = [...withKept(), { from: 'fan', text: t }];
     setTest(next);
     setText('');
     ask(next);
   };
+  // she writes without a new message from him (he went quiet, or just bought)
+  const followUp = () => {
+    if (busy || blocked) return;
+    const next = withKept();
+    setTest(next);
+    ask(next, { followUp: true });
+  };
+  // what he did with her PPV (the practice room plays him)
+  const setPpv = (i, status, speed = null) => setTest(t => t.map((m, k) => (k === i ? { ...m, ppv: { ...m.ppv, status, speed } } : m)));
+  const lastPpvAt = test.map(m => !!m.ppv).lastIndexOf(true);
   const keep = (round, result) => {
     setTest(t => [...t, ...keptMessages(result, round.used)]);
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
@@ -351,6 +390,17 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           {test.map((m, i) => (
             <div key={`t${i}`} className='flex flex-col gap-2'>
               <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}>{m.text}</Bubble>
+              {m.ppv && (
+                <PpvCard ppv={m.ppv}>
+                  {i === lastPpvAt && m.ppv.status === 'pending' && !busy && (
+                    <div className='mt-1 flex flex-wrap gap-1.5'>
+                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'fast')}>Bought right away</Button>
+                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'bought', 'slow')}>Bought after a while</Button>
+                      <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => setPpv(i, 'not_bought')}>Didn&apos;t buy</Button>
+                    </div>
+                  )}
+                </PpvCard>
+              )}
               {roundsAt(i + 1)}
             </div>
           ))}
@@ -361,6 +411,14 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         </div>
 
         <div className='flex flex-col gap-2'>
+          <div className='flex flex-wrap items-center gap-x-4 gap-y-1.5'>
+            <label className='flex items-center gap-2 text-xs'>
+              <Switch checked={sells} onCheckedChange={setSelling} disabled={!contentCount} aria-label='She sells' />
+              {contentCount === null ? <span className='text-muted-foreground'>Checking her content…</span> : contentCount
+                ? <span>She sells: PPVs from her {contentCount} content item{contentCount === 1 ? '' : 's'}</span>
+                : <span className='text-muted-foreground'>She can&apos;t sell yet: add her content first{onContent && <> (<button type='button' className='text-link hover:underline' onClick={onContent}>Her content</button>)</>}</span>}
+            </label>
+          </div>
           <div className='flex flex-wrap items-center gap-1.5'>
             <span className='me-1 text-xs text-muted-foreground'>Writers (up to 3):</span>
             {writers.map(w => (
@@ -378,6 +436,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           </div>
           <div className='flex flex-wrap gap-2'>
             {canAnswerLast && <Button size='sm' variant='outline' onClick={() => ask([])} disabled={busy || blocked}><MessageSquareReply />Answer his last message</Button>}
+            {(test.length > 0 || rounds.length > 0) && (
+              <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />He&apos;s quiet: let her write first</Button>
+            )}
             {(test.length > 0 || rounds.length > 0) && <Button size='sm' variant='ghost' onClick={() => { setTest([]); setRounds([]); }} disabled={busy}><RotateCcw />Start over</Button>}
           </div>
         </div>

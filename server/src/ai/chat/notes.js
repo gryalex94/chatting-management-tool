@@ -34,8 +34,13 @@ function mediaNote(m) {
     const what = mediaWhat(md);
     if (m.from_fan) return `he sent ${what}`;
     if (md.price) {
+      const name = md.title ? ` "${md.title}"` : '';
+      if (md.status) {                                       // the practice room: what he did with it
+        const how = md.status === 'bought' ? `he bought it${md.speed === 'slow' ? ' after a while' : ' right away'}` : md.status === 'not_bought' ? 'he didn\'t buy it' : 'he hasn\'t opened it yet';
+        return `PPV $${md.price}${name}: ${what}, ${how}`;
+      }
       const bought = md.bought_at || m.paid_at;
-      return `PPV $${md.price}: ${what}, ${bought ? `he bought it on ${day(bought)}` : 'he hasn\'t bought it'}`;
+      return `PPV $${md.price}${name}: ${what}, ${bought ? `he bought it on ${day(bought)}` : 'he hasn\'t bought it'}`;
     }
     return `${what}, free`;
   }

@@ -95,13 +95,35 @@ router.get('/pages/:creatorId/memory', (req, res) => res.json({ job: A.memoryJob
 // room. Only shown in the tool; nothing is sent to Fanvue.
 router.post('/pages/:creatorId/reply', async (req, res) => {
   try {
-    const { fan_uuid: fanUuid, made_up: madeUp, test, models } = req.body || {};
+    const { fan_uuid: fanUuid, made_up: madeUp, test, models, selling, follow_up: followUp } = req.body || {};
     if (fanUuid != null && !FAN_RE.test(String(fanUuid))) return res.status(400).json({ error: 'Fan not found' });
     res.json(await A.reply(org(req), req.params.creatorId, {
       fanUuid: fanUuid || null, madeUp: madeUp && typeof madeUp === 'object' ? madeUp : null,
       test: Array.isArray(test) ? test : [], models: Array.isArray(models) ? models : [],
+      selling: selling === true, followUp: followUp === true,
     }));
   } catch (e) { fail(res, e, 'draft a reply'); }
+});
+
+// ── Her content: what she can sell, described precisely (database change 041) ──
+// GET  /api/ai-chat/pages/:creatorId/content          — the list, each item with how spicy it is
+// POST /api/ai-chat/pages/:creatorId/content          — add or change an item (body: the item; id = change)
+// POST /api/ai-chat/pages/:creatorId/content/starter  — add the starter list (an example to change)
+// DELETE /api/ai-chat/pages/:creatorId/content/:itemId
+router.get('/pages/:creatorId/content', async (req, res) => {
+  try { res.json(await A.contentList(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her content'); }
+});
+router.post('/pages/:creatorId/content/starter', async (req, res) => {
+  try { res.json(await A.addStarterContent(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'add the starter list'); }
+});
+router.post('/pages/:creatorId/content', async (req, res) => {
+  try { res.json(await A.saveContent(org(req), req.params.creatorId, req.body || {}, req.user.id)); } catch (e) { fail(res, e, 'save the item'); }
+});
+router.delete('/pages/:creatorId/content/:itemId', async (req, res) => {
+  try {
+    if (!/^\d+$/.test(req.params.itemId)) return res.status(400).json({ error: 'Not found' });
+    res.json(await A.deleteContent(org(req), req.params.creatorId, req.params.itemId));
+  } catch (e) { fail(res, e, 'delete the item'); }
 });
 
 // ── The blind test: AI against her chatters (utils/aiDuels.js) ──────────────

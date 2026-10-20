@@ -48,13 +48,14 @@ const line = (m) => {
 };
 
 /** The messages for the situation picker: the menu, the facts and the last messages. */
-function pickPrompt({ chat, money }) {
+function pickPrompt({ chat, money, selling = false }) {
+  const menu = selling ? PLAYBOOK.situations : SITUATIONS;
   return [
     { role: 'system', content: 'You match a moment in a chat between a creator and a fan to situations from a chatting playbook. Answer with JSON only.' },
     {
       role: 'user',
       content: [
-        `Situations:\n${SITUATIONS.map(s => `${s.id}: ${s.title}`).join('\n')}`,
+        `Situations:\n${menu.map(s => `${s.id}: ${s.title}`).join('\n')}`,
         `About this moment: ${momentFacts(chat, money)}`,
         `The last messages:\n${chat.filter(m => !m.mass).slice(-10).map(line).join('\n')}`,
         'Which situations (at most 3) fit his latest message right now? Only ones that clearly fit.\n'
@@ -67,10 +68,10 @@ function pickPrompt({ chat, money }) {
   ];
 }
 
-// The picked situation ids from the picker's answer (only real, non-selling ones).
-function readPick(json) {
+// The picked situation ids from the picker's answer (only real ones; selling ones only when she sells).
+function readPick(json, { selling = false } = {}) {
   const ids = Array.isArray(json?.ids) ? json.ids : [];
-  return [...new Set(ids.map(String))].filter(id => byId[id] && !byId[id].selling).slice(0, 3);
+  return [...new Set(ids.map(String))].filter(id => byId[id] && (selling || !byId[id].selling)).slice(0, 3);
 }
 
 // His level (0 to 3), mood and whether he pulled back, from the picker's answer.

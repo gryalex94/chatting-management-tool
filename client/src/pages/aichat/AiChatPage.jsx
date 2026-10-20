@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import PlatformNotice from '@/components/shared/PlatformNotice';
 import PracticeTab from './PracticeTab';
 import ProfileTab from './ProfileTab';
+import ContentTab from './ContentTab';
 import MemoryTab from './MemoryTab';
 import DuelTab from './DuelTab';
 import { cost, errMsg } from './shared';
@@ -28,6 +29,7 @@ export default function AiChatPage() {
   const [data, setData] = useState(null);             // { ready, writers, default_writer, pages }
   const [pageId, setPageId] = useState(null);
   const [tab, setTab] = useState('practice');
+  const [contentVersion, setContentVersion] = useState(0);   // her content changed: Practice counts it again
   const [spent, setSpent] = useState(null);
 
   const load = useCallback(() => api.get('/api/ai-chat').then(r => setData(r.data))
@@ -86,16 +88,21 @@ export default function AiChatPage() {
           <TabsList>
             <TabsTrigger value='practice'>Practice</TabsTrigger>
             <TabsTrigger value='profile'>Her profile</TabsTrigger>
+            <TabsTrigger value='content'>Her content</TabsTrigger>
             <TabsTrigger value='memory'>Fan memory</TabsTrigger>
             <TabsTrigger value='duel'>Blind test</TabsTrigger>
           </TabsList>
         </div>
         {/* kept mounted, so a practice chat survives a look at the other tabs */}
         <TabsContent value='practice' forceMount className='data-[state=inactive]:hidden'>
-          <PracticeTab key={page.creator_id} page={page} writers={data.writers} fanTypes={data.fan_types} ready={data.ready} onSpent={loadSpent} onSetUp={() => setTab('profile')} />
+          <PracticeTab key={page.creator_id} page={page} writers={data.writers} fanTypes={data.fan_types} ready={data.ready} onSpent={loadSpent} onSetUp={() => setTab('profile')}
+            onContent={() => setTab('content')} contentVersion={contentVersion} />
         </TabsContent>
         <TabsContent value='profile'>
           <ProfileTab key={page.creator_id} page={page} writers={data.writers} ready={data.ready} onSaved={() => { load(); loadSpent(); }} />
+        </TabsContent>
+        <TabsContent value='content'>
+          <ContentTab key={page.creator_id} page={page} onChanged={() => setContentVersion(v => v + 1)} />
         </TabsContent>
         <TabsContent value='memory'>
           <MemoryTab key={page.creator_id} page={page} ready={data.ready} onSpent={loadSpent} />
