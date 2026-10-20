@@ -14,6 +14,7 @@
 const { GAME_PLAN } = require('./strategy');
 const { mediaNote, emptyBody } = require('./notes');
 const { isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW } = require('./safety');
+const { planText } = require('./plan');
 
 const PROFILE_FIELDS = [
   ['name', 'Name'], ['gender', 'Gender'], ['age', 'Age'], ['orientation', 'Sexuality'], ['from', 'Where she lives'],
@@ -198,7 +199,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -235,6 +236,8 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
       + 'Setting the scene is fine in your character, like getting under the covers or closing the curtains; your PPVs are already made, so never say you are taking or filming them now)\n'
       + lines.join('\n'));
   }
+  // the plan for this reply, decided from who he is and the moment (plan.js)
+  if (plan) parts.push(`# Your plan for this reply (decided from who he is and the moment: follow it, in your own words)\n${planText(plan).map(l => `- ${l}`).join('\n')}`);
   const now_ = [];
   if (level) {
     now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);

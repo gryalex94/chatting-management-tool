@@ -34,19 +34,27 @@ function safetyStep(screen) {
   });
 }
 
-/** 2. Who he is: a made-up fan's type, or a real fan's numbers and notes. */
-function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false }) {
+/** 2. Who he is: his tier and flags (plan.fanProfile), a made-up fan's type, or a real fan's numbers and notes. */
+function himStep({ real = false, fan = {}, type = null, money: m = null, card = [], story = '', long = false, profile = null }) {
   const bits = [];
+  if (profile) bits.push(profile.tier_label);
   if (m?.standing?.label) bits.push(m.standing.label);
   if (m) bits.push(m.spent > 0 ? `${money(m.spent)} spent` : 'nothing spent');
   if (m?.last_purchase) bits.push(`last bought ${day(m.last_purchase)}`);
   const kinds = {};
   for (const f of card) kinds[f.kind] = (kinds[f.kind] || 0) + 1;
+  const flags = profile ? [profile.new_sub ? 'new subscriber' : null, profile.time_waster ? 'time waster' : null, profile.suspicious ? 'suspicious' : null].filter(Boolean) : [];
   return step('him', 'Who he is', {
-    result: [type?.label || (real ? null : 'Not set'), ...bits].filter(Boolean).join(' · ') || 'Nothing known about him',
+    result: bits.filter(Boolean).join(' · ') || (real ? 'Nothing known about him' : 'Not set'),
     why: type?.approach || '',
-    tags: [type ? 'Fan type' : null, m ? 'Fanvue\'s numbers' : null, card.length ? 'Fan memory' : null].filter(Boolean),
+    tags: [profile ? 'Q16 · Q17' : null, type ? 'Fan type' : null, m ? 'Fanvue\'s numbers' : null, card.length ? 'Fan memory' : null].filter(Boolean),
     details: [
+      profile ? { label: 'Tier', value: `${profile.tier_label}: ${profile.tier_why}` } : null,
+      flags.length ? { label: 'Marked', value: flags.join(', ') } : null,
+      profile ? { label: 'Closeness', value: `${profile.closeness} (a rough estimate from his type, spending and this chat, until his memory rates it)` } : null,
+      profile ? { label: 'Free talk budget', value: `${profile.budget.used} of ${profile.budget.limit} of her small-talk messages since his last purchase (Q26b)` } : null,
+      profile?.avg_price ? { label: 'Usually pays', value: `about $${profile.avg_price} a PPV` } : null,
+      type ? { label: 'Practice type', value: type.label } : null,
       fan.name ? { label: 'Name', value: fan.name } : null,
       m?.standing?.text ? { label: 'Standing', value: m.standing.text } : null,
       m && (m.paid_messages || m.tips) ? { label: 'Buys', value: `${m.paid_messages || 0} paid message${m.paid_messages === 1 ? '' : 's'}, ${m.tips || 0} tip${m.tips === 1 ? '' : 's'}` } : null,
@@ -74,9 +82,32 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
   });
 }
 
-/** 4. The plan: what this reply should do, each decision with its reason. */
-function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', notes = [], storyOn = false }) {
+/** 4. The plan: what this reply should do, each decision with its reason (plan.planReply). */
+function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', notes = [], storyOn = false, plan = null }) {
   const kind = heatKind(heat);
+  if (plan) {
+    const how = level.pulled_back ? 'he\'s slowing down, so she follows him'
+      : level.lead ? (level.warm ? 'past the warm-up: she may lead, one step above him at most' : `he has been sexual for ${level.since} of her replies: she leads now`)
+        : level.match ? 'he got sexual: she matches him, not above' : 'warm-up: she follows him, teasing at most';
+    return step('plan', 'The plan', {
+      status: 'decision',
+      result: plan.goal_text,
+      why: `Because ${plan.why}.`,
+      tags: plan.rules,
+      details: [
+        { label: 'PPV', value: plan.sell.allowed ? (plan.offer?.items ? `offer one he asked for: ${plan.offer.items.map(it => `"${it.title}"`).join(', ')}` : plan.offer?.next ? plan.offer.next : `allowed: ${plan.sell.why}`) : `none: ${plan.sell.why}` },
+        plan.price_hint ? { label: 'Price', value: plan.price_hint } : null,
+        { label: 'Questions', value: plan.ask.allowed ? plan.ask.why : `none: ${plan.ask.why}` },
+        { label: 'Length', value: `${plan.length.text} (${plan.length.why})` },
+        { label: 'How far she may go', value: `${plan.level.word}: ${how}. Her heat setting: ${kind}${kind === 'medium' ? ' (explicit only when he is)' : ''}.` },
+        { label: 'Leads', value: plan.lead ? 'yes: she says what she does next' : 'no: she follows him' },
+        plan.callback ? { label: 'From his notes', value: `"${plan.callback.note}": ${plan.callback.why}` } : null,
+        plan.story ? { label: 'Story move', value: `"${plan.story.move}"` } : null,
+        voice?.openers?.length ? { label: 'Don\'t start like', value: voice.openers.map(o => `"${o}…"`).join(', ') } : null,
+        ...notes.map(n => ({ label: 'Note for her', value: n })),
+      ],
+    });
+  }
   const how = level.pulled_back ? 'he\'s slowing down, so she follows him'
     : level.lead ? (level.warm ? 'past the warm-up: she may lead, one step above him at most' : `he has been sexual for ${level.since} of her replies: she leads now`)
       : level.match ? 'he got sexual: she matches him, not above'

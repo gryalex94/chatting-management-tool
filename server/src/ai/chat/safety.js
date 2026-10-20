@@ -25,7 +25,9 @@ const MINOR_WORDS = /\b(?:under\s?age|underaged|pre-?teens?|jail\s?bait|lolis?|l
 // Usually innocent ("my kids are asleep"), sometimes not: Claude judges these.
 const DOUBTFUL_WORDS = /\b(?:kids?|child|children|daughters?|sons?|nieces?|nephews?|teens?|teenage|teenagers?|school\w*|students?|class\s?mates?|young(?:er)?\s+(?:girl|boy|one)s?|little\s+(?:girl|boy|sister|brother)s?|minors?|barely\s+legal|sisters?|brothers?|step\s?(?:sis|sister|bro|brother|mom|mum|dad|daughter|son)\w*|cousins?|mommy|mom|mum|mother|aunt|uncle)\b/i;
 const CRISIS = /\b(?:kill(?:ing)?\s+my\s?self|suicid\w*|end(?:ing)?\s+(?:it\s+all|my\s+life)|self[-\s]?harm\w*|cut(?:ting)?\s+my\s?self|want(?:ed)?\s+to\s+die|don'?t\s+want\s+to\s+(?:live|be\s+alive)|no\s+reason\s+to\s+live)\b/i;
-const PAYMENT_DISPUTE = /\b(?:refund\w*|charge\s?backs?|scam\w*|ripped\s+off|fraud|stole|stolen|money\s+back|didn'?t\s+(?:get|receive)\s+(?:it|what|the|my))\b/i;
+// A payment dispute goes to a person. "Is this a scam?" alone is a doubt, not a dispute:
+// she reassures him (plan.js, Q24c); "you scammed me" is a dispute.
+const PAYMENT_DISPUTE = /\b(?:refund\w*|charge\s?backs?|ripped\s+off|fraud|stole|stolen|money\s+back|didn'?t\s+(?:get|receive)\s+(?:it|what|the|my)|(?:you|she|this\s+page)\s+scammed|scammed\s+me|got\s+scammed)\b/i;
 const ASKS_REAL = /\b(?:are\s+(?:you|u)\s+(?:a\s+)?(?:real|human|bot|robot|ai|a\.i\.|fake|a\s+person|actually\s+real)|(?:you'?re|ur|you\s+are)\s+(?:a\s+)?(?:bot|robot|ai|fake|not\s+real)|is\s+this\s+(?:a\s+)?(?:bot|ai|real)|real\s+person|chat\s?gpt)\b/i;
 // "Nice to meet you" is a greeting, not a meet-up.
 const NOT_GREETING = '(?<!(?:nice|glad|good|great|lovely|happy|pleasure|pleased|cool|awesome)\\s+to\\s+)';
@@ -218,9 +220,13 @@ function questionsIn(list, his = '') {
  * messages as one text, `noQuestion` = why this reply shouldn't ask anything ('' =
  * it may ask one). Returns plain-language problems ([] = fine).
  */
-function voiceProblems(list, { recent = [], his = '', noQuestion = '' } = {}) {
+function voiceProblems(list, { recent = [], his = '', noQuestion = '', length = null } = {}) {
   const all = straight(list.join('\n'));
   const out = [];
+  // his length, mirrored (the plan: Q4)
+  const n = wordsOf(all).length;
+  if (length === 'short' && (n > 35 || list.length > 2)) out.push('It\'s much longer than his short message: keep it short (one message).');
+  if (length === 'long' && n < 8) out.push('It\'s too short for what he wrote: give him a bit more.');
   const questions = questionsIn(list, his);
   if (questions > 1) out.push(`It asks him ${questions} questions; one at most, and often none.`);
   else if (questions && noQuestion) out.push(`It asks him a question, but ${noQuestion}`);

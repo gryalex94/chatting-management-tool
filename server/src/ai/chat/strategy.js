@@ -75,7 +75,7 @@ function readPick(json, { selling = false } = {}) {
 }
 
 // His level (0 to 3), mood and whether he pulled back, from the picker's answer.
-const MOODS = ['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring', 'tired', 'sad', 'annoyed', 'brief'];
+const MOODS = ['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring', 'tired', 'sad', 'annoyed', 'brief', 'suspicious'];
 function readMood(json) {
   const level = Number.isInteger(json?.level) && json.level >= 0 && json.level <= 3 ? json.level : 0;
   return { his: level, mood: MOODS.includes(json?.mood) ? json.mood : 'chatty', pulled_back: json?.pulled_back === true };

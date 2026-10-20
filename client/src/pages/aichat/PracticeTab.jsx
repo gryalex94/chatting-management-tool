@@ -261,19 +261,34 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const ask = async (nextTest, { followUp = false } = {}) => {
     const askedAt = Date.now();         // her timing counts from when he wrote
     setBusy(true);
+    // kept with the reply, so "what if" can ask again about the same moment
+    const body = {
+      fan_uuid: real ? fanId : null,
+      made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
+      test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
+      models, selling: sells, follow_up: followUp,
+    };
     try {
-      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, {
-        fan_uuid: real ? fanId : null,
-        made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
-        test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
-        models, selling: sells, follow_up: followUp,
-      });
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, body);
       const id = `r${askedAt}`;
-      setRounds(r => [...r, { id, at: nextTest.length, askedAt, ...data, kept: null }]);
+      setRounds(r => [...r, { id, at: nextTest.length, askedAt, body, ...data, kept: null, whatIfs: [] }]);
       setMapId(id);                     // the newest reply's map
       onSpent?.();
     } catch (e) { toast.error(errMsg(e, 'Could not get a reply')); }
     finally { setBusy(false); }
+  };
+  // what if he were someone else, or in another mood: the same moment decided again
+  // (and written, if asked), shown in the map, not in the chat
+  const [whatIfBusy, setWhatIfBusy] = useState(false);
+  const whatIf = async (round, overrides, write) => {
+    if (!round?.body || whatIfBusy) return;
+    setWhatIfBusy(true);
+    try {
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, { ...round.body, what_if: overrides, plan_only: !write });
+      setRounds(rs => rs.map(r => (r.id === round.id ? { ...r, whatIfs: [{ id: `w${Date.now()}`, overrides, write, data }, ...(r.whatIfs || [])] } : r)));
+      onSpent?.();
+    } catch (e) { toast.error(errMsg(e, 'Could not try that')); }
+    finally { setWhatIfBusy(false); }
   };
   // no reply picked for his last message: the first one that passed counts, so
   // the chat goes on from her answer (otherwise she'd never have answered)
@@ -526,7 +541,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
             {composerBox}
           </main>
           <aside ref={mapPanel} className='order-2 border-t bg-muted/20 p-3 lg:order-none lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0' aria-label='How she decided'>
-            <DecisionMap rounds={rounds} selectedId={mapId || rounds[rounds.length - 1]?.id} onSelect={setMapId} />
+            <DecisionMap rounds={rounds} selectedId={mapId || rounds[rounds.length - 1]?.id} onSelect={setMapId} onWhatIf={whatIf} whatIfBusy={whatIfBusy} />
           </aside>
         </div>
       </div>
