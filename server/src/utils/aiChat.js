@@ -18,7 +18,8 @@ const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
-const { reviewFan, reviewReply, reviewOffer, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { reviewFan, reviewReply, reviewOffer, coachCheck, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { RULES } = require('../ai/chat/rules');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
 const { mediaNote, emptyBody, standingAt } = require('../ai/chat/notes');
@@ -770,11 +771,13 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (sell && !replyPlan.sell.allowed && !noOffer) noOffer = replyPlan.sell.why;
   if (!replyPlan.ask.allowed && !voice.noQuestion) voice.noQuestion = replyPlan.ask.why;
   voice.length = replyPlan.length.target;
+  // your marks from Practice that fit this moment: wording ones go to the writer, all go to Claude's check
+  const lessons = lessonsFor(await loadLessons(orgId, creatorId), { said: latest.join(' '), goal: replyPlan.goal });
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone: persona.settings?.timezone || P.DEFAULT_TZ,
-    selling: sell, content: sell ? C.contentText(content) : '', sales,
+    selling: sell, content: sell ? C.contentText(content) : '', sales, lessons: lessons.filter(l => l.kind === 'wording'),
   };
   // the decision map: what was looked at and decided before any writer wrote a word
   const situations = plan.ids.map(strategy.situationTitle);
@@ -785,6 +788,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
+    T.lessonsStep(lessons),
   ].filter(Boolean);
   if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile } };
 
@@ -794,6 +798,21 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const results = await Promise.all(writers.map(model => writeOne({
     orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sell ? { items: content, offered } : null,
   })));
+  // 4. Claude's watch-only check of each reply (Practice): never blocks or rewrites; kept for a daily score
+  await Promise.all(results.map(async (r) => {
+    if (!['ok', 'check'].includes(r.status) || !r.replies.length) return;
+    try {
+      const c = await coachCheck({ profile: persona.profile, fan: profile, card, plan: replyPlan, chat: win.messages, messages: r.replies.map(x => x.creator_message), ppv: r.ppv, rules: RULES, lessons });
+      await logUsage(orgId, 'check', CHECK_MODEL, c.usage, { creatorId, fanUuid });
+      r.cost += c.usage.cost || 0;
+      r.coach = { overall: c.overall, summary: c.summary, points: c.points };
+      r.trace = [...(r.trace || []), T.coachStep(r.label, r.coach)];
+      supabaseAdmin.from('ai_checks').insert({
+        organisation_id: orgId, creator_id: creatorId, writer: r.model, overall: c.overall, points: c.points,
+        his: latest.join('\n') || null, her: r.replies.map(x => x.creator_message), goal: replyPlan.goal, cost_usd: c.usage.cost || 0,
+      }).then(({ error }) => { if (error && !/ai_checks/.test(error.message)) console.error('[ai-chat] check save:', error.message); });
+    } catch (e) { console.error('[ai-chat] coach:', e.message); }
+  }));
   return {
     screen, results,
     used: {
@@ -804,6 +823,71 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       trace, said: latest, what_if: whatIf, plan: replyPlan, profile,
     },
   };
+}
+
+// ── Your marks from Practice (database change 044) ─────────────────────────────
+// A wrong call or bad wording, marked on a reply's decision map, with what was wrong
+// and what she should have done. Kept in memory for a short while per page.
+const FEEDBACK_MISSING = 'Run database change 044 (marks on replies) in Supabase first';
+const lessonCache = new Map();
+async function loadLessons(orgId, creatorId) {
+  const key = `${orgId}|${creatorId}`;
+  const hit = lessonCache.get(key);
+  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.rows;
+  let rows = [];
+  try {
+    const { data, error } = await supabaseAdmin.from('ai_feedback').select('id, kind, step, note, better, his, her, goal, created_at')
+      .eq('organisation_id', orgId).eq('creator_id', creatorId).eq('active', true).order('created_at', { ascending: false }).limit(300);
+    if (!error) rows = data || [];
+  } catch { rows = []; }
+  lessonCache.set(key, { at: Date.now(), rows });
+  return rows;
+}
+// The marks that fit this moment: the same goal, or the same words as his message; three of each kind at most.
+function lessonsFor(rows, { said = '', goal = '' }) {
+  const his_ = wordsOf(said);
+  const score = (r) => {
+    let k = 0;
+    for (const w of wordsOf(r.his)) if (his_.has(w)) k += 1;
+    return Math.min(4, 2 * k) + (r.goal && r.goal === goal ? 3 : 0);
+  };
+  const pick = (kind) => rows.filter(r => r.kind === kind).map(r => [score(r), r]).filter(([s]) => s >= 3).sort((a, b) => b[0] - a[0]).slice(0, 3).map(([, r]) => r);
+  return [...pick('wording'), ...pick('decision')];
+}
+
+/** Save a mark from Practice: { kind: 'decision' | 'wording', step, note, better, his, her, goal, context }. */
+async function saveFeedback(orgId, creatorId, userId, raw = {}) {
+  await pageAccount(orgId, creatorId);
+  const text = (v, n) => clean(v).slice(0, n);
+  const row = {
+    organisation_id: orgId, creator_id: creatorId, created_by: userId ? String(userId) : null,
+    kind: raw.kind === 'wording' ? 'wording' : 'decision', step: text(raw.step, 40) || null,
+    note: text(raw.note, 1000), better: text(raw.better, 1000) || null, his: text(raw.his, 2000) || null,
+    her: (Array.isArray(raw.her) ? raw.her : []).map(x => text(x, 1000)).filter(Boolean).slice(0, 5),
+    goal: text(raw.goal, 40) || null, context: raw.context && typeof raw.context === 'object' ? raw.context : {},
+  };
+  if (!row.note) throw new AiChatError('Say what was wrong');
+  const { data, error } = await supabaseAdmin.from('ai_feedback').insert(row).select('id').single();
+  if (error) throw new AiChatError(/ai_feedback/.test(error.message) ? FEEDBACK_MISSING : error.message, /ai_feedback/.test(error.message) ? 409 : 400);
+  lessonCache.delete(`${orgId}|${creatorId}`);
+  return { id: data.id };
+}
+
+/** Your marks, newest first (switched-off ones too). */
+async function listFeedback(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_feedback').select('*').eq('organisation_id', orgId).eq('creator_id', creatorId).order('created_at', { ascending: false }).limit(500);
+  if (error) throw new AiChatError(/ai_feedback/.test(error.message) ? FEEDBACK_MISSING : error.message, 409);
+  return { feedback: data };
+}
+
+/** Switch a mark on or off for teaching. */
+async function setFeedbackActive(orgId, creatorId, id, active) {
+  await pageAccount(orgId, creatorId);
+  const { error } = await supabaseAdmin.from('ai_feedback').update({ active: !!active }).eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
+  if (error) throw new Error(error.message);
+  lessonCache.delete(`${orgId}|${creatorId}`);
+  return listFeedback(orgId, creatorId);
 }
 
 // ── Her sexting story ────────────────────────────────────────────────────────
@@ -1369,6 +1453,7 @@ async function usage(orgId) {
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
+  saveFeedback, listFeedback, setFeedbackActive,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },

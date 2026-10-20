@@ -107,6 +107,21 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
   } catch (e) { fail(res, e, 'draft a reply'); }
 });
 
+// ── Your marks on replies (database change 044): teaching from Practice ──────
+// POST /pages/:creatorId/feedback { kind, step, note, better, his, her, goal, context }
+router.post('/pages/:creatorId/feedback', async (req, res) => {
+  try { res.json(await A.saveFeedback(org(req), req.params.creatorId, req.user?.id, req.body || {})); } catch (e) { fail(res, e, 'save your note'); }
+});
+router.get('/pages/:creatorId/feedback', async (req, res) => {
+  try { res.json(await A.listFeedback(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load your notes'); }
+});
+router.patch('/pages/:creatorId/feedback/:id', async (req, res) => {
+  try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ error: 'Note not found' });
+    res.json(await A.setFeedbackActive(org(req), req.params.creatorId, req.params.id, req.body?.active !== false));
+  } catch (e) { fail(res, e, 'change your note'); }
+});
+
 // ── Her content: what she can sell, described precisely (database change 041) ──
 // GET  /api/ai-chat/pages/:creatorId/content          — the list, each item with how spicy it is
 // POST /api/ai-chat/pages/:creatorId/content          — add or change an item (body: the item; id = change)

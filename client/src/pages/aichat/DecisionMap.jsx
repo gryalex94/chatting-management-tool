@@ -1,18 +1,57 @@
 import { Fragment, useState } from 'react';
-import { Activity, BookOpen, ChevronLeft, ChevronRight, CircleCheck, Flame, FlaskConical, ListChecks, Loader2, PenLine, Route, ShieldCheck, UserRound } from 'lucide-react';
+import { Activity, BookOpen, Check, ChevronLeft, ChevronRight, CircleCheck, Flag, Flame, FlaskConical, GraduationCap, ListChecks, Loader2, NotebookPen, PenLine, Route, ShieldCheck, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { cost } from './shared';
 
 // How each step looks: its icon, and its colour by status.
-const ICON = { safety: ShieldCheck, him: UserRound, moment: Activity, plan: Route, story: Flame, briefing: BookOpen, result: CircleCheck };
+const ICON = { safety: ShieldCheck, him: UserRound, moment: Activity, plan: Route, story: Flame, briefing: BookOpen, result: CircleCheck, lessons: NotebookPen, coach: GraduationCap };
+// Which steps you can mark: a wrong call (a decision) or bad wording (her words).
+const markKind = (id) => (['him', 'moment', 'plan', 'story'].includes(id) ? 'decision' : id === 'result' || id.startsWith('draft') ? 'wording' : null);
+
+// Marking a step as wrong: what was wrong and what she should have done; it teaches the engine.
+function Mark({ kind, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [better, setBetter] = useState('');
+  const [state, setState] = useState(null);          // null | 'saving' | 'saved'
+  if (state === 'saved') {
+    return <span className='flex items-center gap-1 text-xs text-good'><Check className='size-3.5' aria-hidden />Marked: the engine learns from it</span>;
+  }
+  if (!open) {
+    return (
+      <button type='button' onClick={() => setOpen(true)} className='flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground hover:underline'>
+        <Flag className='size-3' aria-hidden />{kind === 'decision' ? 'Wrong call' : 'Bad wording'}
+      </button>
+    );
+  }
+  const save = async () => {
+    if (!note.trim()) return;
+    setState('saving');
+    try { await onSave(note.trim(), better.trim()); setState('saved'); } catch { setState(null); }
+  };
+  return (
+    <div className='flex flex-col gap-1.5 rounded-md border bg-background p-2'>
+      <Textarea rows={2} value={note} onChange={e => setNote(e.target.value)} className='min-h-0 resize-none text-xs' autoFocus
+        placeholder={kind === 'decision' ? 'What was the wrong call?' : 'What was wrong with her words?'} aria-label='What was wrong' />
+      <Textarea rows={2} value={better} onChange={e => setBetter(e.target.value)} className='min-h-0 resize-none text-xs'
+        placeholder={kind === 'decision' ? 'What should she have done instead? (optional)' : 'What should she have said? (optional)'} aria-label='What would be better' />
+      {!note.trim() && state === null && <span className='text-[11px] text-muted-foreground'>Say what was wrong to save it.</span>}
+      <div className='flex gap-2'>
+        <Button size='sm' className='h-7 text-xs' onClick={save} disabled={!note.trim() || state === 'saving'}>{state === 'saving' ? 'Saving…' : 'Save'}</Button>
+        <Button size='sm' variant='ghost' className='h-7 text-xs' onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
+    </div>
+  );
+}
 const TONE = { ok: 'text-good', warn: 'text-warn', stop: 'text-bad', decision: 'text-primary', info: 'text-muted-foreground' };
 const SHOWN = 4;                       // details shown before "Show more"
 
 // One step of the map: what it looked at, what it decided, why, and the rules or data behind it.
-function Step({ step }) {
+function Step({ step, onMark }) {
   const [all, setAll] = useState(false);
   const Icon = ICON[step.id] || (step.id.startsWith('draft') ? PenLine : ListChecks);
   const details = all ? step.details : step.details.slice(0, SHOWN);
@@ -50,6 +89,7 @@ function Step({ step }) {
             {all ? 'Show less' : `Show ${step.details.length - SHOWN} more`}
           </button>
         )}
+        {onMark && markKind(step.id) && <Mark kind={markKind(step.id)} onSave={(note, better) => onMark(step, markKind(step.id), note, better)} />}
       </div>
     </li>
   );
@@ -132,7 +172,7 @@ function WhatIf({ round, onWhatIf, busy }) {
  * writer read, then each writer's drafts (what was turned down and why, what the
  * code changed) and the result. `rounds` = the practice chat's replies, oldest first.
  */
-export default function DecisionMap({ rounds, selectedId, onSelect, onWhatIf, whatIfBusy = false }) {
+export default function DecisionMap({ rounds, selectedId, onSelect, onWhatIf, whatIfBusy = false, onMark }) {
   const i = rounds.findIndex(r => r.id === selectedId);
   const round = i >= 0 ? rounds[i] : null;
   if (!round) {
@@ -145,6 +185,14 @@ export default function DecisionMap({ rounds, selectedId, onSelect, onWhatIf, wh
   }
   const shared = round.used?.trace || [];
   const said = round.used?.said?.length ? round.used.said.join(' / ') : null;
+  // a mark: the step, his message, her reply (the draft's words, or the reply shown), the plan's goal
+  const shownResult = round.results?.find(r => r.model === round.kept) || round.results?.find(r => r.replies?.length);
+  const markFor = (r) => (onMark ? (s, kind, note, better) => onMark({
+    kind, step: s.id, note, better, his: (round.used?.said || []).join('\n'),
+    her: s.quotes?.length ? s.quotes : ((r || shownResult)?.replies || []).map(x => x.creator_message),
+    goal: round.used?.plan?.goal || null,
+    context: { step_title: s.title, step_result: s.result, tier: round.used?.profile?.tier || null, writer: (r || shownResult)?.model || null },
+  }) : null);
   return (
     <div className='flex flex-col gap-3'>
       <div className='flex items-center justify-between gap-2'>
@@ -158,7 +206,7 @@ export default function DecisionMap({ rounds, selectedId, onSelect, onWhatIf, wh
       <p className='rounded-lg bg-muted px-3 py-2 text-xs'>
         {said ? <><span className='text-muted-foreground'>He wrote: </span>{said}</> : round.used?.follow_up ? 'He went quiet: she writes first.' : 'Her reply'}
       </p>
-      {shared.length ? <ol className='flex flex-col'>{shared.map(s => <Step key={s.id} step={s} />)}</ol>
+      {shared.length ? <ol className='flex flex-col'>{shared.map(s => <Step key={s.id} step={s} onMark={markFor(null)} />)}</ol>
         : <p className='text-xs text-muted-foreground'>This reply was made before the decision map existed.</p>}
       {onWhatIf && shared.length > 1 && <WhatIf key={round.id} round={round} onWhatIf={onWhatIf} busy={whatIfBusy} />}
       {(round.results || []).map(r => (
@@ -168,7 +216,7 @@ export default function DecisionMap({ rounds, selectedId, onSelect, onWhatIf, wh
             <span className='text-xs text-muted-foreground'>{cost(r.cost)} · {((r.ms || 0) / 1000).toFixed(1)} s</span>
           </div>
           {r.status === 'error' ? <p className='pb-2.5 text-xs text-bad'>{r.error}</p>
-            : <ol className='flex flex-col'>{(r.trace || []).map(s => <Step key={s.id} step={s} />)}</ol>}
+            : <ol className='flex flex-col'>{(r.trace || []).map(s => <Step key={s.id} step={s} onMark={markFor(r)} />)}</ol>}
         </section>
       ))}
     </div>

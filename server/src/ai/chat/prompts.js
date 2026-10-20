@@ -199,7 +199,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ) {
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -235,6 +235,11 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
     parts.push('# Your sexting story (you lead it: each reply takes it one step on, what you do or what happens next, like a little story; two short messages are fine here. '
       + 'Setting the scene is fine in your character, like getting under the covers or closing the curtains; your PPVs are already made, so never say you are taking or filming them now)\n'
       + lines.join('\n'));
+  }
+  // your manager's marks on replies in moments like this: what not to repeat
+  if (lessons.length) {
+    const one = (l) => `- Him: ${clean(l.his).slice(0, 200) || '(he was quiet)'}\n  Her (marked bad): ${(l.her || []).map(clean).join(' / ') || '(her reply)'}\n  Why: ${clean(l.note)}${l.better ? `\n  Better: ${clean(l.better)}` : ''}`;
+    parts.push(`# Your manager's notes on replies like this (don't repeat these mistakes)\n${lessons.map(one).join('\n')}`);
   }
   // the plan for this reply, decided from who he is and the moment (plan.js)
   if (plan) parts.push(`# Your plan for this reply (decided from who he is and the moment: follow it, in your own words)\n${planText(plan).map(l => `- ${l}`).join('\n')}`);

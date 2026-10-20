@@ -169,6 +169,29 @@ function briefingStep({ library = [], sales = [], situations = [], contentCount 
   });
 }
 
+/** 7. Your marks from Practice that fit this moment (wording ones go to the writer, all to Claude's check). */
+function lessonsStep(lessons = []) {
+  if (!lessons.length) return null;
+  return step('lessons', 'Your notes that applied', {
+    status: 'decision',
+    result: `${lessons.length} of your marks fit this moment`,
+    tags: ['Your marks'],
+    details: lessons.map(l => ({ label: l.kind === 'wording' ? 'Bad wording' : 'Wrong call', value: `${l.note}${l.better ? ` → better: ${l.better}` : ''}` })),
+  });
+}
+
+/** Claude's watch-only check of the reply (it never blocks or rewrites). */
+const POINT_LABEL = { answers_him: 'Answers him', fits_moment: 'Fits the moment', notes_facts: 'Notes and facts', selling: 'Selling call', lessons: 'Your notes' };
+function coachStep(label, coach) {
+  const weak = Object.values(coach.points || {}).filter(p => p?.verdict === 'weak').length;
+  return step('coach', `${label}: Claude's check (watch only)`, {
+    status: coach.overall === 'good' ? 'ok' : coach.overall === 'declined' ? 'info' : coach.overall === 'weak' || weak ? 'warn' : 'ok',
+    result: `${{ good: 'Good', okay: 'Okay', weak: 'Weak', declined: 'Not checked' }[coach.overall] || coach.overall}: ${coach.summary}`,
+    tags: ['Claude', 'Q45'],
+    details: Object.entries(coach.points || {}).filter(([, p]) => p && p.verdict !== 'n/a').map(([k, p]) => ({ label: `${POINT_LABEL[k] || k}${p.verdict === 'weak' ? ' (weak)' : ''}`, value: p.note })),
+  });
+}
+
 /**
  * The writer's drafts and the result. `drafts` = [{ raw, final, ppv, offer, problems,
  * style, review, verdict }] in order; `pick` = the draft shown.
@@ -204,4 +227,4 @@ function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene 
   return out;
 }
 
-module.exports = { safetyStep, himStep, momentStep, planStep, storyStep, briefingStep, writerSteps, heatKind };
+module.exports = { safetyStep, himStep, momentStep, planStep, storyStep, briefingStep, lessonsStep, coachStep, writerSteps, heatKind };

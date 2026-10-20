@@ -277,6 +277,13 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     } catch (e) { toast.error(errMsg(e, 'Could not get a reply')); }
     finally { setBusy(false); }
   };
+  // a step of a reply's map marked as wrong (a wrong call, or bad wording): saved, and it teaches the engine
+  const mark = async (payload) => {
+    try {
+      await api.post(`/api/ai-chat/pages/${page.creator_id}/feedback`, payload);
+      toast.success('Saved: the engine learns from it');
+    } catch (e) { toast.error(errMsg(e, 'Could not save your note')); throw e; }
+  };
   // what if he were someone else, or in another mood: the same moment decided again
   // (and written, if asked), shown in the map, not in the chat
   const [whatIfBusy, setWhatIfBusy] = useState(false);
@@ -541,7 +548,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
             {composerBox}
           </main>
           <aside ref={mapPanel} className='order-2 border-t bg-muted/20 p-3 lg:order-none lg:min-h-0 lg:overflow-y-auto lg:border-l lg:border-t-0' aria-label='How she decided'>
-            <DecisionMap rounds={rounds} selectedId={mapId || rounds[rounds.length - 1]?.id} onSelect={setMapId} onWhatIf={whatIf} whatIfBusy={whatIfBusy} />
+            <DecisionMap rounds={rounds} selectedId={mapId || rounds[rounds.length - 1]?.id} onSelect={setMapId} onWhatIf={whatIf} whatIfBusy={whatIfBusy} onMark={mark} />
           </aside>
         </div>
       </div>

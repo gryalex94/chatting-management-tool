@@ -134,4 +134,53 @@ async function reviewOffer({ fanTexts = [], messages = [], item }) {
   return { ok: !!r.answer.ok, problems: (r.answer.problems || []).map(String).filter(Boolean), usage: r.usage };
 }
 
-module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, MODEL };
+/**
+ * Claude's watch-only check of a Practice reply (it never blocks or rewrites):
+ * does she answer him, does it fit the moment and the plan, are his notes and her
+ * facts used right, is the selling call right, does it repeat a mistake the
+ * manager marked. It sees what the writer saw: who he is, the plan, the chat, the
+ * rules (rules.js) and the manager's notes. Returns { points, overall, summary,
+ * declined, usage }.
+ */
+const POINT = {
+  type: 'object',
+  properties: { verdict: { type: 'string', enum: ['good', 'weak', 'n/a'] }, note: { type: 'string' } },
+  required: ['verdict', 'note'],
+  additionalProperties: false,
+};
+const COACH_SCHEMA = {
+  type: 'object',
+  properties: {
+    answers_him: POINT, fits_moment: POINT, notes_facts: POINT, selling: POINT, lessons: POINT,
+    overall: { type: 'string', enum: ['good', 'okay', 'weak'] }, summary: { type: 'string' },
+  },
+  required: ['answers_him', 'fits_moment', 'notes_facts', 'selling', 'lessons', 'overall', 'summary'],
+  additionalProperties: false,
+};
+async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [] }) {
+  const line = (m) => `${m.from_fan ? 'Him' : m.mass ? 'Her (mass message)' : 'Her'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m)}${mediaNote(m) ? ` [${mediaNote(m)}]` : ''}`;
+  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.heat && `how spicy: ${profile.heat}`].filter(Boolean).join('; ');
+  const him = fan ? `${fan.tier_label}${fan.new_sub ? ', new subscriber' : ''}${fan.time_waster ? ', time waster' : ''}${fan.suspicious ? ', suspicious' : ''}; closeness: ${fan.closeness}; free talk ${fan.budget.used} of ${fan.budget.limit}` : 'unknown';
+  const r = await ask(
+    'You coach the chat replies of an AI character on Fanvue, a subscription site for verified adults; flirting and sex talk between adults are allowed. You judge one reply against the agency\'s rules, the plan made for it and the manager\'s notes. You never rewrite it. Be specific and short.',
+    `The creator: ${who || 'unknown'}\n\nWho he is: ${him}\n`
+      + `His notes: ${card.map(f => `(${f.kind}) ${f.text}`).join('; ') || 'none'}\n\n`
+      + (plan ? `The plan made for this reply: ${plan.goal_text} (because ${plan.why}). PPV: ${plan.sell.allowed ? 'allowed' : `none (${plan.sell.why})`}. Questions: ${plan.ask.allowed ? 'one at most' : `none (${plan.ask.why})`}. Length: ${plan.length.text}.${plan.callback ? ` Callback: "${plan.callback.note}".` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}\n\n` : '')
+      + `The chat (oldest first, the last part):\n${chat.slice(-24).map(line).join('\n')}\n\n`
+      + `Her reply:\n${messages.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n')}${ppv ? `\n[with a PPV: "${ppv.title}", $${ppv.price}, ${ppv.what}]` : ''}\n\n`
+      + `The agency's rules:\n${rules.map(x => `- ${x}`).join('\n')}\n\n`
+      + `The manager's notes on earlier replies (mistakes not to repeat):\n${lessons.length ? lessons.map(l => `- ${l.kind === 'wording' ? 'Wording' : 'Decision'}: "${l.note}"${l.better ? ` (better: ${l.better})` : ''}`).join('\n') : '- none yet'}\n\n`
+      + 'Judge the reply on each point: good, weak, or n/a; a short note for each (what exactly is weak, or why it\'s good):\n'
+      + '- answers_him: does it answer or react to what he actually said (no ignored question, no going off on something else)?\n'
+      + '- fits_moment: does it fit the stage of the chat, his mood and the plan (leading vs stalling, no selling to a sad fan, the right length)?\n'
+      + '- notes_facts: are his notes and her own facts used right (nothing invented, nothing contradicted, callbacks natural)? n/a if none are touched.\n'
+      + '- selling: if it sells or talks price: right moment, item and price? n/a if it doesn\'t sell.\n'
+      + '- lessons: does it repeat a mistake from the manager\'s notes? good if not, n/a if there are no notes.\n'
+      + 'overall: good, okay or weak; summary: one short sentence.',
+    COACH_SCHEMA);
+  if (r.declined) return { declined: true, points: {}, overall: 'declined', summary: 'Claude declined to look at this one.', usage: r.usage };
+  const { overall, summary, ...points } = r.answer;
+  return { points, overall, summary: String(summary || ''), usage: r.usage };
+}
+
+module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, coachCheck, MODEL };
