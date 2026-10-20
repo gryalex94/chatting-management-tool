@@ -14,6 +14,7 @@
 const { replyLevel } = require('./safety');
 const { closenessOf, CLOSENESS, TONE, likesFor, awayText } = require('./memory');
 const { eventFits } = require('./session');
+const { seenText } = require('./notes');
 
 const clean = (s) => String(s ?? '').trim();
 const DAY = 86400_000;
@@ -112,10 +113,14 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
+  // a photo or video he just sent (vision.js): what it showed, or that it couldn't be seen (C4, C5, C9)
+  const photo = (media || []).find(s => s.description && !s.flagged) || null;
+  const unseen = !photo ? (media || []).find(s => s.failed || !s.description) || null : null;
+  p.media = photo ? { text: seenText(photo), kind: photo.kind, sexual: photo.sexual, video: !!photo.video, details: photo.details || [] } : unseen ? { failed: true, video: !!unseen.video } : null;
   // the plan for this conversation (B2): selling day, rapport day… (session.js)
   const aim = session?.aim || 'read';
   p.aim = aim; p.aim_text = session?.aim_text || ''; p.aim_why = session?.why || '';
@@ -146,6 +151,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (waiting?.open && waiting.hisAfter) goal('point_to_ppv', 'Point him to the PPV waiting for him, playfully; nothing new', 'her last PPV is still unopened', ['Q37']);
   else if (match && !match.full.length) goal('honest_no', 'Say honestly she doesn\'t have that exactly (maybe she\'ll make something like it), ask what exactly he\'d want, offer the closest', 'he asks for something she doesn\'t have', ['Q38']);
   else if (match?.full.length && sell && !noOffer) goal('offer', 'He asked for something she has: say yes and offer it', 'he asks for something in her content', ['Q23']);
+  else if (photo?.sexual === 'explicit' && !sexting?.on) goal('react_photo', `He sent an explicit ${photo.video ? 'video' : 'photo'} of himself: react to it at the chat's level, name one specific thing you see, and build from there`, 'he sent explicit content of himself', ['C4']);
   else if (sexting?.on && level.lead) goal('lead_story', 'Lead the sexting story one step on: what she does now, then tease', 'they\'re sexting and she leads', ['Q41', 'Q42b']);
   else if (level.his >= 2) goal('tease', 'He got sexual: say yes playfully and tease; don\'t stall', 'he got sexual first', ['Q1']);
   else if (back) {
@@ -193,7 +199,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     lead_story: 'she leads the story instead', tease: 'he said what he wants: play along', offer: 'he asked: say yes', point_to_ppv: 'no question, just point him to it',
     goodbye: ['keep_ppv', 'mid_sexting'].includes(p.bye) ? null : 'he\'s leaving: no question to hold him',
   }[p.goal];
-  p.ask = p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
+  p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
+    : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
     : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal } : { allowed: true, why: 'one at most (Q5)' };
 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
@@ -259,6 +266,8 @@ function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
   if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
+  if (p.media?.failed) lines.push(`His ${p.media.video ? 'video' : 'photo'} wouldn't load for you: say so playfully and ask what it is; don't pretend you saw it.`);
+  else if (p.media) lines.push(`He sent ${p.media.text}. React to one specific thing you see in it (${p.media.details.slice(0, 3).map(d => `"${d}"`).join(', ') || 'a real detail'}), so he knows you looked${p.media.sexual === 'none' ? '; a question about it is fine if you ask one' : ''}.`);
   if (p.event) lines.push(`A moment of yours: ${p.event.text}. Make it concrete and yours; it's fine to invent the small detail, but keep it true to what you've told fans before.`);
   if (p.back) lines.push(`He's back after ${p.back}: let him feel you're glad he's back.`);
   if (p.tone) lines.push(`Tone: ${p.tone}.`);

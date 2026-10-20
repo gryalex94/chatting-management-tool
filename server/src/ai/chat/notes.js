@@ -28,11 +28,23 @@ function mediaWhat(md) {
  * taken out): "PPV $25.69: 4 photos, he hasn't bought it", "he sent a photo",
  * "a photo, free", "paid message, he bought it for $12", "tip". '' when nothing.
  */
+/** What a photo or video he sent showed, as the chat reads it (ai/chat/vision.js). */
+function seenText(seen) {
+  if (!seen) return '';
+  const what = seen.video ? 'video' : 'photo';
+  if (seen.flagged) return `a ${what} that was flagged and not looked at`;
+  if (seen.failed || !seen.description) return `a ${what} that couldn't be seen`;
+  return `a ${what} of ${seen.kind || 'something'}: ${seen.description}`;
+}
+
 function mediaNote(m) {
   const md = m.media;
   if (md && (md.photos || md.videos || md.other)) {
     const what = mediaWhat(md);
-    if (m.from_fan) return `he sent ${what}`;
+    if (m.from_fan) {
+      const seen = (md.seen || []).map(seenText).filter(Boolean);
+      return seen.length ? `he sent ${seen.join('; ')}` : `he sent ${what}`;
+    }
     if (md.price) {
       const name = md.title ? ` "${md.title}"` : '';
       if (md.status) {                                       // the practice room: what he did with it
@@ -87,4 +99,4 @@ function standingAt(earn = [], at = Date.now(), chatSince = null) {
   return { state: 'subscriber', since: iso(since), days, label: `Subscriber since ${day(since)}`, text: `He has been subscribed to you since ${day(since)} (${days} days).` };
 }
 
-module.exports = { mediaWhat, mediaNote, emptyBody, standingAt };
+module.exports = { mediaWhat, mediaNote, seenText, emptyBody, standingAt };

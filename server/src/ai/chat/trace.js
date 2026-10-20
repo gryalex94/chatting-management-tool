@@ -107,7 +107,7 @@ function sessionStep({ session = null, state = null, herHere = 0 }) {
 }
 
 /** 3. The moment: the planner's read of him, and where the chat is. */
-function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null }) {
+function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null, media = [] }) {
   const phaseWord = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[phase];
   return step('moment', 'The moment', {
     result: followUp ? 'He has gone quiet: she writes first'
@@ -115,6 +115,7 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
     tags: ['Planner (Ministral 8B)'],
     details: [
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
+      ...media.map(s => ({ label: 'He sent', value: s.flagged ? `a ${s.video ? 'video' : 'photo'} that was flagged: the AI leaves this chat (C3)` : s.description ? `a ${s.video ? 'video' : 'photo'} of ${s.kind} (${s.sexual === 'none' ? 'nothing sexual' : s.sexual}): ${s.description}` : `a ${s.video ? 'video' : 'photo'} that couldn't be seen${s.failed ? ` (${s.failed})` : ''}` })),
       herHere != null ? { label: 'This conversation', value: `${herHere} of her replies so far${away ? `; he was away ${awayText(away)} before it` : ''}` } : null,
       clash ? { label: 'Doesn\'t fit his notes', value: `his latest message contradicts "${clash}"` } : null,
       { label: 'Warm-up', value: herCount >= warmUp ? `done (${herCount} of her messages this conversation, ${warmUp} needed)` : `${herCount} of ${warmUp} of her messages this conversation` },
@@ -144,6 +145,7 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         { label: 'Length', value: `${plan.length.text} (${plan.length.why})` },
         plan.touch ? { label: 'Also, in passing', value: `${plan.touch.text}: ${plan.touch.why}` } : null,
         plan.event ? { label: 'A moment of hers', value: `${plan.event.kind.replace(/_/g, ' ')}: ${plan.event.text}` } : null,
+        plan.media ? { label: plan.media.failed ? 'His file' : 'His photo', value: plan.media.failed ? 'it wouldn\'t load: she says so and asks what it is (C9)' : `react to a real detail: ${plan.media.details.slice(0, 3).join(' · ') || plan.media.kind} (${plan.media.sexual === 'explicit' ? 'C4' : 'C5'})` } : null,
         plan.budget ? { label: 'Free talk', value: `${plan.budget.used} of ${plan.budget.limit} small-talk messages${plan.aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}` } : null,
         // what memory brings to this reply, near the top
         plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,

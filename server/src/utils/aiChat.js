@@ -16,6 +16,8 @@
 const crypto = require('crypto');
 const { supabaseAdmin } = require('./supabase');
 const or = require('../integrations/openrouter');
+const fv = require('../integrations/fanvue');
+const V = require('../ai/chat/vision');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, coachCheck, MODEL: CHECK_MODEL } = require('../ai/chat/review');
@@ -262,13 +264,21 @@ async function draftProfile(orgId, creatorId) {
 // keyed "fan|message": a mass message has one id for every fan who got it.
 // From fanvue_media (database change 039); none before it ran.
 async function mediaFor(accountId, fanUuid = null) {
-  let rows = [];
+  let rows = [], notes = [];
   try {
     rows = await all(() => {
-      const q = supabaseAdmin.from('fanvue_media').select('fan_uuid, media_uuid, message_uuid, media_type, price_cents, purchased_at').eq('account_id', accountId);
+      const q = supabaseAdmin.from('fanvue_media').select('fan_uuid, media_uuid, message_uuid, media_type, from_fan, price_cents, purchased_at').eq('account_id', accountId);
       return (fanUuid ? q.eq('fan_uuid', fanUuid) : q).order('fan_uuid').order('media_uuid');
     });
   } catch { return {}; }
+  // what his photos and videos showed, once looked at (ai/chat/vision.js, database change 047)
+  try {
+    notes = await all(() => {
+      const q = supabaseAdmin.from('ai_media_notes').select('media_uuid, media_type, kind, sexual, flagged, description, details, failed').eq('account_id', accountId);
+      return (fanUuid ? q.eq('fan_uuid', fanUuid) : q).order('fan_uuid').order('media_uuid');
+    });
+  } catch { notes = []; }
+  const seenBy = Object.fromEntries(notes.map(n => [n.media_uuid, n]));
   const out = {};
   for (const r of rows) {
     if (!r.message_uuid) continue;
@@ -276,8 +286,64 @@ async function mediaFor(accountId, fanUuid = null) {
     if (r.media_type === 'image') m.photos += 1; else if (r.media_type === 'video') m.videos += 1; else m.other += 1;
     if (r.price_cents) m.price = r.price_cents / 100;
     if (r.purchased_at && (!m.bought_at || r.purchased_at < m.bought_at)) m.bought_at = r.purchased_at;
+    if (r.from_fan) {
+      const s = seenBy[r.media_uuid];
+      if (s) (m.seen ||= []).push({ media_uuid: r.media_uuid, video: r.media_type === 'video', kind: s.kind, sexual: s.sexual, flagged: !!s.flagged, description: s.description || '', details: s.details || [], failed: s.failed || null });
+      else (m.unseen ||= []).push({ media_uuid: r.media_uuid, media_type: r.media_type });
+    }
   }
   return out;
+}
+
+// The link to a fan's file, from what Fanvue sends for a message's media (signed links that expire).
+function bestUrl(payload, mediaType) {
+  const vs = Array.isArray(payload?.variants) ? payload.variants.filter(v => v?.url) : [];
+  if (!vs.length) return payload?.url || null;
+  if (mediaType === 'video') return (vs.find(v => v.lengthMs || /video|original|source/i.test(v.variantType || '')) || vs[0]).url;
+  return [...vs].filter(v => !v.lengthMs).sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url || vs[0].url;
+}
+/**
+ * Look at his photos and videos that haven't been seen yet (C1–C3, C6): each file is
+ * fetched through Fanvue's link, described once, and only the description is kept
+ * (ai_media_notes); the file is deleted. At most `max` at a time, the newest first.
+ * The messages get their `seen` filled in. Returns how many were looked at.
+ */
+async function describeFanMedia(orgId, creatorId, accountId, fanUuid, chat, { max = 6 } = {}) {
+  const todo = chat.filter(m => m.from_fan && m.media?.unseen?.length).flatMap(m => m.media.unseen.map(u => ({ ...u, message_uuid: m.uuid, m }))).slice(-max);
+  for (const u of todo) {
+    let d;
+    try {
+      const r = await fv.request(accountId, `/v1/chats/${fanUuid}/messages/${u.message_uuid}/media`, { params: { mediaUuids: u.media_uuid } });
+      const url = bestUrl(r?.results?.[u.media_uuid], u.media_type);
+      d = url ? await V.describeUrl(url, u.media_type === 'video' ? 'video' : 'image') : { failed: true, error: 'No link to the file' };
+    } catch (e) { d = { failed: true, error: e.message }; }
+    if (d.usage) await logUsage(orgId, 'look', d.model || V.DESCRIBER, d.usage, { creatorId, fanUuid });
+    const row = {
+      account_id: accountId, media_uuid: u.media_uuid, fan_uuid: fanUuid, message_uuid: u.message_uuid, media_type: u.media_type,
+      kind: d.kind || null, sexual: d.sexual || null, flagged: !!d.flagged, description: d.description || null, details: d.details || [],
+      failed: d.failed ? String(d.error || 'failed').slice(0, 200) : null, cost_usd: d.usage?.cost ?? null,
+    };
+    const { error } = await supabaseAdmin.from('ai_media_notes').upsert(row, { onConflict: 'account_id,media_uuid' });
+    if (error && !/ai_media_notes/.test(error.message)) console.error('[ai-chat] media note:', error.message);
+    (u.m.media.seen ||= []).push({ media_uuid: u.media_uuid, video: u.media_type === 'video', kind: row.kind, sexual: row.sexual, flagged: row.flagged, description: row.description || '', details: row.details, failed: row.failed });
+    u.m.media.unseen = u.m.media.unseen.filter(x => x.media_uuid !== u.media_uuid);
+  }
+  return todo.length;
+}
+/** A photo or video uploaded in Practice as him: looked at the same way, nothing kept. Returns what the chat will carry. */
+async function lookAt(orgId, creatorId, { buffer, mimetype = '', name = '' }) {
+  await pageAccount(orgId, creatorId);
+  if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
+  const video = /^video\//.test(mimetype) || /\.(mp4|mov|m4v|webm|avi)$/i.test(name);
+  if (!video && !/^image\//.test(mimetype) && !/\.(jpe?g|png|webp|gif|heic)$/i.test(name)) throw new AiChatError('Send a photo or a video');
+  const d = await V.describeBuffer(buffer, video ? 'video' : 'image', { name });
+  if (d.usage) await logUsage(orgId, 'look', d.model || V.DESCRIBER, d.usage, { creatorId });
+  return {
+    media: {
+      video, kind: d.kind || 'other', sexual: d.sexual || 'none', flagged: !!d.flagged, description: d.description || '', details: d.details || [],
+      failed: d.failed ? String(d.error || 'failed').slice(0, 200) : null, frames: d.frames || 0, cost: d.usage?.cost || 0,
+    },
+  };
 }
 
 // A fan's messages as the writer reads them: each with what came with it and,
@@ -496,6 +562,8 @@ async function buildMemory(orgId, creatorId, fanUuid, { full = false } = {}) {
   const model = persona?.settings?.writer || or.DEFAULT_WRITER;
   const since = full ? null : mem?.covered_through || null;
   const fresh = chat.filter(m => !m.mass && (!since || m.at > since));
+  // his newest photos and videos, looked at before the notes are written (C1), a few at a time
+  if (fresh.some(m => m.from_fan && m.media?.unseen?.length)) await describeFanMedia(orgId, creatorId, account.id, fanUuid, fresh, { max: 8 });
   if (!fresh.length) return { updated: false, cost: 0 };
   let facts = full ? (mem?.facts || []).filter(f => f.locked) : (mem?.facts || []);
   let story = full ? '' : mem?.story || '';
@@ -839,13 +907,26 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     const m = { at: null, from_fan: t?.from === 'fan', text: clean(t?.text).slice(0, 1000), mass: false };
     if (!m.from_fan && t?.ppv && typeof t.ppv === 'object') m.media = practicePpv(t.ppv, content);
     if (!m.from_fan && t?.scene) m.scene = P.readScene(t.scene);           // her sexting story after that reply
+    // a photo or video uploaded as him (lookAt): the chat carries what it showed
+    if (m.from_fan && t?.media && typeof t.media === 'object' && (t.media.description || t.media.flagged || t.media.failed)) {
+      const seen = {
+        video: t.media.video === true, kind: clean(t.media.kind).slice(0, 40) || 'other', sexual: ['none', 'suggestive', 'explicit'].includes(t.media.sexual) ? t.media.sexual : 'none',
+        flagged: t.media.flagged === true, description: clean(t.media.description).slice(0, 1500), details: (Array.isArray(t.media.details) ? t.media.details : []).map(clean).filter(Boolean).slice(0, 6),
+        failed: t.media.failed ? 'failed' : null,
+      };
+      m.media = { photos: seen.video ? 0 : 1, videos: seen.video ? 1 : 0, other: 0, price: null, bought_at: null, seen: [seen] };
+    }
     return m;
   }).filter(t => t.text || t.media);
+  // a real fan's photos and videos not looked at yet, in his latest messages (C1): seen now
+  if (fanUuid && chat.slice(-12).some(m => m.from_fan && m.media?.unseen?.length)) await describeFanMedia(orgId, creatorId, account.id, fanUuid, chat.slice(-12));
   const convo = [...chat, ...typed];
   let lastHer = -1;
   convo.forEach((m, i) => { if (!m.from_fan && !m.mass) lastHer = i; });
-  const latest = convo.slice(lastHer + 1).filter(m => m.from_fan).map(m => m.text).filter(Boolean);
-  if (!latest.length && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
+  const latestMsgs = convo.slice(lastHer + 1).filter(m => m.from_fan);
+  const latest = latestMsgs.map(m => m.text).filter(Boolean);
+  const latestSeen = latestMsgs.flatMap(m => m.media?.seen || []);        // what his newest photos or videos showed
+  if (!latest.length && !latestSeen.length && !followUp) throw new AiChatError('There\'s no message from him to answer yet: write one as him first');
   // this conversation: since the last pause of 6 hours or more (memory.js)
   const talk = Mem.conversation(convo);
   if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
@@ -853,7 +934,10 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const herHere = convo.slice(talk.start).filter(m => !m.from_fan && !m.mass).length;   // her messages in this conversation
 
   // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
-  const screen = latest.length ? await screenLatest(orgId, creatorId, fanUuid, latest) : { action: 'continue', reasons: [], notes: [], review: null };
+  const toScreen = [...latest, ...latestSeen.map(s => s.description).filter(Boolean)];
+  const screen = latestSeen.some(s => s.flagged)
+    ? { action: 'stop', reasons: ['His photo or video may show someone under 18 or something illegal. It was not looked at further; the AI leaves this chat and a person should look (C3).'], notes: [], review: null }
+    : toScreen.length ? await screenLatest(orgId, creatorId, fanUuid, toScreen) : { action: 'continue', reasons: [], notes: [], review: null };
   if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: { trace: [T.safetyStep(screen)] } };
 
   // 2. the briefing, with the Playbook situations that fit this moment
@@ -884,6 +968,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const turn = S.nextTurn(session, { read: level.mood, said: latest.join(' '), suspicious: first.suspicious || level.mood === 'suspicious', timeWaster: first.time_waster });
   session = turn.session;
   level.mood = turn.mood;
+  // an explicit photo or video of him counts as explicit, whatever his words were (C4)
+  const seenLevel = latestSeen.some(s => s.sexual === 'explicit') ? 3 : latestSeen.some(s => s.sexual === 'suggestive') ? 2 : 0;
+  if (seenLevel > level.his) { level.his = seenLevel; level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match }); }
   // why no PPV can go out right now (then she mustn't promise one either)
   let noOffer = !sell ? '' : !level.warm ? `you are still in the warm-up (${herHere} of ${session.warm_up} of your messages this conversation), so get to know him first.`
     : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : session.no_sell ? `${session.no_sell}.` : '';
@@ -912,7 +999,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
-    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session,
+    byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen,
   });
   if (replyPlan.event && session.event) session = { ...session, event: { ...session.event, done: true } };   // her moment is used once
   // the plan is enforced: no PPV (nor a promise of one) when it says so, no question when it says so, his length mirrored
@@ -926,7 +1013,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
-    situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone, now, diary, mood: session.mood_day,
+    situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone, now, diary, mood: session.mood_day, media: latestSeen,
     selling: sell, content: sell ? C.contentText(content) : '', sales, lessons: lessons.filter(l => l.kind === 'wording'),
   };
   // the decision map: what was looked at and decided before any writer wrote a word
@@ -935,7 +1022,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.safetyStep(latest.length ? screen : null),
     T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, state, now, timeZone }),
     T.sessionStep({ session, state, herHere }),
-    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null }),
+    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
@@ -1635,6 +1722,9 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
       if (voice) draft.messages = P.dropSentences(draft.messages, { his: voice.his, noOffer: draft.ppv ? '' : noPpv || base.noOffer || '' });
       const asks = voice ? questionsIn(draft.messages, voice.his) : 0;
+      // he sent a photo or video: her reply must pick up something she saw in it (C4, C5)
+      const seen = (base.media || []).find(s => s.description && !s.flagged);
+      const ignoresMedia = !!seen && !V.reactsTo(draft.messages, seen);
       if (voice && ((voice.noQuestion && asks) || asks > 1)) draft.messages = P.unQuestion(draft.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
       if (draft.handover) {
         steps.push({ raw, final: [...draft.messages], ppv: null, offer: null, problems: [`It asks a person to take over: ${draft.handover}`], style: [], review: null, verdict: 'handover' });
@@ -1662,6 +1752,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         problems = r.ok ? [] : r.problems;
       }
       const now = { draft, verdict, problems, review, style: [...(c.style || [])], index: attempt };
+      if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
       // sexting: a reply that doesn't move the story on (stands still, or only reacts)
       // (a PPV sent as part of the story counts as a step, and so does a step the writer names, like "undresses")
       const named = draft.scene?.beat && draft.scene.beat !== 'reacts_to_him';
@@ -1748,7 +1839,7 @@ async function usage(orgId) {
 module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
-  saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact,
+  saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts, sourced, madeUpNotes, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },

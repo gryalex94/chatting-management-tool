@@ -341,6 +341,7 @@ function memoryPrompt({ name, fan = {}, known = [], story = '', bond = null, cha
           + '- kind "avoid": things he called a bad memory or that upset him, and topics he dislikes.\n'
           + `- kind "promise": what ${her} promised or said she would do for him.\n`
           + `- kind "her": what ${her} told him about herself: every detail she gave (where she is, her day, her pets, her plans), so she stays consistent.\n`
+          + '- A photo or video he sent is described in its message ("he sent a photo of his dog: …"): note what will matter later (his dog\'s name and looks, a tattoo, his car, his body if he showed it), not passing things (a meal, the weather).\n'
           + '- Keep every note that is still true, change what changed, drop what is no longer true. At most 40 notes, each under 15 words.\n'
           + `- story: 2 to 5 sentences on how things are going between him and ${her}: running jokes, anything in progress. Under 100 words.\n`
           + `- warmth: how he treats ${her}, all messages so far considered: "cold" (short, distant or rude), "normal" (friendly), "warm" (compliments, interest in her, glad to talk), "affectionate" (misses her, sweet names, talks to her like a girlfriend). warmth_why: a few words on why.`,

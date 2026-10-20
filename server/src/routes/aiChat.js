@@ -111,6 +111,17 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
 });
 
 // ── Your marks on replies (database change 044): teaching from Practice ──────
+// POST /pages/:creatorId/media (a file as "file") — a photo or video uploaded in Practice as
+// him: looked at by the describer (ai/chat/vision.js), nothing kept. Returns { media }.
+const multer = require('multer');
+const lookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
+router.post('/pages/:creatorId/media', lookUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Send a photo or a video' });
+    res.json(await A.lookAt(org(req), req.params.creatorId, { buffer: req.file.buffer, mimetype: req.file.mimetype, name: req.file.originalname }));
+  } catch (e) { fail(res, e, 'look at the file'); }
+});
+
 // Her diary (B9): what she has told fans about herself, the same for everyone.
 router.get('/pages/:creatorId/diary', async (req, res) => {
   try { res.json(await A.diary(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load her diary'); }

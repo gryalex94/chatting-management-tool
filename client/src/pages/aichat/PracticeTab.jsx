@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, RotateCcw, Route, Search, Send, ShieldAlert, UserRoundPlus, X } from 'lucide-react';
+import { Check, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, UserRoundPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -212,6 +212,8 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const [busy, setBusy] = useState(false);
   const scroller = useRef(null);
   const composer = useRef(null);
+  const fileInput = useRef(null);
+  const [looking, setLooking] = useState(false);       // a photo or video of his being looked at
   const mapPanel = useRef(null);
 
   useEffect(() => {
@@ -287,7 +289,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     const body = {
       fan_uuid: real ? fanId : null,
       made_up: real ? null : { ...madeUp, type: madeUp.type === 'none' ? null : madeUp.type },
-      test: nextTest.map(({ from, text: t, ppv, scene }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}) })),
+      test: nextTest.map(({ from, text: t, ppv, scene, media }) => ({ from, text: t, ...(ppv ? { ppv } : {}), ...(scene ? { scene } : {}), ...(media ? { media } : {}) })),
       models, selling: sells, follow_up: followUp, learned: known, session, outcome,
     };
     try {
@@ -346,6 +348,24 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     setTest(next);
     setText('');
     ask(next, { known: kept.known, outcome });
+  };
+  // a photo or video sent as him: looked at by the describer (nothing is kept), then she answers it
+  const sendFile = async (file) => {
+    if (!file || busy || blocked) return;
+    setLooking(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/media`, form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const outcome = outcomeOf(false);
+      const kept = withKept();
+      const next = [...kept.next, { from: 'fan', text: text.trim(), media: data.media }];
+      setTest(next);
+      setText('');
+      onSpent?.();
+      await ask(next, { known: kept.known, outcome });
+    } catch (e) { toast.error(errMsg(e, 'Could not look at the file')); }
+    finally { setLooking(false); if (fileInput.current) fileInput.current.value = ''; }
   };
   // she writes without a new message from him (he went quiet, or just bought)
   const followUp = () => {
@@ -517,7 +537,15 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       {test.map((m, i) => (
         <div key={`t${i}`} className='flex flex-col gap-2'>
           <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}
-            onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}>{m.text}</Bubble>
+            onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}>
+            {m.text}
+            {m.media && (
+              <span className={cn('flex items-start gap-1 text-xs', m.text && 'mt-1', m.media.flagged ? 'text-bad' : 'text-muted-foreground')}>
+                <Paperclip className='mt-0.5 size-3 shrink-0' aria-hidden />
+                <span>{m.media.flagged ? `A ${m.media.video ? 'video' : 'photo'} that was flagged: the AI leaves this chat` : m.media.failed ? `A ${m.media.video ? 'video' : 'photo'} that couldn't be seen` : `A ${m.media.video ? `video (${m.media.frames} frames)` : 'photo'} of ${m.media.kind}: ${m.media.description}`}</span>
+              </span>
+            )}
+          </Bubble>
           {m.ppv && (
             <PpvCard ppv={m.ppv} creatorId={page.creator_id}>
               {i === lastPpvAt && ['pending', 'ignored'].includes(m.ppv.status) && !busy && (
@@ -553,6 +581,10 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         <Textarea ref={composer} rows={2} value={text} onChange={e => setText(e.target.value)} placeholder='Write as him… (Enter to send)'
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
           disabled={busy || blocked || (real && !detail)} className='min-h-[44px] resize-none' aria-label='Message as the fan' />
+        <input ref={fileInput} type='file' accept='image/*,video/*' className='hidden' onChange={e => sendFile(e.target.files?.[0])} aria-label='A photo or video as him' />
+        <Button variant='outline' size='icon' onClick={() => fileInput.current?.click()} disabled={busy || looking || blocked || (real && !detail)} className='self-end' title='Send a photo or video as him' aria-label='Send a photo or video as him'>
+          {looking ? <Loader2 className='animate-spin' /> : <Paperclip />}
+        </Button>
         <Button onClick={send} disabled={busy || blocked || !text.trim() || (real && !detail)} className='self-end'><Send />Send</Button>
       </div>
       <div className='flex flex-wrap gap-2'>
