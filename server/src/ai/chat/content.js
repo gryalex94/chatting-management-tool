@@ -126,10 +126,13 @@ function contentText(items) {
  */
 // `lowestShare`: inside a paid roleplay, PPVs may go down to this share of the list price (D4).
 // `fixedPrice`: the plan set the price (a first sale's probe price, a tip that covers it): it's used as is.
-function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null, fixedPrice = null, fixedPrices = null }) {
+// `only`: the plan picked these items (ids): the writer offers one of them, and they pass the level check (the plan judged them).
+function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null, fixedPrice = null, fixedPrices = null, only = null }) {
   const id = Number(String(ppv?.item || '').replace(/^c/i, ''));
   const item = items.find(it => it.id === id && it.active !== false);
   if (!item) return { problem: 'It attached content that isn\'t in her content list. Only offer what\'s in the list; if nothing fits, say so and offer the closest item.' };
+  const planned = Array.isArray(only) && only.length > 0;
+  if (planned && !only.includes(item.id)) return { problem: `It attached "${item.title}", which isn't one of the pieces the plan picked for him. Offer one of these instead: ${only.map(k => items.find(it => it.id === k)).filter(Boolean).map(it => `[c${it.id}] "${it.title}"`).join(', ')}.` };
   if (!warm) return { problem: 'It offered a PPV during the warm-up. Get to know him first; offer something only once you have been chatting a while.' };
   if (offered.some(o => o.open)) return { problem: 'Her last PPV is still unopened. Don\'t send another one until he reacts to it: point him to that one.' };
   if (offered.some(o => o.id === item.id)) return { problem: `He already got "${item.title}". Don't send the same item twice; pick another one or talk about that one.` };
@@ -142,7 +145,7 @@ function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null,
       return { problem: `"${item.series}" goes step by step: ${want ? `send step ${next} next ("${want.title}")` : 'it is finished'}, not step ${item.step}.` };
     }
   }
-  if (levelOf(item) > (level?.max ?? 0) + 1) return { problem: `"${item.title}" is ${LEVEL_WORD[levelOf(item)]}: far spicier than the chat is now. Build it up first, or offer something softer.` };
+  if (!planned && levelOf(item) > (level?.max ?? 0) + 1) return { problem: `"${item.title}" is ${LEVEL_WORD[levelOf(item)]}: far spicier than the chat is now. Build it up first, or offer something softer.` };
   const fp = fixedPrices && fixedPrices[item.id] != null ? fixedPrices[item.id] : fixedPrice;
   const fixed = fp != null && Number.isFinite(Number(fp));
   if (fixed) return { item, price: Math.round(Number(fp) * 100) / 100, fixed: true };

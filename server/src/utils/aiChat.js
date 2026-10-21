@@ -1130,6 +1130,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       items: content, offered, lowestShare: session.roleplay?.on ? 0.3 : (replyPlan.lowest_share || null),
       // prices the plan set (a first sale's probe price, a tip that pays for it, a story step on his tip)
       fixedPrices: replyPlan.offer?.prices || (creditIds.length && replyPlan.offer?.next ? Object.fromEntries(creditIds.map(id => [id, 0])) : null),
+      only: replyPlan.offer?.items?.map(it => it.id) || null,
       firstPpv: !taste.bought && !attempts.here,
     } : null,
   })));
@@ -1857,7 +1858,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       let offerProblem = null;
       draft.offer = null;
       if (sell && draft.ppv) {
-        const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm, lowestShare: sell.lowestShare || null, fixedPrices: sell.fixedPrices || null });
+        const o = C.checkOffer({ ppv: draft.ppv, items: sell.items, offered: sell.offered, level: base.level, warm: base.level?.warm, lowestShare: sell.lowestShare || null, fixedPrices: sell.fixedPrices || null, only: sell.only || null });
         // the plan says no PPV with this reply (he's sad, suspicious…)
         if (!o.problem && base.plan && !base.plan.sell.allowed) o.problem = `It attached a PPV, but none should go with this reply: ${base.plan.sell.why}`;
         if (o.problem) offerProblem = o.problem; else draft.offer = o;
