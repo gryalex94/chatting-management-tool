@@ -68,7 +68,27 @@ function ask(mediaKind, nFrames, seconds) {
     + '- details: 3–6 short, specific things she could mention ("a golden retriever asleep on a grey couch", "a tattoo of a wolf on his forearm").\n'
     + '- text_in_it: any readable text in the picture, else "".';
 }
-const dataUrl = (file) => `data:image/jpeg;base64,${fs.readFileSync(file).toString('base64')}`;
+// What a file really is, from its first bytes (fix 13): a file labelled wrongly isn't decoded by the model, which then invents a picture
+function sniff(buf) {
+  const b = buf.subarray(0, 16);
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (b.toString('ascii', 4, 8) === 'ftyp') return /heic|heix|mif1|heif/.test(b.toString('ascii', 8, 12)) ? 'image/heic' : /avif/.test(b.toString('ascii', 8, 12)) ? 'image/avif' : 'video/mp4';
+  if (b[0] === 0x42 && b[1] === 0x4d) return 'image/bmp';
+  return null;
+}
+const READABLE = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+const dataUrl = (file) => { const buf = fs.readFileSync(file); return `data:${sniff(buf) || 'image/jpeg'};base64,${buf.toString('base64')}`; };
+// a second, cheaper look only at who is in it (fix 13): when two models disagree on a man or a woman, or a person
+// against an object, the description isn't trusted and she asks what it is instead of reacting to something invented
+const genderOf = (t) => (/\b(?:woman|girl|female|lady|she|her)\b/i.test(t) ? 'f' : /\b(?:man|guy|male|he|him|boy|dude)\b/i.test(t) ? 'm' : null);
+const PERSON_KINDS = new Set(['selfie', 'his face', 'his body', 'his dick', 'him jerking off', 'him naked', 'another person']);
+async function secondLook(content) {
+  const res = await or.chat({ model: BACKUPS[0], fallbacks: [BACKUPS[1]], maxTokens: 200, temperature: 0.1, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: [{ type: 'text', text: 'Reply with JSON only: {"people": "who is in it: him (a man), a woman, nobody, a group…", "kind": "' + KINDS.join(' | ') + '", "scene": "where it is, in a few words"}' }, ...content.slice(1)] }] });
+  return { answer: parse(res.text), usage: res.usage, model: res.model };
+}
 
 /**
  * Describe a file that is already on disk. `mediaKind` = 'image' | 'video'.
@@ -87,11 +107,28 @@ async function describeFile(file, mediaKind, { dir } = {}) {
     } else {
       try { shots = [await smallImage(file, work)]; } catch { shots = [file]; }   // no ffmpeg: the file as it is
       if (!fs.existsSync(shots[0])) shots = [file];                               // ffmpeg wrote nothing (an odd format): the file as it is
+      // the raw file, in a format the model can't decode: say so rather than let it invent a picture (fix 13)
+      if (shots[0] === file) { const mime = sniff(fs.readFileSync(file)); if (!READABLE.has(mime)) return { failed: true, error: `The file format (${mime || 'unknown'}) can't be read here` }; }
     }
     const content = [{ type: 'text', text: ask(mediaKind, shots.length, seconds) }, ...shots.map(f => ({ type: 'image_url', image_url: { url: dataUrl(f) } }))];
     const res = await or.chat({ model: DESCRIBER, fallbacks: BACKUPS, maxTokens: 900, temperature: 0.2, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content }] });
     const j = parse(res.text);
     if (!j) return { failed: true, error: 'The describer\'s answer couldn\'t be read', model: res.model, usage: res.usage };
+    const bytes = shots.reduce((s, f) => s + fs.statSync(f).size, 0);
+    // a second look at who is in it (fix 13): a disagreement means the picture wasn't really seen
+    let second = null;
+    if (!(j.minor && j.minor !== 'no') && j.illegal !== 'yes') {
+      try {
+        second = await secondLook(content);
+        res.usage = { ...res.usage, cost: (res.usage?.cost || 0) + (second.usage?.cost || 0) };
+        const a = second.answer || {};
+        const g1 = genderOf(`${j.people} ${j.description}`), g2 = genderOf(`${a.people} ${a.scene}`);
+        const p1 = PERSON_KINDS.has(j.kind), p2 = PERSON_KINDS.has(a.kind) || /\b(?:him|man|woman|girl|guy|person|people|group|couple)\b/i.test(String(a.people || ''));
+        const disagree = (g1 && g2 && g1 !== g2) || (p1 !== p2 && a.kind);
+        console.log('[ai-chat] look:', JSON.stringify({ bytes, model: res.model, kind: j.kind, people: j.people, second: { model: second.model, kind: a.kind, people: a.people, scene: a.scene }, disagree }));
+        if (disagree) return { failed: true, error: `Two looks at the file disagree about who is in it (${j.people || j.kind} against ${a.people || a.kind}): not trusted`, model: res.model, usage: res.usage, bytes };
+      } catch (e) { console.error('[ai-chat] second look:', e.message); }
+    }
     const minor = ['no', 'unsure', 'yes'].includes(j.minor) ? j.minor : 'unsure';
     const illegal = j.illegal === 'yes' ? 'yes' : 'no';
     const flagged = minor !== 'no' || illegal === 'yes';
@@ -107,7 +144,8 @@ async function describeFile(file, mediaKind, { dir } = {}) {
       description: flagged ? '' : clean(j.description).slice(0, 1500),
       details: flagged ? [] : (Array.isArray(j.details) ? j.details : []).map(clean).filter(Boolean).slice(0, 6),
       text_in_it: flagged ? '' : clean(j.text_in_it).slice(0, 300),
-      frames: shots.length, seconds: Math.round(seconds), model: res.model, usage: res.usage,
+      frames: shots.length, seconds: Math.round(seconds), model: res.model, usage: res.usage, bytes,
+      second: second?.answer ? { people: clean(second.answer.people).slice(0, 60), kind: clean(second.answer.kind).slice(0, 40), scene: clean(second.answer.scene).slice(0, 80) } : null,
     };
   } catch (e) {
     return { failed: true, error: e.message };

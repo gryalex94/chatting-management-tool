@@ -49,6 +49,7 @@ const HOUSE_RULES = [
   'Don\'t sell for now: no paid messages, no prices, no asking for tips or money. The chat shows the PPVs sent to him before and whether he bought them, so you know what he has; never push him to open or buy one.',
   'You can\'t send photos, videos or voice notes here. Never promise any; if he asks, tease and keep chatting.',
   'Write in English only.',
+  'No opinions on politics, religion, war or public figures, ever: one light, warm non-answer and back to him; never a sexual pivot to get out of it.',
   'Never make up facts about him. Use what you know; if you\'re not sure, ask him.',
   'Where you live is only what your profile says: never mention any other city, country or time zone.',
   'Stay consistent with your profile and with what you have told him before.',
@@ -203,7 +204,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ, now = new Date
   if (dated) out.push('When you bring up something he told you, never say an exact date or day: "a while ago you said…", "last time you told me…".');
   if (money?.standing?.text) out.push(money.standing.text);
   if (money) {
-    const bits = [`spent $${money.spent} in total`];
+    const bits = [money.content_spent > 0 ? `spent $${money.content_spent} on PPVs and tips in total (his subscription isn't counted)` : 'bought nothing yet (his subscription isn\'t a purchase)'];
     if (money.paid_messages) bits.push(`${money.paid_messages} paid message${money.paid_messages === 1 ? '' : 's'}`);
     if (money.tips) bits.push(`${money.tips} tip${money.tips === 1 ? '' : 's'}`);
     if (money.last_purchase) bits.push(`last purchase ${when(money.last_purchase, timeZone)}`);
@@ -623,11 +624,14 @@ function readReply(text) {
  * letters swapped in a longer word, and half the time a "*word" fix follows. Never on
  * a reply of 3 messages. Returns { messages, typo: { word, fixed } | null }.
  */
+// words the voice checks look for (never misspelt: a typo would hide them from the checks, fix 6)
+const PROTECTED = new Set(['eager', 'agenda', 'indeed', 'someone', 'breathless', 'excited', 'tonight', 'morning', 'evening', 'afternoon', 'filming', 'taking', 'promise', 'meet', 'number', 'instagram', 'snapchat', 'telegram', 'whatsapp']);
 function addTypo(list, { chance = 1 / 15, fixChance = 0.5, rand = Math.random } = {}) {
-  if (!list.length || list.length >= 3 || rand() >= chance * list.length) return { messages: list, typo: null };   // about 1 message in 15
+  if (!list.length || list.length >= 3 || rand() >= chance) return { messages: list, typo: null };   // about 1 reply in 15 (fix 6)
   const i = Math.floor(rand() * list.length) % list.length;
   const words = String(list[i]).split(' ');
-  const idx = words.map((w, k) => (/^[a-z]{5,}$/i.test(w) ? k : -1)).filter(k => k >= 0);
+  if (words.length < 6) return { messages: list, typo: null };                                       // never on a one-liner
+  const idx = words.map((w, k) => (/^[a-z]{6,}$/i.test(w) && !PROTECTED.has(w.toLowerCase()) ? k : -1)).filter(k => k >= 0);
   if (!idx.length) return { messages: list, typo: null };
   const k = idx[Math.floor(rand() * idx.length) % idx.length];
   const w = words[k];
@@ -636,7 +640,7 @@ function addTypo(list, { chance = 1 / 15, fixChance = 0.5, rand = Math.random } 
   if (bad === w) return { messages: list, typo: null };
   const out = [...list];
   out[i] = words.map((x, j) => (j === k ? bad : x)).join(' ');
-  const fixed = rand() < fixChance;
+  const fixed = words.length >= 8 && rand() < fixChance;                                           // a "*word" fix only after a real sentence
   if (fixed) out.splice(i + 1, 0, `*${w}`);
   return { messages: out, typo: { word: w, fixed } };
 }

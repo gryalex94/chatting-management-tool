@@ -243,7 +243,7 @@ router.get('/pages/:creatorId/duels', async (req, res) => {
 
 // POST /api/ai-chat/pages/:creatorId/duels { count } — start a blind test (20–150 moments).
 router.post('/pages/:creatorId/duels', async (req, res) => {
-  try { res.json({ job: await D.startDuels(org(req), req.params.creatorId, req.body?.count) }); } catch (e) { fail(res, e, 'start the blind test'); }
+  try { res.json({ job: await D.startDuels(org(req), req.params.creatorId, req.body?.count, { second: typeof req.body?.second === 'string' ? req.body.second : null, talk: req.body?.talk === true }) }); } catch (e) { fail(res, e, 'start the blind test'); }
 });
 
 // GET /api/ai-chat/pages/:creatorId/duels/next?batch= — the next moment to judge (blind).

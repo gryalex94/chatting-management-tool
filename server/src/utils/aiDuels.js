@@ -19,7 +19,7 @@ const { supabaseAdmin } = require('./supabase');
 const A = require('./aiChat');
 const or = require('../integrations/openrouter');
 const strategy = require('../ai/chat/strategy');
-const { screenFan } = require('../ai/chat/safety');
+const { screenFan, replyLevel } = require('../ai/chat/safety');
 const { judgeDuel, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { mediaNote, emptyBody } = require('../ai/chat/notes');
 
@@ -177,8 +177,12 @@ async function oneDuel({ orgId, creatorId, accountId, persona, writers, batch, m
 const jobs = new Map();
 const duelJob = (creatorId) => jobs.get(creatorId) || null;
 
-/** Start a blind test on `count` moments (20–150): proven answers first, then the moments. */
-async function startDuels(orgId, creatorId, count = 100) {
+/**
+ * Start a blind test on `count` moments (20–150): proven answers first, then the moments.
+ * `second` = the writer to compare the page's writer with (default Cydonia; Claude Haiku or
+ * Sonnet for a talk test), `talk` = talk moments only: nothing sexual on either side (fix 10).
+ */
+async function startDuels(orgId, creatorId, count = 100, { second = null, talk = false } = {}) {
   if (jobs.get(creatorId)?.running) return jobs.get(creatorId);
   if (!or.configured()) throw new A.AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
   const d1 = await supabaseAdmin.from('ai_duels').select('id, options').limit(1);
@@ -187,16 +191,19 @@ async function startDuels(orgId, creatorId, count = 100) {
   const persona = await E.loadPersona(orgId, creatorId);
   if (!String(persona?.profile?.name || '').trim()) throw new A.AiChatError('Set up her profile first (Her profile)', 409);
   const main = or.isOffered(persona.settings?.writer) ? persona.settings.writer : or.DEFAULT_WRITER;
-  const writers = [main, main === SECOND ? MISTRAL : SECOND];
+  const other = second && or.isOffered(second) && second !== main ? second : (main === SECOND ? MISTRAL : SECOND);
+  const writers = [main, other];
   const batch = new Date().toISOString();
   const job = {
     running: true, phase: 'answers', batch, total: 0, done: 0, failed: 0, cost: 0,
-    writers: writers.map(or.writerLabel), last_error: null, finished_at: null,
+    writers: writers.map(or.writerLabel), talk: !!talk, last_error: null, finished_at: null,
   };
   jobs.set(creatorId, job);
   (async () => {
     try {
-      const pool = await findMoments(account.id);
+      const all = await findMoments(account.id);
+      // talk moments only: he wasn't sexual and neither was her chatter's answer
+      const pool = talk ? all.filter(m => replyLevel(m.latest.join(' ')) <= 1 && replyLevel(m.human.join(' ')) <= 1) : all;
       const chosen = sample(pool, Math.min(150, Math.max(20, Number(count) || 100)));
       if (chosen.length < 5) throw new Error('There are too few moments in her chats where a chatter answered a fan');
       job.total = chosen.length;

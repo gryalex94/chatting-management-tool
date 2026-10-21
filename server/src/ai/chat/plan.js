@@ -29,7 +29,10 @@ const TIER_LABEL = { new: 'New subscriber', none: 'No spend in 90 days', small: 
 // Free small talk before she moves toward a sale, in her messages since his last
 // purchase (Q26b; starting points, to be calibrated). Sexting doesn't count (Q27).
 const BUDGET = { whale: 20, new: 15, spender: 15, small: 10, none: 8, tw: 5 };
-const SUSPICIOUS = /\b(?:are\s+(?:you|u)\s+(?:a\s+)?(?:real|bot|robot|fake|ai|a\s+scam|scamming)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|fake|a\s+scam)|scam\w*|catfish\w*|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
+// doubt that she is real (Q24c); "are you a real man / the real deal" is mockery or praise, not doubt (fix 2)
+const SUSPICIOUS = /\b(?:are\s+(?:you|u)\s+(?:a\s+)?(?:real(?!\s+(?:man|woman|one|deal|friend|leader|king|guy|girl|chad|boss))|bot|robot|fake|ai|a\s+scam|scamming)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|fake|a\s+scam)|scam\w*|catfish\w*|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
+// he asked her something directly (fix 4): a question mark, or a question word up front
+const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/i;
 const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview)|send\s+(?:me\s+)?(?:a\s+)?(?:free|preview)|no\s+money|broke)\b/i;
 // he's leaving (Q8)
 const GOODBYE = /\b(?:good\s*night|good\s*bye|g'?night|nighty?\s*night|gn|nite|gotta\s+(?:go|run|sleep)|got\s+to\s+go|have\s+to\s+(?:go|leave|run)|need\s+to\s+(?:go|sleep|leave)|i'?m\s+(?:off|out|going\s+to\s+(?:bed|sleep))|heading\s+(?:to\s+bed|out|off)|off\s+to\s+(?:bed|sleep|work)|going\s+to\s+(?:bed|sleep)|talk\s+(?:to\s+(?:you|u)\s+)?(?:later|tomorrow|tmrw|soon)|ttyl|bye+|see\s+(?:you|ya|u)\s+(?:later|tomorrow|soon))\b/i;
@@ -46,7 +49,7 @@ const NOTICES_HOUR = /\b(?:up (?:so |this )?late|still (?:up|awake)|don'?t (?:yo
  * this conversation starts in `chat` (memory.conversation), `override` = what-if
  * changes ({ tier, closeness, budget }).
  */
-function fanProfile({ money = null, type = null, chat = [], ids = [], mood = '', pageMonthly = null, offered = [], card = [], bond = null, from = 0, override = {}, now = new Date() }) {
+function fanProfile({ money = null, type = null, chat = [], ids = [], mood = '', pageMonthly = null, offered = [], card = [], bond = null, from = 0, override = {}, latest = [], now = new Date() }) {
   const small = pageMonthly != null && pageMonthly < SMALL_PAGE;
   const k = small ? 0.5 : 1;
   const spent90 = money?.spent90 ?? 0;
@@ -68,7 +71,8 @@ function fanProfile({ money = null, type = null, chat = [], ids = [], mood = '',
   if (timeWaster) tier = 'tw';
   if (override.tier && TIER_LABEL[override.tier]) tier = override.tier;
   const bars = `whale $${TIER_BARS.whale * k}+, spender $${TIER_BARS.spender * k}+ in 90 days${small ? ' (halved: a small page)' : ''}`;
-  const suspicious = mood === 'suspicious' || SUSPICIOUS.test(hisText);
+  // doubt is a moment, not a state (fix 2): his latest message(s), or the planner's read of them
+  const suspicious = mood === 'suspicious' || SUSPICIOUS.test(latest.join(' '));
   // how close they are (Q16): a mix of signals, each with its points (memory.js); what if: as you set it
   const close = closenessOf({ chat, card, tier, bond, now });
   if (override.closeness && CLOSENESS.includes(override.closeness)) Object.assign(close, { level: override.closeness, tone: TONE[override.closeness], what_if: true });
@@ -120,10 +124,13 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
+  // he's gone dry (fix 1): three one-word replies in a row; during sexting short answers are normal, so it takes more of them
+  const dryNow = sexting?.on ? (dry >= 5 ? dry : 0) : (dry >= 3 ? dry : 0);
+  p.dry = dryNow;
   p.first = followUp ? (first || { kind: 'nudge', word: 'a nudge: he went quiet' }) : null;
   // selling (A1–A7, E5): he asks himself, or gets sexual, and the cadence doesn't hold him back
   const asks = !!match?.full?.length || WANTS_TO_BUY.test(said) || !!(tip && match?.full?.length);
@@ -174,12 +181,18 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     goal('goodbye', bye.text, bye.why, bye.rules);
     p.bye = bye.kind;
   }
+  // a dry fan (fix 1): one real question or topic, once; then a short sign-off; then she waits for something real
+  else if (dryNow && !session?.dry_asked) goal('dry_ask', `He's gone dry (${dryNow} one-word replies in a row): one real question or a concrete topic of yours, short, no flirting hype${waiting?.open ? '; your PPV is still waiting for him, you can mention it' : ''}`, 'three or more one-word replies in a row (fix 1)', ['R1']);
+  else if (dryNow && !session?.dry_bye) goal('dry_bye', 'Still dry: a short, warm sign-off ("I\'ll let you get on with your day, come find me when you feel chatty"), no question, nothing sold', 'he stays dry after her question (fix 1)', ['R1']);
+  else if (dryNow) goal('no_reply', 'No reply: he\'s been dry for a while, so she waits for something real from him', 'dry after her sign-off: she says nothing (fix 1)', ['R1']);
   else if (level.pulled_back) goal('ease_off', 'He\'s slowing down: ease off, back to normal talk', 'he pulled back');
   else if (mood === 'sad') goal('comfort', 'Comfort him: no flirting, no selling', `he seems sad${['spender', 'whale'].includes(profile.tier) ? ', and he spends: take your time' : ''}`, ['Q24', 'Q25']);
   else if (profile.suspicious) goal('reassure', 'Calm and easy: reassure him, joke it away, no selling unless he asks', 'he doubts it\'s real or worth it', ['Q24c']);
   else if (mood === 'annoyed') goal('calm', 'Stay calm and warm; no selling', 'he seems annoyed', ['Q1', 'Q24d']);
   else if (waiting?.open && /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that)\b|how\s+(?:many|long))/i.test(waiting.hisLatest || '')) goal('answer_ppv', 'Answer what he asks about her PPV, truthfully, then tease', 'he asks what\'s in it', ['Q42']);
-  else if (waiting?.open && waiting.hisAfter) goal('point_to_ppv', 'Point him to the PPV waiting for him, playfully; nothing new', 'her last PPV is still unopened', ['Q37']);
+  else if (waiting?.open && waiting.hisAfter && !session?.pointed) goal('point_to_ppv', 'Point him to the PPV waiting for him, playfully; nothing new', 'her last PPV is still unopened (once per conversation)', ['Q37']);
+  // a brand-new subscriber's very first message (fix 12): welcome him, it's about him
+  else if (profile.new_sub && herReplies === 0 && !lastConv && !followUp) goal('welcome_new', 'His very first message to you: welcome him personally (glad he found you), react to what he wrote, and one question about what brought him here or what he\'s into; no "how about you", no story of yours yet, nothing sold', 'a brand-new subscriber, his first message (fix 12)', ['R12', 'Q21']);
   else if (match && !match.full.length) goal('honest_no', 'Say honestly she doesn\'t have that exactly (maybe she\'ll make something like it), ask what exactly he\'d want, offer the closest', 'he asks for something she doesn\'t have', ['Q38']);
   else if (match?.full.length && sell && !noOffer) goal('offer', 'He asked for something she has: say yes and offer it', 'he asks for something in her content', ['Q23']);
   else if (!match && WANTS_TO_BUY.test(said) && sell && !noOffer && !stage) goal('offer', 'He asks what she has: offer the piece that fits him best (the picks below), teased in her own words', 'he asks himself, so the cadence doesn\'t hold her back (E5)', ['E5', 'Q23']);
@@ -223,13 +236,16 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     why_not: 'he didn\'t take the last one: find out why first; the next attempt comes next conversation (B5)', readiness_check: 'the check comes first, the offer after it (E5)',
     flirt: 'the first-sale path: the flirting stage, nothing sold yet (A1)', sexy_vibe: 'the first-sale path: the sexy vibe, no PPV yet (A1)', direct_ask: 'the first-sale path: the ask first, the offer with his answer (A1)',
     get_to_know: stage ? 'the first-sale path: stay with his vibe first (A1)' : null,
+    welcome_new: 'his very first message: welcome him, nothing sold (fix 12)', dry_ask: 'he\'s gone dry: one real question, nothing sold (fix 1)', dry_bye: 'a sign-off, nothing sold (fix 1)', no_reply: 'no reply at all (fix 1)',
   }[p.goal];
   // the cadence, a pause after a big spend, one attempt a day (E5, A7, A4): unless he asks or gets sexual
   let hold = '';
   const inStory = !!(sexting?.on && sexting.next);
   const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
   const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
-  if (p.goal === 'after_buy') {
+  // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
+  if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(p.goal)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
+  else if (p.goal === 'after_buy') {
     if (!warmNow) hold = 'he\'s cooling off after the buy: no second offer (A4)';
     else if (attempts.here >= 2) hold = 'one more at most after a buy, and it was made (A4)';
     else if (session?.pause && !veryHorny && !asks) hold = session.pause.why;
@@ -296,7 +312,11 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     lead_story: 'she leads the story instead', tease: 'he said what he wants: play along', offer: 'he asked: say yes', point_to_ppv: 'no question, just point him to it',
     service_deliver: 'she delivers, no question', refuse: 'a light no, then on to something else', request_refused: 'a light no, then on to something else',
     goodbye: ['keep_ppv', 'mid_sexting'].includes(p.bye) ? null : 'he\'s leaving: no question to hold him',
+    dry_bye: 'a sign-off: no question (fix 1)',
   }[p.goal];
+  // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
+  const answerable = DIRECT_Q.test(said) && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
+  p.answer_first = answerable ? `He asked you something ("${said.slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
     : ['direct_ask', 'readiness_check', 'why_not'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)' }[p.goal] }
@@ -305,7 +325,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
   const n = words(said);
   const roomy = p.goal === 'lead_story' || p.goal === 'welcome_back' || p.goal === 'roleplay' || ['personal', 'stronger_hook'].includes(p.bye);
-  const target = p.goal === 'service_deliver' ? 'piece' : (followUp && p.first?.kind === 'personal') ? 'medium' : followUp || p.short ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
+  const target = p.goal === 'service_deliver' ? 'piece' : (followUp && p.first?.kind === 'personal') ? 'medium' : followUp || p.short || ['dry_ask', 'dry_bye'].includes(p.goal) ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
   p.length = {
     target,
     why: p.goal === 'service_deliver' ? 'he paid for a written piece' : followUp ? (p.first?.kind === 'personal' ? 'a personal message with something real in it' : 'a light first message') : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
@@ -378,6 +398,7 @@ function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
   if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
   if (p.request?.kind === 'refuse') lines.push('Never explain the rules or lecture him: one light line ("that\'s not my thing, babe") and move on to something you do.');
+  if (p.answer_first) lines.push(`${p.answer_first}.`);
   if (p.tip_first) lines.push(p.tip_first);
   if (p.tip_note) lines.push(p.tip_note);
   if (p.honest) lines.push(p.honest);

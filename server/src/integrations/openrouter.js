@@ -16,6 +16,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // for when OpenRouter doesn't report the cost itself.
 const WRITERS = [
   { id: 'mistralai/mistral-large-2512', label: 'Mistral Large 3', price: [0.5, 1.5] },
+  { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (talk, not sex)', price: [0.1, 0.5] },
+  { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (talk, not sex)', price: [2, 10] },
   { id: 'mistralai/ministral-8b-2512', label: 'Ministral 8B (fits your PC)', price: [0.15, 0.15] },
   { id: 'thedrummer/cydonia-24b-v4.1', label: 'Cydonia 24B (roleplay)', price: [0.3, 0.5] },
   { id: 'sao10k/l3.1-euryale-70b', label: 'Euryale 70B (roleplay)', price: [0.85, 0.85] },
@@ -41,7 +43,25 @@ const BUSY_WAITS = [3000, 8000, 15000];
  * { input, output, cost } } (cost in USD). A busy writer is tried again after a
  * pause; failing ones twice. `fallbacks`: other models OpenRouter may use instead.
  */
+// Claude as a writer (fix 10, a test): straight to Anthropic, the same prompt. Claude won't write explicit chat:
+// a refusal is an error the practice room shows, and the blind test counts as "no answer".
+const CLAUDE_PRICE = { 'claude-haiku-5-5': [0.10, 0.50], 'claude-sonnet-5-5': [2, 10] };
+async function claudeChat({ model, messages, maxTokens = 600, timeoutMs = 90_000 }) {
+  const { client } = require('../ai/agentRunner');
+  const text = (c) => (typeof c === 'string' ? c : (c || []).filter(x => x.type === 'text').map(x => x.text).join('\n'));
+  const system = messages.filter(m => m.role === 'system').map(m => text(m.content)).join('\n\n');
+  const rest = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: text(m.content) }));
+  const res = await client.messages.create({ model, max_tokens: maxTokens, system, messages: rest, output_config: { effort: 'low' } }, { timeout: timeoutMs });
+  const input = res.usage?.input_tokens || 0, output = res.usage?.output_tokens || 0;
+  const price = CLAUDE_PRICE[model] || [2, 10];
+  const cost = (input * price[0] + output * price[1]) / 1e6;
+  if (res.stop_reason === 'refusal') throw new Error('Claude declined to write this reply (its own rules): Mistral stays the writer for moments like this');
+  const out = (res.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  return { text: out, finish: res.stop_reason || null, model, usage: { input, output, cost } };
+}
+
 async function chat({ model, messages, maxTokens = 600, temperature = 0.8, timeoutMs = 90_000, fallbacks = [] }) {
+  if (/^claude-/.test(String(model))) return claudeChat({ model, messages, maxTokens, timeoutMs });
   if (!configured()) throw new Error('OpenRouter isn\'t connected: add OPENROUTER_API_KEY to the server settings');
   const body = {
     ...(fallbacks.length ? { models: [model, ...fallbacks] } : { model }),

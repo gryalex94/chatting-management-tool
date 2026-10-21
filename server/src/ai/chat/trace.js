@@ -49,7 +49,7 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
   const bits = [];
   if (profile) bits.push(profile.tier_label);
   if (m?.standing?.label) bits.push(m.standing.label);
-  if (m) bits.push(m.spent > 0 ? `${money(m.spent)} spent` : 'nothing spent');
+  if (m) bits.push(m.content_spent > 0 ? `${money(m.content_spent)} on PPVs and tips` : 'nothing bought yet');
   if (m?.last_purchase) bits.push(`last bought ${day(m.last_purchase)}`);
   const kinds = {};
   for (const f of card) kinds[f.kind] = (kinds[f.kind] || 0) + 1;

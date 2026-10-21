@@ -236,7 +236,8 @@ function pickFor({ content = [], taste = null, offered = [], level = { max: 0 },
   };
   const prefer = (list) => [...list].sort((a, b) => (score(b) - 3 * newGround(b)) - (score(a) - 3 * newGround(a)) || byPrice(a, b));   // new ground last
   const same = pool.filter(it => !newGround(it) && (taste.liked.kinds.includes(it.kind) || C.conceptsOf(it).some(c => taste.liked.concepts.includes(c))));
-  const fresh = pool.filter(it => !C.conceptsOf(it).some(c => boughtConcepts.has(c)) || newGround(it));
+  // "something new" never means new ground (a man, anal, oral): that only comes through a direct request of his
+  const fresh = pool.filter(it => !C.conceptsOf(it).some(c => boughtConcepts.has(c)) && !newGround(it));
   if (taste.last?.bought && taste.last.reaction === 'none' && fresh.length) return { items: prefer(fresh).slice(0, 3), why: 'no reaction to the last one: something different this time (A3)', mix: 'different' };
   if (same.length && (!fresh.length || rand() < 0.75)) return { items: prefer(same).slice(0, 3), why: `mostly what he loved (${[...taste.liked.concepts, ...taste.liked.kinds.map(kindWord)].slice(0, 3).join(', ')}): 3 offers in 4 the same kind (A3)`, mix: 'same' };
   if (fresh.length) return { items: prefer(fresh).slice(0, 3), why: 'one offer in four something new, to learn what else he likes (A3)', mix: 'new' };

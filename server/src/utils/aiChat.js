@@ -394,19 +394,21 @@ async function loadChat(accountId, fanUuid) {
 function moneyOf(allRows, at = null, chatSince = null) {
   const t = at ? Date.parse(at) : Date.now();
   const rows = at ? allRows.filter(e => e.paid_at && Date.parse(e.paid_at) <= t) : allRows;
-  let spent = 0, paid = 0, tips = 0, last = null, spent90 = 0, msgSpent = 0;
+  let spent = 0, paid = 0, tips = 0, last = null, spent90 = 0, msgSpent = 0, tipSpent = 0;
   for (const e of rows) {
     const amount = Math.abs(e.gross_cents || 0) / 100;
     if (e.source === 'refund' || e.source === 'chargeback') { spent -= amount; continue; }
     spent += amount;
     if (e.source === 'message') { paid++; msgSpent += amount; }
-    if (e.source === 'tip') tips++;
+    if (e.source === 'tip') { tips++; tipSpent += amount; }
     if ((e.source === 'message' || e.source === 'tip') && (!last || e.paid_at > last)) last = e.paid_at;
     // what he spent on PPVs and tips in the last 90 days: his tier (plan.js)
     if ((e.source === 'message' || e.source === 'tip') && e.paid_at && t - Date.parse(e.paid_at) <= 90 * 86400_000) spent90 += amount;
   }
   return {
     spent: Math.round(spent * 100) / 100, paid_messages: paid, tips, last_purchase: last, standing: standingAt(rows, t, chatSince),
+    // what he spent on PPVs and tips: what "spent" means to the engine and the writer (fix 11); subscriptions aren't purchases
+    content_spent: Math.round((msgSpent + tipSpent) * 100) / 100,
     spent90: Math.round(spent90 * 100) / 100, msg_spent: Math.round(msgSpent * 100) / 100,
   };
 }
@@ -979,6 +981,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     const k = kind || due?.kind || 'nudge';
     firstMsg = { kind: k, text: Sc.KINDS[k], word: Sc.KIND_WORD[k] };
   }
+  // he's gone dry (fix 1): his one-word replies in a row at the end of this conversation
+  const dry = dryStreak(convo.slice(talk.start));
   // selling (A1–A7, E5): what he bought and how he took it, the PPVs sent in this conversation and today
   const taste = Sl.tasteOf({ chat: convo, content, seed: type?.taste || [] });
   const attempts = { here: convo.slice(talk.start).filter(m => !m.from_fan && !m.mass && m.media?.price).length, today: Sl.attemptsToday(convo.slice(0, talk.start), now.getTime()) };
@@ -1007,7 +1011,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // who he is, first from his numbers and notes alone (the planner's read comes next), then his state
   // from his history and the plan for this conversation (session.js), kept by the practice room
   const pageUsd = await pageMonthly(account.id);
-  const first = Plan.fanProfile({ money, type, chat: convo, ids: [], mood: '', pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, now });
+  const first = Plan.fanProfile({ money, type, chat: convo, ids: [], mood: '', pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, latest, now });
   const state = fanUuid ? S.fanStateOf({ chat, profile: first, away: talk.away, timeZone, now }) : S.madeUpState(type, first);
   // how often she plans an attempt with him (E5), and a pause after a big spend (A7)
   const cadence = Sl.cadenceOf(first.tier, { lastAttemptAt: state.last_ppv_at || Sl.lastAttemptAt(convo.slice(0, talk.start)), now, seed: fanUuid || fan.name || 'fan' });
@@ -1037,8 +1041,18 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const turn = S.nextTurn(session, { read: level.mood, said: latest.join(' '), suspicious: first.suspicious || level.mood === 'suspicious', timeWaster: first.time_waster, veryHorny: replyLevel(latest.join(' ')) >= 3 });
   session = turn.session;
   level.mood = turn.mood;
-  // a new subscriber's path to his first sale (A1): where he is on it in this conversation
-  const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere, direct, hisLevel: level.his, since: level.since, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
+  // dry flags reset once he writes something real (fix 1)
+  if (!dry && (session.dry_asked || session.dry_bye)) session = { ...session, dry_asked: false, dry_bye: false };
+  // foreign swearing and politicians aren't sexual (fix 3): the planner's level is capped by his own words
+  if (level.his >= 2 && NOT_SEXUAL.test(latest.join(' ')) && replyLevel(latest.join(' ')) === 0) {
+    level.his = 0; level.match = false; level.lead = !level.pulled_back && level.warm;
+    level.max = P.maxLevel({ his: 0, heat: persona.profile?.heat, lead: level.lead, match: false });
+  }
+  // a new subscriber's path to his first sale (A1): where he is on it in this conversation. It pauses
+  // while a heavy mood holds or he is dry (fix 8): those replies don't count as progress
+  const held = !!session.mood || dry >= 3;
+  const progress = Math.max(0, herHere - (session.first_sale?.held || 0));
+  const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: level.his, since: level.since, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
   if (stage?.stage === 'offer' && !level.warm) level.warm = true;       // the path says: offer now
   // paid requests, refusals and unusual asks (services.js, D1–D9), and what they change in the session
   const services = Sv.servicesOf(persona.settings);
@@ -1101,7 +1115,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const momentNotes = [...ppvNotes(convo, followUp), ...sellingNotes({ sell, level, ids: plan.ids, content, said: latest.join(' '), aboutLastPpv: asksAboutLastPpv(convo) })];
 
   // 3. the plan: who he is and what this reply should do, decided in code (plan.js)
-  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, now });
+  const profile = Plan.fanProfile({ money, type, chat: convo, ids: plan.ids, mood: level.mood, pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, latest, now });
   const lastSent = convo.map(m => !!m.media?.item).lastIndexOf(true);
   const gap = lastSent < 0 ? null : convo.slice(lastSent + 1).filter(m => !m.from_fan && !m.mass).length;
   // what memory brings to this reply: a note to bring up (at most once every few days), a
@@ -1119,7 +1133,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
-    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg,
+    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry,
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
@@ -1130,7 +1144,10 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     if (replyPlan.goal === 'request_park' && session.pending) session.pending.parked = true;
     if (replyPlan.touch?.kind === 'still_thinking' && session.pending) session.pending.again = false;
     if (replyPlan.honest && session.tw) session.tw = { ...session.tw, said: true };
-    if (replyPlan.goal === 'direct_ask') session.first_sale = { asked: true };
+    if (replyPlan.goal === 'dry_ask') session.dry_asked = true;
+    if (replyPlan.goal === 'dry_bye') session.dry_bye = true;
+    if (held && latest.length && session.aim === 'first_sale') session.first_sale = { ...session.first_sale, held: (session.first_sale?.held || 0) + 1 };
+    if (replyPlan.goal === 'point_to_ppv') session.pointed = true;
     if (replyPlan.goal === 'readiness_check') session.asked_ready = true;
     if (replyPlan.goal === 'why_not') session.why_asked = true;
     if (replyPlan.goal === 'cheaper') session.cheaper_done = true;
@@ -1175,6 +1192,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.lessonsStep(lessons),
   ].filter(Boolean);
   if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile, session, state, stage, attempts } };
+  // she says nothing (fix 1): a dry fan after her sign-off; nothing is written and nothing would be sent
+  if (replyPlan.goal === 'no_reply') return { screen, results: [], quiet: { text: replyPlan.goal_text, why: replyPlan.why }, used: { trace, said: latest, plan: replyPlan, profile, session, state, stage, attempts } };
 
   // 3. each writer drafts; every draft is checked, and rewritten if it breaks a rule or sounds off
   const speed = persona.settings?.typing || 'normal';
@@ -1187,6 +1206,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     firstPpv: !taste.bought && !attempts.here,
   } : null;
   const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sellFor })));
+  // the direct ask (A1) counts only when a reply really asked him something
+  if (!whatIf && replyPlan.goal === 'direct_ask' && results.some(r => (r.replies || []).some(m => /\?/.test(m.creator_message || '')))) session = { ...session, first_sale: { ...session.first_sale, asked: true } };
   // the rules you approved from your marks (C2) join the house rules in Claude's check
   const allRules = [...RULES, ...approvedRules.map(x => x.text)];
   // 4. Claude's watch-only check of each reply (Practice): never blocks or rewrites; kept for a daily score
@@ -1203,8 +1224,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
         his: latest.join('\n') || null, her, goal: replyPlan.goal, cost_usd: cc.usage.cost || 0,
       }).then(({ error }) => { if (error && !/ai_checks/.test(error.message)) console.error('[ai-chat] check save:', error.message); });
       saveCheck(c, r.replies.map(x => x.creator_message));
-      // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it once more
-      if (c.overall === 'weak' && !c.declined) {
+      // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it
+      // once more; not in selling moments (fix 9): Claude's taste disagrees with the proven answers there
+      if ((c.overall === 'weak' || (replyPlan.answer_first && c.points?.answers_him?.verdict === 'weak')) && !c.declined && !SELL_GOALS.has(replyPlan.goal)) {
         const notes = Object.entries(c.points || {}).filter(([k, v]) => v?.verdict === 'weak' && CHECK_POINTS[k]).map(([k, v]) => `${CHECK_POINTS[k]}: ${clean(v.note)}`);
         const instruction = `Your coach found this reply weak${c.summary ? ` (${clean(c.summary)})` : ''}. ${notes.join(' ')} Write it again, fixing exactly that and keeping what was right: the same moment, the same length.`;
         const fixed = await writeOne({ orgId, creatorId, fanUuid, model: r.model, base, latest, recentHer, voice, speed, emojis, sell: sellFor, fixWith: instruction });
@@ -1523,6 +1545,24 @@ async function saveServices(orgId, creatorId, { services = {}, session_total: to
   return getServices(orgId, creatorId);
 }
 /** Fans' requests a manager decides on (an unusual service) or should know about (missing content). */
+// selling moments: Claude's fixes stay out of them (fix 9)
+const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'lead_story', 'after_buy', 'cheaper', 'sexy_vibe', 'direct_ask', 'readiness_check', 'service_offer', 'service_deliver', 'roleplay', 'point_to_ppv', 'answer_ppv']);
+// foreign swearing, slang and politicians read as sexual by the planner (fix 3)
+const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|wtf|damn|dammit|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu|musk)\b/i;
+// his one-word replies in a row at the end of a conversation (fix 1): "ok", "k", "lol", "yes"…
+function dryStreak(here = []) {
+  const groups = [];
+  let cur = null;
+  for (const m of here) {
+    if (m.mass) continue;
+    if (m.from_fan) { if (!cur) { cur = []; groups.push(cur); } cur.push(clean(m.text)); }
+    else cur = null;
+  }
+  const isDry = (g) => g.length > 0 && g.every(t => !t || ((t.match(/[\p{L}\p{N}']+/gu) || []).length <= 2 && !/\?/.test(t)));
+  let n = 0;
+  for (let i = groups.length - 1; i >= 0 && isDry(groups[i]); i -= 1) n += 1;
+  return n;
+}
 // he asks for content (photos, videos…) rather than a service
 const CONTENT_WORDS = /\b(?:pics?|photos?|pictures?|videos?|vids?|clips?|sets?|content|nudes?|selfies?|snaps?)\b/i;
 // he asks about his parked request again (D4)
@@ -1888,7 +1928,7 @@ function practicePpv(p, content) {
 }
 
 // He asks about a PPV she sent: "what's in it?", "is it nude?", "how long is it?"…
-const ASKS_ABOUT_IT = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this)\b|does\s+(?:it|that)\b|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
+const ASKS_ABOUT_IT = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this|there)\b|does\s+(?:it|that)\b|do\s+(?:it|they)\s+(?:have|show)|any\s+\w+\s+in\s+(?:it|there)|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
 // He wants something other than the PPV waiting for him: "something more interesting", "not that one".
 const WANTS_OTHER = /\b(?:something|anything)\s+(?:else|more|better|different|hotter|spicier|naughtier|nastier|dirtier|crazier)\b|\bnot\s+(?:that|this)(?:\s+one)?\b|\bshow\s+me\s+more\b|\bmore\s+(?:interesting|explicit|naked|nude)\b|\bsurprise\s+me\b|\bwhat\s+else\b/i;
 
@@ -2183,6 +2223,10 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       }
       const now = { draft, verdict, problems, review, style: [...(c.style || [])], index: attempt };
       if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
+      // the direct ask (A1) must ask: a reply without a question doesn't do its job
+      if (base.plan?.goal === 'direct_ask' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('This reply has to ask him what he\'d like to see of you (or whether he\'s alone and wants to see something): one real question.');
+      // he asked something (fix 4): a reply that is only questions didn't answer him
+      if (base.plan?.answer_first && draft.messages.length && draft.messages.every(m => /\?\s*$/.test(String(m).trim()))) now.style.push('He asked you something: answer it first, in a plain statement; a question back isn\'t an answer.');
       // his first PPV (A1): the caption teases, never explicit (explicit captions sold half as well in the 35k chats)
       if (sell?.firstPpv && draft.offer && replyLevel(draft.messages[draft.messages.length - 1] || '') >= 3) now.style.push('It\'s his first PPV and the caption is explicit: tease it instead ("just took these for you…", "wanna see what I\'d do if you were here?"); explicit captions sold half as well (A1).');
       // a paid written piece that's too thin for the money (D1)

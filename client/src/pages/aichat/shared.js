@@ -48,7 +48,7 @@ export const agoText = (iso) => {
 // "Subscriber since 28 Jul · Spent $45 · 3 paid messages · 1 tip · last bought 2 Oct"
 export const moneyLine = (m) => {
   if (!m) return '';
-  const bits = [...(m.standing?.label ? [m.standing.label] : []), `Spent ${dollars(m.spent)}`];
+  const bits = [...(m.standing?.label ? [m.standing.label] : []), m.content_spent > 0 ? `${dollars(m.content_spent)} on PPVs and tips` : 'Nothing bought yet'];
   if (m.paid_messages) bits.push(`${m.paid_messages} paid message${m.paid_messages === 1 ? '' : 's'}`);
   if (m.tips) bits.push(`${m.tips} tip${m.tips === 1 ? '' : 's'}`);
   if (m.last_purchase) bits.push(`last bought ${shortDay(m.last_purchase)}`);

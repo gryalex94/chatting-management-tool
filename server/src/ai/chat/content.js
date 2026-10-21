@@ -172,8 +172,10 @@ const about = (it, ...words) => {
   return words.some(w => hay.includes(w));
 };
 const withMan = (it) => (it.seen?.people || []).some(p => /\b(?:male|man|men|boy)\b/.test(p)) || /\b(?:male partner|a man|with a man|nude man|partner)\b/i.test(it.description || '');
+// he is asking for content, not just mentioning a word (fix 7): "any feet pics?", "show me", "do you have"
+const CONTENT_ASK = /\b(?:pics?|photos?|pictures?|videos?|vids?|clips?|sets?|content|nudes?|selfies?|snaps?|show me|send me|see you|see your|wanna see|want to see|got any|do you have|have you got|can i see|let me see|anything with|something with|more of you|what(?:'s| is) in)\b/i;
 const CONCEPTS = [
-  ['a man in it', /\b(?:guy|guys|man|men|dude|boy ?friend|bf|partner|couple|b\/?g|with (?:a|another) (?:guy|man|dude)|sex with)\b/i, withMan],
+  ['a man in it', /\b(?:with (?:a|another|some|your) (?:guy|man|dude|bf|boyfriend|partner)|boy ?friend|b\/?g\b|boy ?girl|couple|sex with|(?:a |another )?(?:guy|man|dude) in (?:it|them|the (?:video|vid|pics?|photos?))|two of you|threesome)\b/i, withMan],
   ['a toy', /\b(?:toy|toys|dildo|vibrator|plug)\b/i, it => has(it, 'dildo', 'vibrator', 'plug', 'sex toy') || (it.seen?.objects || []).some(o => /toy|dildo|vibrator/.test(o))],
   ['the shower or bath', /\b(?:shower|bath|bathtub|tub)\b/i, it => has(it, 'shower', 'bath')],
   ['a video', /\b(?:video|vid|vids|clip|movie)\b/i, it => it.kind === 'video' || it.kind === 'bundle'],
@@ -194,6 +196,7 @@ const CONCEPTS = [
  * that have all of it, or else the closest ones. Null when he isn't asking for anything specific.
  */
 function matchRequest(text, items) {
+  if (!CONTENT_ASK.test(String(text || ''))) return null;                    // a word alone isn't a request (fix 7)
   const wants = CONCEPTS.filter(([, re]) => re.test(String(text || '')));
   if (!wants.length) return null;
   const active = items.filter(it => it.active !== false);

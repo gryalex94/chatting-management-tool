@@ -23,6 +23,11 @@ const WARM_UP = { new: 6, friendly: 4, flirty: 3, intimate: 3, girlfriend: 2 };
 const HEAVY = new Set(['sad', 'annoyed']);                 // sticks (B4)
 const NO_SELL = new Set(['sad', 'annoyed', 'suspicious']); // no selling for the rest of the conversation (B3)
 const LIGHT = new Set(['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring']);
+// a heavy read sticks only when his own words back it (fix 3): the planner misreads jokes and politics
+const CONFIRMS = {
+  sad: /\b(?:sad|depress\w*|lonely|alone|cry\w*|tears|died|passed away|funeral|lost my|miss (?:him|her|them|my)|broke up|breakup|divorc\w*|dumped|heartbroken|hurt\w*|stress\w*|anxious|anxiety|panic|tired of|exhausted|burn\w* out|hate my (?:life|job)|rough (?:day|week|night|time)|bad day|not (?:doing )?(?:well|great|good|ok|okay)|sick|hospital|surgery|fired|laid off|lost my job|can'?t sleep|insomnia|worthless|nobody|no one cares|fuck my life|fml)\b/i,
+  annoyed: /\b(?:wtf|annoy\w*|boring|bored|bullshit|bs|shut up|fuck off|fuck you|screw you|dumb|stupid|dummy|idiot|moron|leave me|stop (?:it|that|texting|messaging)|not funny|seriously|whatever|ugh|pathetic|lame|scam\w*|waste of|bot|fake|liar|lying|pointless|forget it)\b/i,
+};
 // he can't pay (a price objection, "too expensive", is handled by the plan instead: one cheaper piece, A5)
 const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
 const FREE = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|one|something)|something\s+free|anything\s+free)\b/i;
@@ -234,7 +239,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     // selling (A1–A7, E5): the cadence, a pause after a big spend, the first-sale path, what was done once
     cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
     pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
-    first_sale: { asked: false }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null,
+    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false,
     taste_text: taste?.text || '', tw,
   };
 }
@@ -265,8 +270,9 @@ function resumeSession(s) {
       ? { every: s.cadence.every, text: clean(s.cadence.text).slice(0, 60), due: s.cadence.due === true, next_in: Math.max(0, Math.round(Number(s.cadence.next_in) || 0)), why: clean(s.cadence.why).slice(0, 200) } : null,
     pause: s.pause && typeof s.pause === 'object' && clean(s.pause.why) ? { total: Math.round(Number(s.pause.total) || 0), until: clean(s.pause.until).slice(0, 40), why: clean(s.pause.why).slice(0, 300) } : null,
     pause_lifted: s.pause_lifted === true,
-    first_sale: { asked: s.first_sale?.asked === true },
+    first_sale: { asked: s.first_sale?.asked === true, held: Math.max(0, Math.round(Number(s.first_sale?.held) || 0)) },
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
+    dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true,
     credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,
     taste_text: clean(s.taste_text).slice(0, 300),
     tw: s.tw && Sl.TW_APPROACH[s.tw.kind] ? { kind: s.tw.kind, text: Sl.TW_APPROACH[s.tw.kind], said: s.tw.said === true, why: clean(s.tw.why).slice(0, 120) } : null,
@@ -280,8 +286,13 @@ function resumeSession(s) {
  * to buy. `read` = the planner's mood for this reply, `said` = his latest message(s).
  * Returns { session, mood } with the mood to use.
  */
-function nextTurn(session, { read = 'chatty', said = '', suspicious = false, timeWaster = false, veryHorny = false }) {
+function nextTurn(session, { read: readIn = 'chatty', said = '', suspicious = false, timeWaster = false, veryHorny = false }) {
   const s = { ...session, changes: [...(session.changes || [])] };
+  let read = readIn;
+  if (HEAVY.has(read) && !CONFIRMS[read].test(said)) {
+    s.changes.push({ aim: s.aim, why: `the planner read him as ${read}, but his words don't show it: not kept (fix 3)` });
+    read = 'chatty';
+  }
   let mood = read;
   // the pause after a big spend (A7) ends when he asks himself or is very actively horny
   if (s.pause && (WANTS_TO_BUY.test(said) || veryHorny)) {

@@ -462,7 +462,14 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   // a kept reply shows once, as her message in the chat (its map link under it), so its card goes
   const roundsAt = (n) => rounds.filter(r => r.at === n && !r.kept).map(round => (
     <div key={round.id} className='flex flex-col gap-2'>
-      {round.screen && ['stop', 'handover', 'wait'].includes(round.screen.action) ? (
+      {round.quiet ? (
+        <div className='flex flex-col items-stretch gap-1'>
+          <div className='rounded-lg border border-dashed p-3 text-sm text-muted-foreground'>
+            <span className='font-medium text-foreground'>She doesn&apos;t answer this one.</span> {round.quiet.text}. Because {round.quiet.why}. Write something real as him and she&apos;s back.
+          </div>
+          <MapLink onClick={() => setMapId(round.id)} active={mapId === round.id} />
+        </div>
+      ) : round.screen && ['stop', 'handover', 'wait'].includes(round.screen.action) ? (
         <div className='flex flex-col items-stretch gap-1'>
           <Stopped screen={round.screen} decided={round.decided || null} onDecide={round === rounds[rounds.length - 1] ? (status, terms) => decide(round, status, terms) : null} onFlag={round === rounds[rounds.length - 1] ? (status) => decideFlag(round, status) : null} />
           <MapLink onClick={() => setMapId(round.id)} active={mapId === round.id} />

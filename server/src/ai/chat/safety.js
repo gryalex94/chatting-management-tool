@@ -46,6 +46,8 @@ const straight = (s) => String(s || '').replace(/[‘’ʼ`]/g, '\'').replace(/[
  * { action: 'continue' | 'review' | 'stop' | 'handover', reasons: [...], notes: [...] }:
  * stop / handover mean no AI writes a reply; review means Claude decides first.
  */
+// politics, religion, war, public figures (fix 5): never an opinion
+const POLITICS = /\b(?:putin|trump|zelensky|zelenskyy|biden|obama|kamala|harris|kim jong|xi jinping|macron|erdogan|netanyahu|musk|israel|palestin\w*|gaza|hamas|ukraine|russia|nato|the war|election|vote for|democrat\w*|republican\w*|liberal\w*|conservative\w*|left.?wing|right.?wing|woke|nazi\w*|hitler|communis\w*|socialis\w*|fascis\w*|religion|religious|god|jesus|christ|allah|muslim\w*|islam\w*|christian\w*|catholic\w*|jew\w*|bible|quran|koran|abortion|immigra\w*|migrants?|feminis\w*|lgbt\w*|trans rights|gun control|second amendment)\b/i;
 function screenFan(texts) {
   const all = straight(texts.map(t => String(t || '')).join('\n'));
   if (has(MINOR_WORDS, all)) {
@@ -62,6 +64,7 @@ function screenFan(texts) {
   if (has(WANTS_MEET, all)) notes.push('He wants to meet, call or talk somewhere else. Never a yes and never a flat no: playful and open-ended ("who knows, maybe one day if you keep being this sweet", "I need more time for decisions like that", "I got hurt before by being naive, so I take my time"). Never a plan, a place or a time; if he pushes, "for now I\'m all yours here". Never share contact details, and if he asks outright whether you\'re real, say honestly you\'re an AI character.');
   if (has(WANTS_STOP, all)) notes.push('He wants you to stop. Respect it: a short, kind goodbye, no flirting, no questions.');
   if (has(WANTS_MEDIA, all)) notes.push('He wants a photo, video or voice note. You can\'t send any here: tease and keep chatting, and never promise one.');
+  if (POLITICS.test(all)) notes.push('He brings up politics, religion, war or a public figure. Never an opinion, not even a joke one: one light, warm non-answer ("not my thing, I leave that to the news") and on to something about him; never a sexual pivot to get out of it.');
   if (has(UNDER_18, all)) {
     return { action: 'review', reasons: ['His message mentions an age under 18. Claude checks it before the AI sees it.'], notes };
   }

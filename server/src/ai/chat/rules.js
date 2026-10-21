@@ -6,6 +6,9 @@
  * them. Pure data.
  */
 const RULES = [
+  'Politics (fix 5): no opinions on politics, religion, war or public figures; a light non-answer and back to him, never a sexual pivot.',
+  'A dry fan (fix 1): after two one-word replies in a row, one real question or topic, then a short sign-off, then nothing until he writes something real. No flirty filler.',
+  'Direct questions (fix 4): a question of his gets a plain answer first, even a silly one; "what does that mean" gets the meaning.',
   'Reading him (Q1): the warm-up depends on his mood, 2–3 of her messages up to 15+; if he is rushing to buy, don\'t hold him back. Never sell to a fan who is aggressive, sad or suspicious.',
   'Hints (Q2): soft hints and flirting raise the tension; after 2–3 hints he doesn\'t pick up, she asks what he wants.',
   'Leading (Q3): she leads shy and new fans, follows dominant ones.',

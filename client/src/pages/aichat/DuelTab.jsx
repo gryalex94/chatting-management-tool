@@ -101,6 +101,8 @@ export default function DuelTab({ page, ready, onSpent }) {
   const [duel, setDuel] = useState(null);             // the moment being judged
   const [res, setRes] = useState(null);               // the results
   const [count, setCount] = useState('100');
+  const [second, setSecond] = useState('thedrummer/cydonia-24b-v4.1');   // the writer to compare with (fix 10: Claude on talk moments)
+  const [talk, setTalk] = useState(false);
   const [busy, setBusy] = useState('');
 
   const load = useCallback(() => api.get(`/api/ai-chat/pages/${page.creator_id}/duels`).then(r => setOv(r.data))
@@ -129,7 +131,7 @@ export default function DuelTab({ page, ready, onSpent }) {
   const start = async () => {
     setBusy('start');
     try {
-      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/duels`, { count: Number(count) });
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/duels`, { count: Number(count), second, talk });
       setOv(o => ({ ...o, job: data.job })); setBatch(data.job.batch); setView('judge'); setDuel(null);
       toast.success('Started');
     } catch (e) { toast.error(errMsg(e, 'Could not start')); }
@@ -175,6 +177,22 @@ export default function DuelTab({ page, ready, onSpent }) {
             <Label htmlFor='duel-count' className='text-xs'>Moments</Label>
             <Input id='duel-count' type='number' min='20' max='150' className='h-9 w-24' value={count} onChange={e => setCount(e.target.value)} />
           </div>
+          <div className='grid gap-1'>
+            <Label className='text-xs'>Against</Label>
+            <Select value={second} onValueChange={setSecond}>
+              <SelectTrigger className='h-9 w-56' aria-label='The writer to compare with'><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value='thedrummer/cydonia-24b-v4.1'>Cydonia 24B (roleplay)</SelectItem>
+                <SelectItem value='claude-haiku-5-5'>Claude Haiku 5.5 (talk, not sex)</SelectItem>
+                <SelectItem value='claude-sonnet-5-5'>Claude Sonnet 5.5 (talk, not sex)</SelectItem>
+                <SelectItem value='mistralai/ministral-8b-2512'>Ministral 8B</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <label className='flex h-9 items-center gap-2 text-xs'>
+            <input type='checkbox' checked={talk} onChange={e => setTalk(e.target.checked)} />
+            Talk moments only (no selling, no sexting)
+          </label>
           <Button onClick={start} disabled={!!busy || running || !ready.writer}>
             {busy === 'start' || running ? <Loader2 className='animate-spin' /> : <Play />}New test
           </Button>
