@@ -484,6 +484,10 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='font-medium'>This conversation: {session.aim.replace(/_/g, ' ')}</span>
           <span className='text-muted-foreground'>{session.aim_text}. Because {session.why}.</span>
           {session.no_sell && <span className='text-warn'>{session.no_sell}.</span>}
+          {session.cadence && <span className='text-muted-foreground'>Sell attempts: {session.cadence.text}; {session.cadence.due ? 'one is due today' : `the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}`}.</span>}
+          {session.pause && <span className='text-warn'>After his big spend: {session.pause.why}.</span>}
+          {session.taste_text && <span className='text-muted-foreground'>His taste: {session.taste_text}.</span>}
+          {session.credit && <span>His ${session.credit.amount} tip: {session.credit.steps ? `${session.credit.steps} story step${session.credit.steps === 1 ? '' : 's'} free` : 'free sexting if he is in the mood'}.</span>}
           {session.service && <span>{session.service.label}, ${session.service.price}: {session.service.state === 'offered' ? 'waiting for his tip' : session.service.state === 'paid' ? `tipped $${session.service.tip}, she delivers` : 'delivered'}</span>}
           {session.roleplay?.on && <span>Roleplay on: {session.roleplay.exchanges} exchange{session.roleplay.exchanges === 1 ? '' : 's'}, PPVs at {Math.round(100 * Math.max(0.3, 1 - session.roleplay.tip / session.roleplay.total))}% of list</span>}
           {session.pending && <span className='text-warn'>An unusual request ("{session.pending.what || session.pending.text}"): {session.pending.state}</span>}

@@ -14,6 +14,7 @@
  */
 const { replyLevel } = require('./safety');
 const { PAUSE, awayText } = require('./memory');
+const Sl = require('./selling');
 
 const DAY = 86400_000;
 const clean = (s) => String(s ?? '').trim();
@@ -22,7 +23,8 @@ const WARM_UP = { new: 6, friendly: 4, flirty: 3, intimate: 3, girlfriend: 2 };
 const HEAVY = new Set(['sad', 'annoyed']);                 // sticks (B4)
 const NO_SELL = new Set(['sad', 'annoyed', 'suspicious']); // no selling for the rest of the conversation (B3)
 const LIGHT = new Set(['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring']);
-const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|too\s+expensive|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
+// he can't pay (a price objection, "too expensive", is handled by the plan instead: one cheaper piece, A5)
+const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
 const FREE = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|one|something)|something\s+free|anything\s+free)\b/i;
 const WANTS_TO_BUY = /\b(?:what\s+(?:do\s+you|have\s+you|you)\s+(?:got|have|sell)|(?:send|show)\s+me\s+(?:something|more|what)|i'?ll\s+(?:buy|take|get)\s+it|how\s+much|price|unlock|wanna\s+see\s+(?:more|something)|got\s+(?:anything|something)\s+(?:for\s+me|new|hot|naughty))\b/i;
 // Her mood of the day (A7): picked from the date, so every fan gets the same Yuna that day.
@@ -43,6 +45,7 @@ const EVENTS = {
   first_to_know: { slot: 'talk', text: 'tell him he\'s the first to know about your new set (name it, say what\'s in it in a line); no price unless he asks (A6)' },
 };
 const AIMS = {
+  first_sale: 'Walk him to his first sale: stay with his vibe, then flirt, then a sexy vibe, then ask what he wants and offer one piece at $30–50',
   get_to_know: 'Get to know him: welcome him, let him talk, nothing sold before he\'s clearly in the mood',
   rapport: 'Build rapport, don\'t push: he bought recently. Nothing is offered unless he asks or starts the sexting himself',
   sell: 'Plan to sell him something today, without pushing: steer toward it earlier, his set when he\'s in the mood',
@@ -122,7 +125,7 @@ function fanStateOf({ chat = [], profile, away = null, timeZone = 'America/New_Y
   const last = done[done.length - 1] || null;
   return {
     conversations: done.length, buyer, phase, phase_why: why, hours: hoursOf(chat, { timeZone, now: t }),
-    strikes7, strikes30, faded,
+    strikes7, strikes30, faded, last_ppv_at: Sl.lastAttemptAt(chat.filter(m => m.at)),
     last: last ? {
       ended: last.end, his: last.his, hers: last.hers, ppv: last.ppv, bought: last.bought, sexual: last.sexual,
       text: `${last.his} from him, ${last.hers} from her${last.ppv ? `, ${last.ppv} PPV${last.ppv === 1 ? '' : 's'} sent, ${last.bought ? `${last.bought} bought` : 'none bought'}` : ', no PPV'}${last.sexual ? ', it got sexual' : ''}`,
@@ -139,6 +142,7 @@ function madeUpState(type, profile) {
     conversations: n, buyer: !!h.bought, phase: faded ? 'winding down' : profile?.new_sub ? 'new' : (h.awayDays || 0) >= 14 ? 'lapsed' : h.sexual ? 'sexting partner' : n < 3 ? 'getting to know' : 'regular',
     phase_why: `his practice type (${type?.label || 'not set'})`, hours: { n: 0, best: null, text: '' },
     strikes7: h.strikes7 || 0, strikes30: h.strikes30 || h.strikes7 || 0, faded,
+    last_ppv_at: h.lastPpvDays != null ? new Date(Date.now() - h.lastPpvDays * DAY).toISOString() : null,
     last: n ? { text: h.last || 'a normal chat', sexual: !!h.sexual, bought: h.bought ? 1 : 0 } : null,
   };
 }
@@ -199,19 +203,24 @@ function rotationOf(chat = [], now = Date.now()) {
 // ── The plan for this conversation ────────────────────────────────────────────
 const daysText = (d) => (d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days ago`);
 /**
- * The plan when a conversation starts (B2). `profile` = plan.fanProfile, `state` =
- * fanStateOf, `away` = how long he was gone (ms). Returns the session the practice
- * room keeps: { aim, aim_text, why, warm_up, closeness, mood, lighter, no_sell, changes }.
+ * The plan when a conversation starts (B2, and E5 / A1 / A7 in the adjustment round).
+ * `profile` = plan.fanProfile, `state` = fanStateOf, `away` = how long he was gone (ms),
+ * `cadence` = selling.cadenceOf (how often she plans an attempt with him), `pause` =
+ * selling.pauseOf (a big spend lately), `taste` = selling.tasteOf. Returns the session
+ * the practice room keeps: { aim, aim_text, why, warm_up, closeness, mood, lighter,
+ * no_sell, changes, cadence, pause, first_sale, … }.
  */
-function startSession({ profile, state, away = null, now = new Date(), timeZone = 'America/New_York', newItem = null, rand = Math.random }) {
+function startSession({ profile, state, away = null, now = new Date(), timeZone = 'America/New_York', newItem = null, cadence = null, pause = null, taste = null, rand = Math.random }) {
   const d = profile.days_since_buy;
   let aim, why;
   if (state.faded) [aim, why] = ['short', `a time waster with ${state.strikes7} failed conversation${state.strikes7 === 1 ? '' : 's'} this week: lowest priority (Q19b)`];
-  else if (profile.new_sub) [aim, why] = ['get_to_know', 'a new subscriber (Q21)'];
+  else if (profile.new_sub && !state.buyer && (state.strikes7 || 0) >= 2) [aim, why] = ['short', `a new subscriber who didn't take the first offer in ${state.strikes7} conversations this week: time-waster rules (A1)`];
+  else if (profile.new_sub) [aim, why] = ['first_sale', `a new subscriber with no purchase yet: the staged path to his first sale (A1)`];
+  else if (pause) [aim, why] = ['rapport', pause.why];
   else if (away != null && away >= 14 * DAY && state.buyer) [aim, why] = ['win_back', `he used to buy and was away ${awayText(away)}`];
   else if (d != null && d <= 7) [aim, why] = ['rapport', `he bought ${daysText(d)}: no pushing, build rapport (B2)`];
-  else if (state.buyer && d != null && d >= 30) [aim, why] = ['sell', `he hasn't bought for ${d} days: plan to sell him something today (B2)`];
-  else if (!state.buyer && !profile.time_waster && state.conversations >= 3) [aim, why] = ['sell', `${state.conversations} conversations and never a buy: plan to offer something today (B2)`];
+  else if (cadence?.due) [aim, why] = ['sell', `a planned attempt: ${cadence.why}`];
+  else if (cadence) [aim, why] = ['read', `no planned attempt today: ${cadence.why}`];
   else [aim, why] = ['read', d != null ? `his last buy was ${daysText(d)}: read his vibe, no pushing (B2)` : 'nothing bought yet: read his vibe while talking (B2)'];
   const mood_day = herMood(now, timeZone);
   return {
@@ -219,6 +228,11 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     started_at: now.toISOString(), mood: null, lighter: 0, no_sell: '', changes: [],
     mood_day, event: pickEvent({ profile, aim, mood: mood_day, newItem, rand }), diary_add: [],
     pending: null, service: null, roleplay: null, custom_asked: 0,
+    // selling (A1–A7, E5): the cadence, a pause after a big spend, the first-sale path, what was done once
+    cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
+    pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
+    first_sale: { asked: false }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null,
+    taste_text: taste?.text || '',
   };
 }
 
@@ -244,6 +258,14 @@ function resumeSession(s) {
       ? { on: true, tip: Math.max(0, Math.round(Number(s.roleplay.tip) || 0)), total: Math.max(1, Math.round(Number(s.roleplay.total) || 250)), exchanges: Number.isInteger(s.roleplay.exchanges) ? s.roleplay.exchanges : 0 }
       : null,
     custom_asked: Number.isInteger(s.custom_asked) ? s.custom_asked : 0,
+    cadence: s.cadence && typeof s.cadence === 'object' && s.cadence.every in Sl.EVERY
+      ? { every: s.cadence.every, text: clean(s.cadence.text).slice(0, 60), due: s.cadence.due === true, next_in: Math.max(0, Math.round(Number(s.cadence.next_in) || 0)), why: clean(s.cadence.why).slice(0, 200) } : null,
+    pause: s.pause && typeof s.pause === 'object' && clean(s.pause.why) ? { total: Math.round(Number(s.pause.total) || 0), until: clean(s.pause.until).slice(0, 40), why: clean(s.pause.why).slice(0, 300) } : null,
+    pause_lifted: s.pause_lifted === true,
+    first_sale: { asked: s.first_sale?.asked === true },
+    asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
+    credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,
+    taste_text: clean(s.taste_text).slice(0, 300),
   };
 }
 
@@ -253,19 +275,25 @@ function resumeSession(s) {
  * to buy. `read` = the planner's mood for this reply, `said` = his latest message(s).
  * Returns { session, mood } with the mood to use.
  */
-function nextTurn(session, { read = 'chatty', said = '', suspicious = false, timeWaster = false }) {
+function nextTurn(session, { read = 'chatty', said = '', suspicious = false, timeWaster = false, veryHorny = false }) {
   const s = { ...session, changes: [...(session.changes || [])] };
   let mood = read;
+  // the pause after a big spend (A7) ends when he asks himself or is very actively horny
+  if (s.pause && (WANTS_TO_BUY.test(said) || veryHorny)) {
+    s.changes.push({ aim: s.aim, why: `${veryHorny ? 'he\'s very actively horny' : 'he asks himself'}: the pause after his big spend is lifted (A7)` });
+    s.pause = null; s.pause_lifted = true;
+  }
   if (HEAVY.has(read)) { s.mood = read; s.lighter = 0; }
   else if (s.mood) {
     s.lighter = LIGHT.has(read) ? s.lighter + 1 : 0;
     if (s.lighter >= 2) { s.mood = null; s.lighter = 0; } else mood = s.mood;
   }
-  if (!s.no_sell && (NO_SELL.has(read) || suspicious)) s.no_sell = `he was ${suspicious && !NO_SELL.has(read) ? 'suspicious' : read} earlier in this conversation: no selling for the rest of it (B3)`;
+  // "too expensive" is haggling, not a mood: one cheaper piece may follow (A5), so it doesn't switch selling off
+  if (!s.no_sell && (NO_SELL.has(read) || suspicious) && !(read === 'annoyed' && !suspicious && Sl.priceObjection(said))) s.no_sell = `he was ${suspicious && !NO_SELL.has(read) ? 'suspicious' : read} earlier in this conversation: no selling for the rest of it (B3)`;
   const change = (aim, why) => { if (s.aim !== aim) { s.changes.push({ aim, why }); s.aim = aim; s.aim_text = AIMS[aim]; s.why = why; } };
   if (FREE.test(said)) { /* a free ask changes nothing: the plan handles it (no freebies) */ }
   else if (BROKE.test(said) && !timeWaster && s.aim !== 'short') change('rapport', 'he says he can\'t spend now: no pushing');
-  else if (WANTS_TO_BUY.test(said) && s.aim !== 'short' && s.aim !== 'get_to_know') {
+  else if (WANTS_TO_BUY.test(said) && !['short', 'get_to_know', 'first_sale'].includes(s.aim)) {
     change('sell', 'he asks what she has or wants to buy');
     // he asks himself: answering him isn't pushing, so the no-selling rule (B3) doesn't hold him back
     if (s.no_sell) { s.changes.push({ aim: 'sell', why: 'he asked himself, so selling is back on' }); s.no_sell = ''; }
@@ -273,4 +301,4 @@ function nextTurn(session, { read = 'chatty', said = '', suspicious = false, tim
   return { session: s, mood };
 }
 
-module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, herMood, pickEvent, eventFits, rotationOf, WARM_UP, AIMS, EVENTS };
+module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, herMood, pickEvent, eventFits, rotationOf, WARM_UP, AIMS, EVENTS, WANTS_TO_BUY };

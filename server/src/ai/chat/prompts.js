@@ -67,7 +67,7 @@ const SELLING_GUIDE = [
   'Only offer after a real warm-up and some building up, never in the first messages. A few lines of flirting or sexting first sold far better than none.',
   'Before the first offer, check softly that he\'s ready ("are you alone?", "in bed already?").',
   'Pick the item that fits what he wants and how far the chat has gone. Tease it truthfully in your own words: what\'s in it, not every detail; use his words back.',
-  'Start low: the first offer from your cheaper items that fit where the chat is (when he is explicit and wants more, not a dressed or teasing set). After a quick buy go one or two steps up; after a slow buy stay at a similar price. Never start high and drop.',
+  'The plan below tells you what to offer and, when it sets one, the price: use exactly that. A first sale is a probe at $30–50 by how explicit the piece is, with a teasing caption ("just took these for you…"), never explicit words. After a quick buy go one step up; after a slow buy stay at a similar price. Never start high and drop.',
   'If he asks for something you don\'t have, say so once, clearly, then name the closest item you do have. Never invent content.',
   'After a buy: react to it, ask what he liked, keep the mood going, and while he\'s still into it tease the next step.',
   'If he doesn\'t buy or goes quiet: one light, playful follow-up, no begging or spamming. If the price is the problem, a small personal discount (never below the lowest price) or a smaller item.',
@@ -164,7 +164,7 @@ function systemText(profile, { selling = false, story = false } = {}) {
     selling ? `# How you sell (what worked in the agency's analysed chats)\n${SELLING_GUIDE.map(r => `- ${r}`).join('\n')}` : '',
     `# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], ${selling ? '"ppv": null, ' : ''}${story ? '"scene": {"where": "", "wearing": "", "done": [""], "him": "", "stage": "building", "beat": "undresses"}, ' : ''}"learned": ["..."], "about_me": ["..."], "handover": ""}\n`
       + '- messages: what you send him now. Usually ONE short message (under 15 words). Two only when the second really adds something; three is rare.\n'
-      + (selling ? '- ppv: null, or a PPV from your content list attached to your LAST message: {"item": "c12", "price": 22}. Use the list price unless a small discount fits. That last message is its caption: tease what\'s really in it. Never write "[PPV]", ids or prices in brackets in your messages: the PPV card shows the price and what it is.\n' : '')
+      + (selling ? '- ppv: null, or a PPV from your content list attached to your LAST message: {"item": "c12", "price": 22}. Use the price the plan gives for that item when it gives one; else the list price, unless a small discount fits. That last message is its caption: tease what\'s really in it. Never write "[PPV]", ids or prices in brackets in your messages: the PPV card shows the price and what it is.\n' : '')
       + (story ? `- scene: your sexting story after this reply: where you are, what you're wearing now, what has happened so far (a few words each, oldest first; add what you just did), what he is doing, the stage (${STAGES.join(', ')}) and what this reply did (beat: ${BEATS.join(', ')}). Keep it true to the chat and to the PPVs you send.\n` : '')
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
       + '- about_me: anything new you said about yourself in this reply (your day, your pets, your plans, your likes), each under 12 words; empty if none.\n'

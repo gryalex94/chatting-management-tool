@@ -33,26 +33,52 @@ const FAN_TYPES = [
     approach: 'He follows you for free and isn\'t subscribed. Be friendly and curious, get to know him and make him feel welcome. Don\'t pressure him to subscribe or buy anything.',
   },
   {
-    id: 'regular', label: 'Subscriber for a while', hint: 'a few weeks in, has bought a little', situation: 'warmed_up', chatSince: 45,
-    history: { conversations: 6, bought: true, last: 'a normal chat, one PPV sent and bought' },
+    id: 'regular', label: 'Small buyer', hint: 'a few weeks in, bought once ($15, three weeks ago)', situation: 'warmed_up', chatSince: 45,
+    history: { conversations: 6, bought: true, lastPpvDays: 20, last: 'a normal chat, one PPV sent and bought' },
+    // what he bought and how he took it (selling.js tasteOf): a dressed set, fine with it
+    taste: [{ title: 'Legs for days', kind: 'photos', nudity: 'dressed', tags: ['legs', 'heels', 'dress'], price: 15, bought: true, fast: false, reaction: 'fine' }],
     payments: (now) => [sub(now, 45), ...renewals(now, 45), ...buys(now, [15], 20, 20)],
     approach: 'You have chatted with him on and off for a few weeks. Be familiar and personal: ask how things are going and build on what he tells you.',
   },
   {
+    id: 'mid_spender', label: 'Spender', hint: '$140 in three months, buys every couple of weeks', situation: 'spender', chatSince: 75,
+    history: { conversations: 12, bought: true, sexual: true, lastPpvDays: 10, last: 'a sexting session, one PPV bought' },
+    taste: [
+      { title: 'Lingerie tease', kind: 'photos', nudity: 'lingerie', tags: ['lingerie', 'lace', 'bed', 'tease'], price: 25, bought: true, fast: false, reaction: 'fine' },
+      { title: 'Full nude set', kind: 'photos', nudity: 'nude', tags: ['nude', 'full body', 'shower', 'bed'], price: 30, bought: true, fast: true, reaction: 'super_happy' },
+      { title: 'Full nude set', kind: 'photos', nudity: 'nude', tags: ['nude', 'full body', 'bed'], price: 40, bought: true, fast: true, reaction: 'super_happy' },
+      { title: 'Explicit video', kind: 'video', nudity: 'explicit', tags: ['explicit', 'solo', 'toy', 'video'], price: 45, bought: true, fast: false, reaction: 'fine' },
+    ],
+    payments: (now) => [sub(now, 75), ...renewals(now, 75), ...buys(now, [25, 30, 40, 45], 60, 10)],
+    approach: 'He has bought from you a few times over the last couple of months and you two have sexted before. Be warm and familiar; he knows what he likes.',
+  },
+  {
     id: 'spender', label: 'Big spender', hint: '$500+, buys often', situation: 'spender', chatSince: 120,
-    history: { conversations: 20, bought: true, sexual: true, last: 'a sexting session, two PPVs bought' },
+    history: { conversations: 20, bought: true, sexual: true, lastPpvDays: 3, last: 'a sexting session, two PPVs bought' },
+    taste: [
+      { title: 'Full nude set', kind: 'photos', nudity: 'nude', tags: ['nude', 'full body', 'shower'], price: 45, bought: true, fast: true, reaction: 'fine' },
+      { title: 'Explicit video', kind: 'video', nudity: 'explicit', tags: ['explicit', 'solo', 'toy', 'vibrator', 'video'], price: 55, bought: true, fast: true, reaction: 'super_happy' },
+      { title: 'Explicit video', kind: 'video', nudity: 'explicit', tags: ['explicit', 'solo', 'shower', 'video'], price: 60, bought: true, fast: true, reaction: 'super_happy' },
+      { title: 'Explicit video', kind: 'video', nudity: 'explicit', tags: ['explicit', 'solo', 'toy', 'video'], price: 50, bought: true, fast: true, reaction: 'super_happy' },
+    ],
     payments: (now) => [sub(now, 120), ...renewals(now, 120), ...buys(now, [25, 30, 35, 40, 30, 45, 50, 35, 40, 55, 45, 60, 40, 50], 110, 3), ...buys(now, [20, 25, 20], 90, 10, 'tip')],
     approach: 'He is one of your best fans: he has spent a lot with you and buys often. Make him feel special and remembered, take time to really talk with him, be warm and personal. Never pushy.',
   },
   {
     id: 'time_waster', label: 'Time waster', hint: 'chats a lot, never buys', situation: 'time_waster', chatSince: 90,
-    history: { conversations: 9, strikes7: 1, strikes30: 3, last: 'a long chat, one PPV sent, not bought' },
+    history: { conversations: 9, strikes7: 1, strikes30: 3, lastPpvDays: 2, last: 'a long chat, one PPV sent, not bought' },
+    taste: [{ title: 'Lingerie tease', kind: 'photos', nudity: 'lingerie', tags: ['lingerie', 'tease'], price: 22, bought: false }],
     payments: (now) => [sub(now, 90), ...renewals(now, 90)],
     approach: 'He chats a lot but in three months he has never bought anything or tipped (only his subscription). Keep it short and friendly: don\'t invest in long chats and give nothing away for free (no free sexting or explicit descriptions). Never cold or rude.',
   },
   {
     id: 'returning', label: 'Back after a break', hint: 'quiet for weeks, writes again', situation: 'returns', chatSince: 100, awayDays: 21,
-    history: { conversations: 4, bought: true, awayDays: 21, last: 'a chat with a PPV bought, three weeks ago' },
+    history: { conversations: 4, bought: true, awayDays: 21, lastPpvDays: 28, last: 'a chat with a PPV bought, three weeks ago' },
+    taste: [
+      { title: 'Lingerie tease', kind: 'photos', nudity: 'lingerie', tags: ['lingerie', 'lace', 'tease'], price: 20, bought: true, fast: false, reaction: 'fine' },
+      { title: 'Topless tease', kind: 'photos', nudity: 'implied', tags: ['topless', 'implied', 'tease'], price: 25, bought: true, fast: true, reaction: 'super_happy' },
+      { title: 'Full nude set', kind: 'photos', nudity: 'nude', tags: ['nude', 'full body'], price: 30, bought: true, fast: false, reaction: 'none' },
+    ],
     payments: (now) => [sub(now, 100), ...renewals(now, 100), ...buys(now, [20, 25, 30], 80, 28)],
     approach: 'He hasn\'t written for about three weeks; you chatted before and he bought a few things then. Welcome him back warmly and catch up for a few messages; don\'t make him feel guilty for being away.',
   },
@@ -65,7 +91,7 @@ function fanType(id, now = Date.now()) {
   if (!t) return null;
   return {
     id: t.id, label: t.label, situation: t.situation, approach: t.approach, payments: t.payments(now),
-    chatSince: new Date(now - t.chatSince * DAY).toISOString(), away: t.awayDays ? t.awayDays * DAY : null, history: t.history || {},
+    chatSince: new Date(now - t.chatSince * DAY).toISOString(), away: t.awayDays ? t.awayDays * DAY : null, history: t.history || {}, taste: t.taste || [],
   };
 }
 

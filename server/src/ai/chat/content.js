@@ -125,7 +125,8 @@ function contentText(items) {
  * `warm` = past the warm-up. Returns { item, price } or { problem }.
  */
 // `lowestShare`: inside a paid roleplay, PPVs may go down to this share of the list price (D4).
-function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null }) {
+// `fixedPrice`: the plan set the price (a first sale's probe price, a tip that covers it): it's used as is.
+function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null, fixedPrice = null, fixedPrices = null }) {
   const id = Number(String(ppv?.item || '').replace(/^c/i, ''));
   const item = items.find(it => it.id === id && it.active !== false);
   if (!item) return { problem: 'It attached content that isn\'t in her content list. Only offer what\'s in the list; if nothing fits, say so and offer the closest item.' };
@@ -142,6 +143,9 @@ function checkOffer({ ppv, items, offered = [], level, warm, lowestShare = null 
     }
   }
   if (levelOf(item) > (level?.max ?? 0) + 1) return { problem: `"${item.title}" is ${LEVEL_WORD[levelOf(item)]}: far spicier than the chat is now. Build it up first, or offer something softer.` };
+  const fp = fixedPrices && fixedPrices[item.id] != null ? fixedPrices[item.id] : fixedPrice;
+  const fixed = fp != null && Number.isFinite(Number(fp));
+  if (fixed) return { item, price: Math.round(Number(fp) * 100) / 100, fixed: true };
   const price = Number(ppv.price) || Number(item.price);
   const floor = lowestShare ? Math.min(lowest(item), Math.round(Number(item.price) * lowestShare)) : lowest(item);
   if (price < floor) return { problem: `${money(price)} is below the lowest price for "${item.title}" (${money(floor)}).` };
@@ -196,4 +200,7 @@ function matchRequest(text, items) {
   return { wants: wants.map(([label]) => label), full, close };
 }
 
-module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money, seenText, matchRequest };
+/** What an item is about, in the fan's own concepts ("a video", "her feet", "full nudity"…): for his taste (selling.js). */
+const conceptsOf = (it) => CONCEPTS.filter(([, , test]) => { try { return test(it); } catch { return false; } }).map(([label]) => label);
+
+module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money, seenText, matchRequest, CONCEPTS, conceptsOf };
