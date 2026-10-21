@@ -99,6 +99,8 @@ function Vault({ page }) {
 // Services (D1–D4) and requests (D1, D8, D9): what she sells besides PPVs, paid by a tip
 // first, with a base price the manager sets; and fans' requests the AI couldn't decide.
 const REQUEST_STATUS = { pending: ['Waiting for you', 'text-warn'], approved: ['Approved', 'text-good'], refused: ['Refused', 'text-muted-foreground'], noted: ['Missing content, noted', 'text-muted-foreground'] };
+// a flagged file (D5): the chat stays stopped until it's cleared or he's blocked
+const FLAG_STATUS = { pending: ['Waiting: clear him or block him', 'text-warn'], approved: ['Cleared', 'text-good'], refused: ['Blocked', 'text-bad'] };
 function Services({ page }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
@@ -150,16 +152,22 @@ function Services({ page }) {
       </div>
       <div className='flex flex-col gap-2 rounded-lg border p-4'>
         <p className='text-sm font-medium'>Requests the AI couldn&apos;t decide</p>
-        <p className='max-w-2xl text-xs text-muted-foreground'>An unusual request: she hesitated, then the conversation waits for your yes or no, with your terms. Visual content she doesn&apos;t have: noted here as missing content.</p>
+        <p className='max-w-2xl text-xs text-muted-foreground'>An unusual request: she hesitated, parked it (&quot;I&apos;ll think about it&quot;) and moved the chat on; your yes or no, with your terms, reaches her in her next reply. Visual content she doesn&apos;t have: noted here as missing content. A flagged file (someone who could be under 18, or something illegal): the chat stays stopped until you clear him or block him.</p>
         {requests === null ? <Skeleton className='h-10 w-full' /> : !requests.length ? <p className='text-xs text-muted-foreground'>Nothing yet.</p> : (
           <ul className='flex flex-col gap-2'>
             {requests.map(r => (
               <li key={r.id} className='flex flex-col gap-1.5 rounded-md border px-3 py-2 text-sm'>
                 <div className='flex flex-wrap items-baseline justify-between gap-2'>
-                  <span className='min-w-0'>{r.kind === 'content' ? 'Content: ' : 'Service: '}{r.text}</span>
-                  <span className={cn('text-xs', REQUEST_STATUS[r.status]?.[1])}>{REQUEST_STATUS[r.status]?.[0] || r.status}{r.terms ? ` · ${r.terms}` : ''} · {new Date(r.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' })}{r.source === 'practice' ? ' · practice' : ''}</span>
+                  <span className='min-w-0'>{r.kind === 'content' ? 'Content: ' : r.kind === 'flag' ? 'Flagged file: ' : 'Service: '}{r.text}</span>
+                  <span className={cn('text-xs', (r.kind === 'flag' ? FLAG_STATUS : REQUEST_STATUS)[r.status]?.[1])}>{(r.kind === 'flag' ? FLAG_STATUS : REQUEST_STATUS)[r.status]?.[0] || r.status}{r.terms ? ` · ${r.terms}` : ''} · {new Date(r.created_at).toLocaleDateString([], { day: 'numeric', month: 'short' })}{r.source === 'practice' ? ' · practice' : ''}</span>
                 </div>
-                {r.status === 'pending' && (
+                {r.status === 'pending' && r.kind === 'flag' && (
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <Button size='sm' variant='outline' className='h-8' onClick={() => decide(r, 'approved')} disabled={busy === `r${r.id}`}>Clear him: it was fine</Button>
+                    <Button size='sm' variant='outline' className='h-8' onClick={() => decide(r, 'refused')} disabled={busy === `r${r.id}`}>Block him</Button>
+                  </div>
+                )}
+                {r.status === 'pending' && r.kind !== 'flag' && (
                   <div className='flex flex-wrap items-center gap-1.5'>
                     <Input value={terms[r.id] || ''} onChange={e => setTerms(t => ({ ...t, [r.id]: e.target.value }))} placeholder='Your terms (a price, what exactly), or why not' className='h-8 flex-1 min-w-48' aria-label='Terms' />
                     <Button size='sm' variant='outline' className='h-8' onClick={() => decide(r, 'approved')} disabled={busy === `r${r.id}`}>Approve</Button>

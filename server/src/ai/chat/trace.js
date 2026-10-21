@@ -31,9 +31,9 @@ const heatKind = (heat) => /\b(mild|medium|hot)\b/i.exec(String(heat || ''))?.[1
 function safetyStep(screen) {
   if (!screen) return step('safety', 'Safety screen', { result: 'Nothing to screen: she writes first' });
   const stopped = screen.action === 'stop' || screen.action === 'handover' || screen.action === 'wait';
-  return step('safety', screen.action === 'wait' ? 'Waiting for a manager' : 'Safety screen', {
+  return step('safety', screen.flag ? 'A flagged file' : screen.action === 'wait' ? 'Waiting for a manager' : 'Safety screen', {
     status: stopped ? 'stop' : screen.review ? 'warn' : 'ok',
-    result: stopped ? (screen.action === 'stop' ? 'Stopped: no AI saw his message' : screen.action === 'wait' ? 'The conversation waits for your decision' : 'A person takes over')
+    result: stopped ? (screen.flag === 'blocked' ? 'Blocked by a manager: the AI never answers him' : screen.flag ? 'Stopped until a manager clears him or blocks him' : screen.action === 'stop' ? 'Stopped: no AI saw his message' : screen.action === 'wait' ? 'The conversation waits for your decision' : 'A person takes over')
       : screen.notes.length ? `Passed, with ${screen.notes.length} note${screen.notes.length === 1 ? '' : 's'} for her` : 'Passed: nothing flagged',
     why: [...(screen.reasons || [])].join(' '),
     tags: ['House rules', ...(screen.review ? ['Claude'] : [])],
@@ -106,7 +106,8 @@ function sessionStep({ session = null, state = null, herHere = 0, stage = null, 
       session.mood ? { label: 'Mood that sticks', value: `${session.mood}, until he sounds lighter twice in a row (${session.lighter} of 2 so far)` } : null,
       session.no_sell ? { label: 'No selling', value: session.no_sell } : null,
       ...(session.changes || []).map(c => ({ label: 'Plan changed', value: `${aimWord(c.aim)}: ${c.why}` })),
-      session.pending ? { label: 'An unusual request', value: `"${session.pending.what || session.pending.text}": ${{ hesitant: `she hesitates (${session.pending.exchanges} of 2 exchanges), then a manager decides`, waiting: 'waiting for a manager\'s decision; she says nothing until then', approved: `approved${session.pending.terms ? `: ${session.pending.terms}` : ''}`, refused: `refused${session.pending.terms ? `: ${session.pending.terms}` : ''}` }[session.pending.state]} (D1)` } : null,
+      session.pending ? { label: 'An unusual request', value: `"${session.pending.what || session.pending.text}": ${{ hesitant: `she hesitates (${session.pending.exchanges} of 2 exchanges), then parks it for a manager`, waiting: session.pending.parked ? 'parked ("I\'ll think about it"); the chat goes on while a manager decides' : 'she parks it now ("I\'ll think about it") and moves the chat on; a manager decides meanwhile', approved: `approved${session.pending.terms ? `: ${session.pending.terms}` : ''}`, refused: `refused${session.pending.terms ? `: ${session.pending.terms}` : ''}` }[session.pending.state]} (D1, D4)` } : null,
+      session.tw ? { label: 'A time waster', value: `the approach this conversation: ${session.tw.text}; ${session.tw.why} (D2)` } : null,
       session.service ? { label: 'A service', value: `${session.service.label}, $${session.service.price}: ${{ offered: 'offered, waiting for his tip', paid: `he tipped $${session.service.tip}: she delivers`, delivered: 'delivered' }[session.service.state]} (D1–D3)` } : null,
       session.roleplay?.on ? { label: 'Roleplay', value: `on, ${session.roleplay.exchanges} exchange${session.roleplay.exchanges === 1 ? '' : 's'}; his $${session.roleplay.tip} tip counts toward a $${session.roleplay.total} session, so PPVs cost ${Math.round(100 * Math.max(0.3, 1 - session.roleplay.tip / session.roleplay.total))}% of list (D4)` } : null,
       state?.last ? { label: 'Last conversation', value: `${state.last.ended ? `${day(state.last.ended)}: ` : ''}${state.last.text}` } : null,

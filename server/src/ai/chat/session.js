@@ -212,11 +212,14 @@ const daysText = (d) => (d === 0 ? 'today' : d === 1 ? 'yesterday' : `${d} days 
  */
 function startSession({ profile, state, away = null, now = new Date(), timeZone = 'America/New_York', newItem = null, cadence = null, pause = null, taste = null, rand = Math.random }) {
   const d = profile.days_since_buy;
+  // a time waster who isn't faded yet (D2): three approaches in turn, the one that worked when one did
+  const tw = profile.time_waster && !state.faded ? Sl.twApproach({ strikes: state.strikes30, conversations: state.conversations, buyer: state.buyer }) : null;
   let aim, why;
   if (state.faded) [aim, why] = ['short', `a time waster with ${state.strikes7} failed conversation${state.strikes7 === 1 ? '' : 's'} this week: lowest priority (Q19b)`];
   else if (profile.new_sub && !state.buyer && (state.strikes7 || 0) >= 2) [aim, why] = ['short', `a new subscriber who didn't take the first offer in ${state.strikes7} conversations this week: time-waster rules (A1)`];
   else if (profile.new_sub) [aim, why] = ['first_sale', `a new subscriber with no purchase yet: the staged path to his first sale (A1)`];
   else if (pause) [aim, why] = ['rapport', pause.why];
+  else if (tw) [aim, why] = [tw.kind === 'cheap' ? 'sell' : 'read', `a time waster, the approach this time: ${tw.text} (D2)`];
   else if (away != null && away >= 14 * DAY && state.buyer) [aim, why] = ['win_back', `he used to buy and was away ${awayText(away)}`];
   else if (d != null && d <= 7) [aim, why] = ['rapport', `he bought ${daysText(d)}: no pushing, build rapport (B2)`];
   else if (cadence?.due) [aim, why] = ['sell', `a planned attempt: ${cadence.why}`];
@@ -232,7 +235,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
     pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
     first_sale: { asked: false }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null,
-    taste_text: taste?.text || '',
+    taste_text: taste?.text || '', tw,
   };
 }
 
@@ -249,7 +252,7 @@ function resumeSession(s) {
     diary_add: Array.isArray(s.diary_add) ? s.diary_add.map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-20) : [],
     // paid requests (services.js, D1–D4): an unusual ask waiting for a manager, a service offered or paid, a roleplay going on
     pending: s.pending && typeof s.pending === 'object' && ['hesitant', 'waiting', 'approved', 'refused'].includes(s.pending.state)
-      ? { text: clean(s.pending.text).slice(0, 300), what: clean(s.pending.what).slice(0, 80), exchanges: Number.isInteger(s.pending.exchanges) ? s.pending.exchanges : 0, state: s.pending.state, terms: clean(s.pending.terms).slice(0, 300), id: Number.isInteger(s.pending.id) ? s.pending.id : null }
+      ? { text: clean(s.pending.text).slice(0, 300), what: clean(s.pending.what).slice(0, 80), exchanges: Number.isInteger(s.pending.exchanges) ? s.pending.exchanges : 0, state: s.pending.state, terms: clean(s.pending.terms).slice(0, 300), id: Number.isInteger(s.pending.id) ? s.pending.id : null, parked: s.pending.parked === true, again: s.pending.again === true }
       : null,
     service: s.service && typeof s.service === 'object' && clean(s.service.kind) && ['offered', 'paid', 'delivered'].includes(s.service.state)
       ? { kind: clean(s.service.kind), label: clean(s.service.label).slice(0, 60), price: Math.max(0, Math.round(Number(s.service.price) || 0)), state: s.service.state, tip: Math.max(0, Math.round(Number(s.service.tip) || 0)) }
@@ -266,6 +269,8 @@ function resumeSession(s) {
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
     credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,
     taste_text: clean(s.taste_text).slice(0, 300),
+    tw: s.tw && Sl.TW_APPROACH[s.tw.kind] ? { kind: s.tw.kind, text: Sl.TW_APPROACH[s.tw.kind], said: s.tw.said === true, why: clean(s.tw.why).slice(0, 120) } : null,
+    flag: ['pending', 'cleared', 'blocked'].includes(s.flag) ? s.flag : null,
   };
 }
 

@@ -641,7 +641,28 @@ async function refreshMemories(accountId, { max = 25 } = {}) {
     } catch (e) { out.failed += 1; console.error('[ai-chat] notes after a chat:', e.message); }
   }
   if (todo.length) console.log('[ai-chat] notes after chats:', JSON.stringify({ ...out, cost: round(out.cost, 4) }));
+  // her facts told to three fans or more move into her profile (D3)
+  try { out.promoted = await promoteFacts(acc.organisation_id, acc.creator_id, accountId); } catch (e) { console.error('[ai-chat] promote facts:', e.message); }
   return out;
+}
+
+/**
+ * A fact she told three fans or more becomes part of her profile by itself (D3): added
+ * to the profile's facts (the manager can remove it there; it isn't added again). Returns how many were added.
+ */
+async function promoteFacts(orgId, creatorId, accountId) {
+  const persona = await loadPersona(orgId, creatorId);
+  if (!persona) return 0;
+  const promoted = new Set((persona.settings?.promoted || []).map(normText));
+  const list = (await diaryOf(orgId, creatorId, accountId, persona)).filter(d => !d.profile && !d.off && d.fans >= 3 && !promoted.has(normText(d.text))).slice(0, 5);
+  if (!list.length) return 0;
+  const facts = [...(persona.profile?.facts || []), ...list.map(d => d.text)].slice(-60);
+  const keys = [...promoted, ...list.map(d => normText(d.text))].slice(-200);
+  const { error } = await supabaseAdmin.from('ai_personas').update({ profile: { ...(persona.profile || {}), facts }, settings: { ...(persona.settings || {}), promoted: keys }, updated_at: new Date().toISOString() }).eq('creator_id', creatorId);
+  check(error);
+  diaryCache.delete(`${orgId}|${creatorId}`);
+  console.log(`[ai-chat] ${list.length} of her facts moved into her profile (told to 3+ fans)`);
+  return list.length;
 }
 
 // Memory for every fan who wrote, in the background: one job per page at a time.
@@ -948,10 +969,14 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const taste = Sl.tasteOf({ chat: convo, content, seed: type?.taste || [] });
   const attempts = { here: convo.slice(talk.start).filter(m => !m.from_fan && !m.mass && m.media?.price).length, today: Sl.attemptsToday(convo.slice(0, talk.start), now.getTime()) };
 
-  // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up)
+  // 1. the safety screen, before any writer sees anything (nothing to screen when she follows up).
+  //    A flagged file (C3, D5): the chat stays stopped until a manager clears him or blocks him; a real fan is marked in his notes
   const toScreen = [...latest, ...latestSeen.map(s => s.description).filter(Boolean)];
-  const screen = latestSeen.some(s => s.flagged)
-    ? { action: 'stop', reasons: ['His photo or video may show someone under 18 or something illegal. It was not looked at further; the AI leaves this chat and a person should look (C3).'], notes: [], review: null }
+  const flaggedNow = latestSeen.filter(s => s.flagged);
+  let flag = fanUuid ? await flagOf(orgId, creatorId, account.id, fanUuid, flaggedNow) : { state: ['pending', 'cleared', 'blocked'].includes(sentSession?.flag) ? sentSession.flag : null, id: null };
+  if (!fanUuid && flaggedNow.length && flag.state !== 'blocked' && flag.state !== 'cleared') flag = { state: 'pending', id: null };
+  const screen = flag.state === 'blocked' ? { action: 'stop', reasons: ['A manager blocked him after a flagged file: the AI never answers him again (D5).'], notes: [], review: null, flag: 'blocked', flag_id: flag.id }
+    : flag.state === 'pending' ? { action: 'stop', reasons: [flaggedNow.length ? 'His photo or video may show someone under 18 or something illegal. It was not looked at further; the AI leaves this chat until you clear him or block him (C3, D5).' : 'His earlier file is still flagged: the AI stays out of this chat until a manager clears him or blocks him (D5).'], notes: [], review: null, flag: 'pending', flag_id: flag.id }
     : toScreen.length ? await screenLatest(orgId, creatorId, fanUuid, toScreen) : { action: 'continue', reasons: [], notes: [], review: null };
   if (screen.action === 'stop' || screen.action === 'handover') return { screen, results: [], used: { trace: [T.safetyStep(screen)] } };
 
@@ -960,7 +985,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   long = win.long;
   const recentHer = convo.filter(m => !m.from_fan && !m.mass).slice(-8).map(m => m.text);
   const sell = content.length > 0;
-  const match = sell && !asksAboutLastPpv(convo) ? C.matchRequest(latest.join(' '), content) : null;   // what he asks for, in her content
+  let match = sell && !asksAboutLastPpv(convo) ? C.matchRequest(latest.join(' '), content) : null;   // what he asks for, in her content
   // her last PPV in this practice chat: none new while it waits for him (unless he wants something else)
   const waiting = lastPpv(convo);
   const offered = convo.filter(m => m.media?.item).map(m => ({ id: Number(String(m.media.item).replace(/^c/i, '')), status: m.media.status, open: false }));
@@ -1005,8 +1030,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const services = Sv.servicesOf(persona.settings);
   const lastSeen = [...convo.slice(talk.start)].reverse().flatMap(m => (m.from_fan ? m.media?.seen || [] : [])).find(s => s.description && !s.flagged) || null;
   let request = latest.length || latestSeen.length ? Sv.requestOf(latest.join(' '), { media: latestSeen, services }) : null;
-  // a request for content she has, or clearly content she doesn't have ("any feet pics?"), is a content question, not an unusual service ask
-  if (request?.kind === 'unknown' && match) request = null;
+  // a request for content she has, or clearly for content she doesn't have ("any feet pics?"), is a content question,
+  // not an unusual service ask ("would you be into feet worship?" stays one)
+  if (request?.kind === 'unknown' && match && (match.full.length || CONTENT_WORDS.test(latest.join(' ')))) request = null;
   // she asked what custom content he'd want exactly: his next message is the answer (D8, step 2)
   if (!request && session.custom_asked === 1 && latest.length) request = { kind: 'custom', what: latest.join(' ').slice(0, 120), described: true };
   if (request && services[request.kind]) request.price = Sv.priceFor(request.kind, { services, avgPrice: first.avg_price });
@@ -1019,10 +1045,21 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   };
   session = { ...session, pending: session.pending ? { ...session.pending } : null, service: session.service ? { ...session.service } : null, roleplay: session.roleplay ? { ...session.roleplay } : null };
   if (!whatIf) {
-    if (request?.kind === 'unknown' && !session.pending) session.pending = { text: latest.join(' ').slice(0, 300), what: request.what, exchanges: 0, state: 'hesitant', terms: '', id: null };
+    if (request?.kind === 'unknown' && !session.pending) session.pending = { text: latest.join(' ').slice(0, 300), what: request.what, exchanges: 0, state: 'hesitant', terms: '', id: null, parked: false, again: false };
     else if (session.pending?.state === 'hesitant' && latest.length) {
       session.pending.exchanges += 1;
+      // after two exchanges she parks it ("I'll think about it") and the conversation goes on; a manager decides meanwhile (D1, D4)
       if (session.pending.exchanges >= 2) { session.pending.state = 'waiting'; if (!planOnly) requestRow = session.pending.id = await noteRequest('service', `${session.pending.what}: ${session.pending.text}`, 'pending'); }
+    }
+    else if (session.pending?.state === 'waiting' && latest.length) {
+      // a decision made in Her content → Services and requests reaches the chat here
+      if (session.pending.id) {
+        const d = await requestStatus(orgId, creatorId, session.pending.id);
+        if (d && ['approved', 'refused'].includes(d.status)) { session.pending.state = d.status; session.pending.terms = d.terms || ''; }
+      }
+      // he brings it up again: "still thinking about it, don't rush me" (D4); it isn't a new content question
+      session.pending.again = session.pending.state === 'waiting' && (ASKS_AGAIN.test(latest.join(' ')) || (request?.kind === 'unknown' && request.what === session.pending.what));
+      if (session.pending.again) { match = null; request = null; }
     }
     if (request && services[request.kind] && !session.service) session.service = { kind: request.kind, label: services[request.kind].label, price: request.price, state: 'offered', tip: 0 };
     if (session.service?.state === 'offered' && latestTip > 0) { session.service.tip += latestTip; if (Sv.covers(session.service.tip, session.service.price)) session.service.state = 'paid'; }
@@ -1035,11 +1072,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     session.credit = session.credit ? { ...session.credit, amount: session.credit.amount + c.amount, steps: Math.min(2, session.credit.steps + c.steps), total: Math.min(2, (session.credit.total ?? session.credit.steps) + c.steps) } : { ...c, total: c.steps };
   }
   const creditIds = session.credit?.steps > 0 ? nextStepIds(content, offered) : [];
-  // an unusual request after her hesitation: the conversation stops until a manager decides (D1)
-  if (session.pending?.state === 'waiting') {
-    const screenWait = { action: 'wait', reasons: [`He asked for something not in her menu ("${session.pending.what}"). She said nothing more: the conversation waits for your decision, then goes on with your terms (D1).`], notes: [], review: null };
-    return { screen: screenWait, results: [], used: { trace: [T.safetyStep(screenWait)], session, request_id: session.pending.id || requestRow } };
-  }
+  if (requestRow) session.request_id = requestRow;
   // an explicit photo or video of him counts as explicit, whatever his words were (C4)
   const seenLevel = latestSeen.some(s => s.sexual === 'explicit') ? 3 : latestSeen.some(s => s.sexual === 'suggestive') ? 2 : 0;
   if (seenLevel > level.his) { level.his = seenLevel; level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match }); }
@@ -1077,6 +1110,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // what this reply settles: a service delivered (a roleplay starts), a manager's decision used,
   // the selling steps done once per conversation (the direct ask, the readiness check, "why not", a cheaper piece, a reminder)
   if (!whatIf) {
+    if (replyPlan.goal === 'request_park' && session.pending) session.pending.parked = true;
+    if (replyPlan.touch?.kind === 'still_thinking' && session.pending) session.pending.again = false;
+    if (replyPlan.honest && session.tw) session.tw = { ...session.tw, said: true };
     if (replyPlan.goal === 'direct_ask') session.first_sale = { asked: true };
     if (replyPlan.goal === 'readiness_check') session.asked_ready = true;
     if (replyPlan.goal === 'why_not') session.why_asked = true;
@@ -1284,6 +1320,50 @@ async function saveServices(orgId, creatorId, { services = {}, session_total: to
   return getServices(orgId, creatorId);
 }
 /** Fans' requests a manager decides on (an unusual service) or should know about (missing content). */
+// he asks for content (photos, videos…) rather than a service
+const CONTENT_WORDS = /\b(?:pics?|photos?|pictures?|videos?|vids?|clips?|sets?|content|nudes?|selfies?|snaps?)\b/i;
+// he asks about his parked request again (D4)
+const ASKS_AGAIN = /\b(?:did (?:you|u) (?:think|decide)|thought about (?:it|that|my)|what about (?:my|that|the) (?:request|thing|idea|question|offer)|any (?:news|answer|decision)|have (?:you|u) decided|still thinking|(?:you|u) never answered|what do (?:you|u) say|so\?+$|decided yet)\b/i;
+/** A request's decision, as made in Her content → Services and requests. */
+async function requestStatus(orgId, creatorId, id) {
+  try {
+    const { data } = await supabaseAdmin.from('ai_requests').select('status, terms').eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId).maybeSingle();
+    return data || null;
+  } catch { return null; }
+}
+/**
+ * A real fan's flag (D5): a photo or video that may show someone under 18 or something
+ * illegal. The first time, a request of kind "flag" is written for a manager and the
+ * fan is marked in his notes; after that the chat stays stopped until the manager
+ * clears him (approved) or blocks him (refused). Returns { state, id }.
+ */
+async function flagOf(orgId, creatorId, accountId, fanUuid, flaggedNow = []) {
+  let row = null;
+  try {
+    const { data } = await supabaseAdmin.from('ai_requests').select('id, status, text, created_at').eq('organisation_id', orgId).eq('creator_id', creatorId).eq('fan_uuid', fanUuid).eq('kind', 'flag').order('created_at', { ascending: false }).limit(1).maybeSingle();
+    row = data || null;
+  } catch { row = null; }
+  if (row?.status === 'refused') return { state: 'blocked', id: row.id };
+  if (row?.status === 'pending') return { state: 'pending', id: row.id };
+  // cleared, or never flagged: a new flagged file (not the one already cleared) starts a new flag
+  const fresh = flaggedNow.filter(s => !(row && s.media_uuid && String(row.text || '').includes(s.media_uuid)));
+  if (!fresh.length) return { state: row ? 'cleared' : null, id: row?.id || null };
+  const s = fresh[0];
+  const text = `${s.video ? 'A video' : 'A photo'} he sent (${s.media_uuid || 'no id'}) may show someone under 18 or something illegal; it was not looked at further`;
+  let id = null;
+  try {
+    const { data } = await supabaseAdmin.from('ai_requests').insert({ organisation_id: orgId, creator_id: creatorId, fan_uuid: fanUuid, source: 'live', kind: 'flag', text, status: 'pending' }).select('id').single();
+    id = data?.id || null;
+  } catch (e) { console.error('[ai-chat] flag:', e.message); }
+  // marked in his notes, so everyone who looks at him sees it
+  try {
+    const mem = await memoryRow(accountId, fanUuid);
+    const facts = [...(mem?.facts || []), { kind: 'avoid', text: `Flagged ${new Date().toISOString().slice(0, 10)}: he sent a file that may show someone under 18 or something illegal; a manager must clear or block him`, said_at: new Date().toISOString(), flag: true }];
+    await supabaseAdmin.from('ai_fan_memory').upsert({ account_id: accountId, fan_uuid: fanUuid, organisation_id: orgId, facts, story: mem?.story || '', updated_at: new Date().toISOString() }, { onConflict: 'account_id,fan_uuid' });
+  } catch (e) { console.error('[ai-chat] flag note:', e.message); }
+  return { state: 'pending', id };
+}
+
 async function listRequests(orgId, creatorId) {
   await pageAccount(orgId, creatorId);
   const { data, error } = await supabaseAdmin.from('ai_requests').select('*').eq('organisation_id', orgId).eq('creator_id', creatorId).order('created_at', { ascending: false }).limit(200);
@@ -1292,7 +1372,7 @@ async function listRequests(orgId, creatorId) {
 }
 async function decideRequest(orgId, creatorId, id, { status, terms }) {
   await pageAccount(orgId, creatorId);
-  if (!['approved', 'refused', 'noted'].includes(status)) throw new AiChatError('Approve or refuse it');
+  if (!['approved', 'refused', 'noted'].includes(status)) throw new AiChatError('Approve or refuse it (clear or block, for a flagged file)');
   const { error } = await supabaseAdmin.from('ai_requests').update({ status, terms: clean(terms).slice(0, 300) || null, decided_at: new Date().toISOString() }).eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
   check(error);
   return listRequests(orgId, creatorId);

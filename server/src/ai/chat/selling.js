@@ -243,6 +243,18 @@ function pickFor({ content = [], taste = null, offered = [], level = { max: 0 },
   return { items: prefer(pool).slice(0, 3), why: 'what fits him (A3)', mix: 'any' };
 }
 
+// ── A time waster's approach (D2) ─────────────────────────────────────────────
+const TW_APPROACH = {
+  short: 'short and sweet: friendly, brief, nothing for free, no chasing',
+  cheap: 'one cheap offer: friendly and brief, and one cheap piece offered plainly once his free talk is used',
+  honest: 'honest: friendly and brief, and once, lightly, that you spend your time on the ones who support you',
+};
+/** Three approaches in turn, one per conversation; the one that worked (a cheap offer) stays once he has ever bought. */
+function twApproach({ strikes = 0, conversations = 0, buyer = false } = {}) {
+  const kind = buyer ? 'cheap' : ['short', 'cheap', 'honest'][(Math.max(0, strikes) + Math.max(0, conversations)) % 3];
+  return { kind, text: TW_APPROACH[kind], said: false, why: buyer ? 'a cheap offer worked with him once, so it stays' : 'the approaches take turns, one per conversation' };
+}
+
 // ── Objections and tips (A5, D1) ──────────────────────────────────────────────
 const PRICE_OBJECTION = /\b(?:too (?:expensive|much|pricey|steep|high|rich)|pricey|expensive|that'?s a lot|cheaper|lower (?:the )?price|discount|can'?t (?:pay|do|spend) that much|(?:a )?bit much|out of my (?:budget|range)|not (?:paying|worth) that)\b/i;
 const priceObjection = (text) => PRICE_OBJECTION.test(String(text || ''));
@@ -252,4 +264,4 @@ function tipCredit(tip, { usual = null } = {}) {
   return { amount: Math.round(Number(tip) || 0), steps: Math.min(2, Math.floor((Number(tip) || 0) / ticket)), ticket: Math.round(ticket) };
 }
 
-module.exports = { cadenceOf, buysOf, pauseOf, attemptsToday, lastAttemptAt, firstSaleStage, probeFor, bandOf, PROBE_PRICE, tasteOf, pickFor, priceObjection, tipCredit, EVERY, STAGE_TEXT };
+module.exports = { cadenceOf, buysOf, pauseOf, attemptsToday, lastAttemptAt, firstSaleStage, probeFor, bandOf, PROBE_PRICE, tasteOf, pickFor, priceObjection, tipCredit, twApproach, TW_APPROACH, EVERY, STAGE_TEXT };

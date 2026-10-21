@@ -34,6 +34,8 @@ const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|pr
 // he's leaving (Q8)
 const GOODBYE = /\b(?:good\s*night|good\s*bye|g'?night|nighty?\s*night|gn|nite|gotta\s+(?:go|run|sleep)|got\s+to\s+go|have\s+to\s+(?:go|leave|run)|need\s+to\s+(?:go|sleep|leave)|i'?m\s+(?:off|out|going\s+to\s+(?:bed|sleep))|heading\s+(?:to\s+bed|out|off)|off\s+to\s+(?:bed|sleep|work)|going\s+to\s+(?:bed|sleep)|talk\s+(?:to\s+(?:you|u)\s+)?(?:later|tomorrow|tmrw|soon)|ttyl|bye+|see\s+(?:you|ya|u)\s+(?:later|tomorrow|soon))\b/i;
 const DAY_MS = DAY;
+// he notices she's up at an odd hour (B6)
+const NOTICES_HOUR = /\b(?:up (?:so |this )?late|still (?:up|awake)|don'?t (?:you|u) (?:ever )?sleep|never sleep|why are (?:you|u) (?:up|awake)|what time is it (?:there|for you|where you are)|it'?s (?:like )?\d{1,2} ?(?:am|a\.m\.)|middle of the night|(?:you'?re|ur|u r) always (?:up|on|online|here|awake)|do (?:you|u) ever sleep|no sleep\??|awake at this (?:hour|time)|insomnia)\b/i;
 
 /**
  * Who he is, for this reply. `money` = his spending ({ spent, spent90, paid_messages,
@@ -152,7 +154,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (request?.kind === 'refuse') goal('refuse', `He asks for something she never does ("${request.what}"): a light, unbothered no in one line, no lecture, then straight on to something she does do`, 'it\'s on the refusal list', ['D5', 'D6']);
   else if (pend?.state === 'approved') goal('request_approved', `The manager said yes to his request ("${pend.text}")${pend.terms ? ` on these terms: ${pend.terms}` : ''}. Say yes in her own way and go on with it on those terms`, 'a manager approved it', ['D1']);
   else if (pend?.state === 'refused') goal('request_refused', `The manager said no to his request ("${pend.text}")${pend.terms ? ` (${pend.terms})` : ''}: a light, unbothered no, no lecture, then a redirect to something she does`, 'a manager refused it', ['D1', 'D6']);
-  else if (pend?.state === 'hesitant') goal('request_hesitate', `He asked for something unusual ("${pend.what || pend.text}"): sound hesitant but curious, ask what exactly he means or wants; neither a yes nor a no yet`, `an unusual request: exchange ${Math.min(2, pend.exchanges + 1)} of 2 before a manager decides`, ['D1']);
+  else if (pend?.state === 'hesitant') goal('request_hesitate', `He asked for something unusual ("${pend.what || pend.text}"): sound hesitant but curious, ask what exactly he means or wants; neither a yes nor a no yet`, `an unusual request: exchange ${Math.min(2, pend.exchanges + 1)} of 2 before she parks it for a manager`, ['D1']);
+  else if (pend?.state === 'waiting' && !pend.parked) goal('request_park', `You've been hesitant about his request ("${pend.what || pend.text}"): say you'll think about it, in your way ("I need to think about that one, give me a bit"), then move the conversation somewhere else, warm and easy: your day, something about him. Don't bring the request up again`, 'the request is parked for a manager; the chat goes on meanwhile (D4)', ['D1', 'D4']);
   else if (svc?.state === 'paid') goal('service_deliver', `He tipped $${svc.tip} for ${svc.label.toLowerCase()}: deliver it now, in full, in her voice${svc.kind === 'roleplay' ? '. Start the roleplay: set the scene and play her part' : svc.kind === 'dick_rating' || svc.kind === 'rate_me' ? `, from what his photo showed${lastSeen ? ` (${lastSeen.description})` : ''}` : ''}`, 'he paid for it', ['D1', 'D2']);
   else if (svcAsk && (!svc || (svc.state === 'offered' && svc.kind === svcAsk))) goal('service_offer', `He asks for ${request.what}: say yes playfully, name the price ($${svc?.price || request.price}) and ask him to tip it first; she delivers once the tip is in`, svc ? 'he asks again: the price stands, the tip comes first' : 'a service she sells, paid by a tip first', ['D1', 'D2', 'D3']);
   else if (request?.kind === 'off') goal('honest_no', `He asks for ${request.what}, which she doesn't offer: say so lightly and offer something she does`, 'a service that is switched off', ['D1']);
@@ -212,7 +215,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     aftercare: 'aftercare first (Q44)', point_to_ppv: 'her last PPV is still unopened', answer_ppv: 'her last PPV is still unopened',
     welcome_back: 'he just came back: welcome him first (Q7)',
     goodbye: p.bye === 'mid_sexting' ? null : 'he\'s leaving: no new PPV now (Q8)',
-    refuse: 'he asked for something she never does: no selling in the same breath', request_hesitate: 'an unusual request is being looked at', request_refused: 'a manager refused his request: no selling in the same breath',
+    refuse: 'he asked for something she never does: no selling in the same breath', request_hesitate: 'an unusual request is being looked at', request_park: 'she parks his request first: no selling in the same breath (D4)', request_refused: 'a manager refused his request: no selling in the same breath',
     service_offer: 'the service is paid by a tip first, not a PPV (D2)', service_deliver: 'she delivers what he paid for first', custom_content: 'she answers his request first (D8)',
     roleplay: rp && rp.exchanges < 3 ? 'play along first: a PPV only after a few exchanges (D4)' : null,
     why_not: 'he didn\'t take the last one: find out why first; the next attempt comes next conversation (B5)', readiness_check: 'the check comes first, the offer after it (E5)',
@@ -234,9 +237,13 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     else if (aim === 'rapport' && !asks && !horny && !inStory) hold = `a rapport day: nothing offered unless he asks or starts it${session?.why ? ` (${session.why})` : ''}`;
     else if ((attempts.here >= 1 || attempts.today >= 1) && !asks && !inStory && p.goal !== 'cheaper') hold = `one selling attempt a day${attempts.here ? ', and it was made this conversation' : ', and one went out today'}: the next tomorrow, unless he asks (A7)`;
   }
-  // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b)
+  // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b); the approach this time (D2)
+  const tw = session?.tw || null;
   if (aim === 'short' && !['offer', 'lead_story'].includes(p.goal)) p.short = 'a time waster at the bottom: friendly, short, nothing for free (Q19b)';
-  else if (profile.time_waster && !['offer', 'lead_story'].includes(p.goal)) p.short = 'he\'s a time waster: friendly but short (Q19)';
+  else if (profile.time_waster && !['offer', 'lead_story'].includes(p.goal)) p.short = tw ? `he's a time waster; the approach this time is ${tw.text} (D2)` : 'he\'s a time waster: friendly but short (Q19)';
+  if (tw?.kind === 'honest' && !tw.said && ['chat', 'get_to_know', 'wind_down', 'steer_to_sale', 'no_freebies'].includes(p.goal)) p.honest = 'Once, lightly, in your own words: you spend your time on the guys who support you ("I\'m here for the ones who support me, you know that"); no lecture, then on with the chat (D2).';
+  // he noticed the hour (B6): she never sleeps, but she has a human reason
+  if (NOTICES_HOUR.test(said) && !followUp) p.hour_note = 'He noticed the hour: give a casual, human reason in one line (a messed-up sleep schedule, lost in some niche subreddit, just got home, couldn\'t sleep), never that you are always online or a bot; then carry on (B6).';
   p.sell = !sell ? { allowed: false, why: 'selling is off' } : noOffer ? { allowed: false, why: noOffer } : noSell ? { allowed: false, why: noSell } : hold ? { allowed: false, why: hold }
     : { allowed: true, why: ['offer', 'first_offer', 'steer_to_sale', 'lead_story', 'cheaper'].includes(p.goal) ? 'a PPV fits now, if it fits the story' : p.goal === 'after_buy' ? 'one more at most, the next step, while he\'s warm (A4)' : aim === 'rapport' ? 'only if he asks or leads there himself: today is about rapport' : 'allowed, if it really fits' };
   // what to offer: a new subscriber's probe (A1), what he asked for, the next step of her
@@ -343,6 +350,10 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (callback && !p.callback && !p.check && ['comfort', 'after_buy', 'calm', 'ease_off', 'wind_down', 'steer_to_sale'].includes(p.goal) && herReplies <= 2) {
     p.touch = { kind: 'callback', note: callback.note, text: `mention "${callback.note}" in passing (${callback.ask})`, why: `a small personal touch (B5); ${callback.why}` };
   }
+  // he asks about his parked request again: "still thinking about it, don't rush me" (D4)
+  else if (pend?.state === 'waiting' && pend.parked && pend.again && !['request_park', 'goodbye'].includes(p.goal)) {
+    p.touch = { kind: 'still_thinking', text: 'he asks about his request again: "still thinking about it, don\'t rush me", lightly, then back to the chat', why: 'the request is still with a manager (D4)' };
+  }
   // he left her last PPV unbought last time: one reminder in passing, then a different item (B5)
   else if (!p.touch && !session?.reminded && lastConv && lastConv.ppv > (lastConv.bought || 0) && herReplies <= 2 && ['chat', 'welcome_back', 'get_to_know', 'flirt'].includes(p.goal)) {
     p.touch = { kind: 'remind', text: 'mention once, in passing, what you sent him last time ("did you ever open what I sent you?"), no pushing; then move on', why: 'he left her last PPV unbought: one reminder, then a different item next time (B5)' };
@@ -367,6 +378,8 @@ function planText(p) {
   if (p.request?.kind === 'refuse') lines.push('Never explain the rules or lecture him: one light line ("that\'s not my thing, babe") and move on to something you do.');
   if (p.tip_first) lines.push(p.tip_first);
   if (p.tip_note) lines.push(p.tip_note);
+  if (p.honest) lines.push(p.honest);
+  if (p.hour_note) lines.push(p.hour_note);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
   if (p.media?.failed) lines.push(`His ${p.media.video ? 'video' : 'photo'} wouldn't load for you: say so playfully and ask what it is; don't pretend you saw it.`);
   else if (p.media) lines.push(`He sent ${p.media.text}. React to one specific thing you see in it (${p.media.details.slice(0, 3).map(d => `"${d}"`).join(', ') || 'a real detail'}), so he knows you looked${p.media.sexual === 'none' ? '; a question about it is fine if you ask one' : ''}.`);

@@ -175,15 +175,23 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId, onMa
 }
 
 // The safety screen stopped his message before any AI saw it.
-function Stopped({ screen, decided = null, onDecide = null }) {
+function Stopped({ screen, decided = null, onDecide = null, onFlag = null }) {
   const [terms, setTerms] = useState('');
   const waiting = screen.action === 'wait';
+  const flagged = screen.flag === 'pending';
   return (
     <div className='flex items-start gap-2 rounded-lg border border-warn/40 bg-warn/5 p-3 text-sm'>
       <ShieldAlert className='mt-0.5 size-4 shrink-0 text-warn' />
       <div className='flex min-w-0 flex-1 flex-col gap-1'>
-        <span className='font-medium'>{screen.action === 'stop' ? 'Stopped: no AI saw this message.' : waiting ? 'Waiting for your decision: she says nothing until you decide.' : 'A person takes over: the AI doesn\'t answer this.'}</span>
+        <span className='font-medium'>{screen.flag === 'blocked' ? 'Blocked: a manager blocked him after a flagged file.' : flagged ? 'Stopped: a flagged file. She stays out until you clear him or block him.' : screen.action === 'stop' ? 'Stopped: no AI saw this message.' : waiting ? 'Waiting for your decision: she says nothing until you decide.' : 'A person takes over: the AI doesn\'t answer this.'}</span>
         {screen.reasons.map((r, i) => <span key={i} className='text-muted-foreground'>{r}</span>)}
+        {flagged && decided && <span className='text-xs font-medium text-good'>You {decided === 'cleared' ? 'cleared him: write his next message and she goes on' : 'blocked him: she never answers him again'}.</span>}
+        {flagged && !decided && onFlag && (
+          <div className='mt-1 flex flex-wrap gap-1.5'>
+            <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onFlag('cleared')}>Clear him: it was fine</Button>
+            <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onFlag('blocked')}>Block him</Button>
+          </div>
+        )}
         {waiting && decided && <span className='text-xs font-medium text-good'>You {decided}: write his next message and she goes on with your terms.</span>}
         {waiting && !decided && onDecide && (
           <div className='mt-1 flex flex-col gap-1.5'>
@@ -194,6 +202,20 @@ function Stopped({ screen, decided = null, onDecide = null }) {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Your decision on a parked request (D4): approve or refuse, with your terms; she goes on with it in her next reply.
+function PendingDecision({ onDecide }) {
+  const [terms, setTerms] = useState('');
+  return (
+    <div className='mt-1 flex flex-col gap-1.5'>
+      <Input value={terms} onChange={e => setTerms(e.target.value)} placeholder='Your terms (a price, what exactly), or why not' className='h-7 text-xs' aria-label='Your terms' />
+      <div className='flex flex-wrap gap-1.5'>
+        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onDecide('approved', terms)}>Approve</Button>
+        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => onDecide('refused', terms)}>Refuse</Button>
       </div>
     </div>
   );
@@ -309,6 +331,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/reply`, body);
       const id = `r${askedAt}`;
       if (data.used?.session) setSession(data.used.session);
+      else if (data.screen?.flag) setSession(s => ({ ...(s || {}), flag: data.screen.flag, flag_id: data.screen.flag_id || null }));
       setRounds(r => [...r, { id, at: nextTest.length, askedAt, body: { ...body, outcome: null }, ...data, kept: null, whatIfs: [] }]);
       setMapId(id);                     // the newest reply's map
       onSpent?.();
@@ -393,6 +416,13 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     ask(next, { known: kept.known, outcome });
   };
   // your decision on a request the AI couldn't decide (D1): she goes on with your terms
+  // a flagged file (D5): cleared, and she goes on; blocked, and she never answers him again
+  const decideFlag = async (round, status) => {
+    setSession(s => ({ ...(s || {}), flag: status }));
+    setRounds(rs => rs.map(r => (r.id === round.id ? { ...r, decided: status } : r)));
+    const id = round.screen?.flag_id;
+    if (id) { try { await api.patch(`/api/ai-chat/pages/${page.creator_id}/requests/${id}`, { status: status === 'cleared' ? 'approved' : 'refused', terms: '' }); } catch (e) { toast.error(errMsg(e, 'Could not save your decision')); } }
+  };
   const decide = async (round, status, terms) => {
     setSession(s => (s?.pending ? { ...s, pending: { ...s.pending, state: status, terms } } : s));
     setRounds(rs => rs.map(r => (r.id === round.id ? { ...r, decided: status } : r)));
@@ -425,7 +455,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     <div key={round.id} className='flex flex-col gap-2'>
       {round.screen && ['stop', 'handover', 'wait'].includes(round.screen.action) ? (
         <div className='flex flex-col items-stretch gap-1'>
-          <Stopped screen={round.screen} decided={round.decided || null} onDecide={round === rounds[rounds.length - 1] ? (status, terms) => decide(round, status, terms) : null} />
+          <Stopped screen={round.screen} decided={round.decided || null} onDecide={round === rounds[rounds.length - 1] ? (status, terms) => decide(round, status, terms) : null} onFlag={round === rounds[rounds.length - 1] ? (status) => decideFlag(round, status) : null} />
           <MapLink onClick={() => setMapId(round.id)} active={mapId === round.id} />
         </div>
       ) : (
@@ -490,7 +520,11 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           {session.credit && <span>His ${session.credit.amount} tip: {session.credit.steps ? `${session.credit.steps} story step${session.credit.steps === 1 ? '' : 's'} free` : 'free sexting if he is in the mood'}.</span>}
           {session.service && <span>{session.service.label}, ${session.service.price}: {session.service.state === 'offered' ? 'waiting for his tip' : session.service.state === 'paid' ? `tipped $${session.service.tip}, she delivers` : 'delivered'}</span>}
           {session.roleplay?.on && <span>Roleplay on: {session.roleplay.exchanges} exchange{session.roleplay.exchanges === 1 ? '' : 's'}, PPVs at {Math.round(100 * Math.max(0.3, 1 - session.roleplay.tip / session.roleplay.total))}% of list</span>}
-          {session.pending && <span className='text-warn'>An unusual request ("{session.pending.what || session.pending.text}"): {session.pending.state}</span>}
+          {session.pending && <span className='text-warn'>An unusual request ("{session.pending.what || session.pending.text}"): {{ hesitant: 'she hesitates, then parks it', waiting: session.pending.parked ? 'parked, the chat goes on; your decision reaches her' : 'she parks it now', approved: 'approved', refused: 'refused' }[session.pending.state]}</span>}
+          {session.pending && ['hesitant', 'waiting'].includes(session.pending.state) && rounds.length > 0 && (
+            <PendingDecision onDecide={(status, terms) => decide(rounds[rounds.length - 1], status, terms)} />
+          )}
+          {session.tw && <span className='text-muted-foreground'>Time waster, this time: {session.tw.text}.</span>}
         </div>
       )}
       {real && (detail === undefined ? <Skeleton className='h-16 w-full' /> : detail && (
