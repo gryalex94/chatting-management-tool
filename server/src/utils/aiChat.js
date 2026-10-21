@@ -21,7 +21,7 @@ const V = require('../ai/chat/vision');
 const Sv = require('../ai/chat/services');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
-const { reviewFan, reviewReply, reviewOffer, coachCheck, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { reviewFan, reviewReply, reviewOffer, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { RULES } = require('../ai/chat/rules');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
@@ -1154,11 +1154,13 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (replyPlan.level.max > level.max) level.max = replyPlan.level.max;   // close fans: a little flirting (Q16)
   // your marks from Practice that fit this moment: wording ones go to the writer, all go to Claude's check
   const lessons = lessonsFor(await loadLessons(orgId, creatorId), { said: latest.join(' '), goal: replyPlan.goal });
+  // the rules you approved from your marks (C2): the writer reads them with every reply
+  const approvedRules = (await loadRules(orgId, creatorId)).filter(x => !x.goal || x.goal === replyPlan.goal);
   const base = {
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone, now, diary, mood: session.mood_day, media: latestSeen,
-    selling: sell, content: sell ? C.contentText(content) : '', sales, lessons: lessons.filter(l => l.kind === 'wording'),
+    selling: sell, content: sell ? C.contentText(content) : '', sales, lessons: lessons.filter(l => l.kind === 'wording'), rules: approvedRules.map(x => x.text),
   };
   // the decision map: what was looked at and decided before any writer wrote a word
   const situations = plan.ids.map(strategy.situationTitle);
@@ -1177,29 +1179,45 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // 3. each writer drafts; every draft is checked, and rewritten if it breaks a rule or sounds off
   const speed = persona.settings?.typing || 'normal';
   const emojis = persona.settings?.emojis || 'rarely';
-  const results = await Promise.all(writers.map(model => writeOne({
-    orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis,
-    sell: sell ? {
-      items: content, offered, lowestShare: session.roleplay?.on ? 0.3 : (replyPlan.lowest_share || null),
-      // prices the plan set (a first sale's probe price, a tip that pays for it, a story step on his tip)
-      fixedPrices: replyPlan.offer?.prices || (creditIds.length && replyPlan.offer?.next ? Object.fromEntries(creditIds.map(id => [id, 0])) : null),
-      only: replyPlan.offer?.items?.map(it => it.id) || null,
-      firstPpv: !taste.bought && !attempts.here,
-    } : null,
-  })));
+  const sellFor = sell ? {
+    items: content, offered, lowestShare: session.roleplay?.on ? 0.3 : (replyPlan.lowest_share || null),
+    // prices the plan set (a first sale's probe price, a tip that pays for it, a story step on his tip)
+    fixedPrices: replyPlan.offer?.prices || (creditIds.length && replyPlan.offer?.next ? Object.fromEntries(creditIds.map(id => [id, 0])) : null),
+    only: replyPlan.offer?.items?.map(it => it.id) || null,
+    firstPpv: !taste.bought && !attempts.here,
+  } : null;
+  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sellFor })));
+  // the rules you approved from your marks (C2) join the house rules in Claude's check
+  const allRules = [...RULES, ...approvedRules.map(x => x.text)];
   // 4. Claude's watch-only check of each reply (Practice): never blocks or rewrites; kept for a daily score
   await Promise.all(results.map(async (r) => {
     if (!['ok', 'check'].includes(r.status) || !r.replies.length) return;
     try {
-      const c = await coachCheck({ profile: persona.profile, fan: profile, card, plan: replyPlan, chat: win.messages, messages: r.replies.map(x => x.creator_message), ppv: r.ppv, rules: RULES, lessons, diary });
+      const c = await coachCheck({ profile: persona.profile, fan: { ...profile, name: fan.name }, card, plan: replyPlan, chat: win.messages, messages: r.replies.map(x => x.creator_message), ppv: r.ppv, rules: allRules, lessons, diary });
       await logUsage(orgId, 'check', CHECK_MODEL, c.usage, { creatorId, fanUuid });
       r.cost += c.usage.cost || 0;
       r.coach = { overall: c.overall, summary: c.summary, points: c.points };
       r.trace = [...(r.trace || []), T.coachStep(r.label, r.coach)];
-      supabaseAdmin.from('ai_checks').insert({
-        organisation_id: orgId, creator_id: creatorId, writer: r.model, overall: c.overall, points: c.points,
-        his: latest.join('\n') || null, her: r.replies.map(x => x.creator_message), goal: replyPlan.goal, cost_usd: c.usage.cost || 0,
+      const saveCheck = (cc, her, fixed = false) => supabaseAdmin.from('ai_checks').insert({
+        organisation_id: orgId, creator_id: creatorId, writer: r.model, overall: cc.overall, points: { ...cc.points, ...(fixed ? { fixed: true } : {}) },
+        his: latest.join('\n') || null, her, goal: replyPlan.goal, cost_usd: cc.usage.cost || 0,
       }).then(({ error }) => { if (error && !/ai_checks/.test(error.message)) console.error('[ai-chat] check save:', error.message); });
+      saveCheck(c, r.replies.map(x => x.creator_message));
+      // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it once more
+      if (c.overall === 'weak' && !c.declined) {
+        const notes = Object.entries(c.points || {}).filter(([k, v]) => v?.verdict === 'weak' && CHECK_POINTS[k]).map(([k, v]) => `${CHECK_POINTS[k]}: ${clean(v.note)}`);
+        const instruction = `Your coach found this reply weak${c.summary ? ` (${clean(c.summary)})` : ''}. ${notes.join(' ')} Write it again, fixing exactly that and keeping what was right: the same moment, the same length.`;
+        const fixed = await writeOne({ orgId, creatorId, fanUuid, model: r.model, base, latest, recentHer, voice, speed, emojis, sell: sellFor, fixWith: instruction });
+        if (['ok', 'check'].includes(fixed.status) && fixed.replies.length) {
+          const c2 = await coachCheck({ profile: persona.profile, fan: { ...profile, name: fan.name }, card, plan: replyPlan, chat: win.messages, messages: fixed.replies.map(x => x.creator_message), ppv: fixed.ppv, rules: allRules, lessons, diary });
+          await logUsage(orgId, 'check', CHECK_MODEL, c2.usage, { creatorId, fanUuid });
+          saveCheck(c2, fixed.replies.map(x => x.creator_message), true);
+          r.fixed = { notes, summary: c.summary, before: r.replies, before_ppv: r.ppv || null, coach: { overall: c2.overall, summary: c2.summary, points: c2.points } };
+          Object.assign(r, { replies: fixed.replies, ppv: fixed.ppv, timing: fixed.timing, scene: fixed.scene, learned: fixed.learned, about_me: fixed.about_me, style: fixed.style, problems: fixed.problems, review: fixed.review, cost: r.cost + fixed.cost + (c2.usage.cost || 0), ms: r.ms + fixed.ms });
+          r.coach = r.fixed.coach;
+          r.trace = [...r.trace, T.fixStep({ notes, summary: c.summary }), ...(fixed.trace || []), T.coachStep(`${r.label}, after Claude's fix`, r.fixed.coach)];
+        }
+      }
     } catch (e) { console.error('[ai-chat] coach:', e.message); }
   }));
   return {
@@ -1259,7 +1277,142 @@ async function saveFeedback(orgId, creatorId, userId, raw = {}) {
   const { data, error } = await supabaseAdmin.from('ai_feedback').insert(row).select('id').single();
   if (error) throw new AiChatError(/ai_feedback/.test(error.message) ? FEEDBACK_MISSING : error.message, /ai_feedback/.test(error.message) ? 409 : 400);
   lessonCache.delete(`${orgId}|${creatorId}`);
+  // three similar marks and a rule is drafted for you (C2), in the background
+  draftRules(orgId, creatorId).catch(e => console.error('[ai-chat] rules:', e.message));
   return { id: data.id };
+}
+
+// ── Rules from your marks (C2, database change 049) ──────────────────────────
+// Approved rules, as the writer and Claude's check read them. Kept in memory for a couple of minutes per page.
+const ruleCache = new Map();
+async function loadRules(orgId, creatorId) {
+  const key = `${orgId}|${creatorId}`;
+  const hit = ruleCache.get(key);
+  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.rows;
+  let rows = [];
+  try {
+    const { data } = await supabaseAdmin.from('ai_chat_rules').select('id, text, kind, goal').eq('organisation_id', orgId).eq('creator_id', creatorId).eq('status', 'approved').order('created_at');
+    rows = data || [];
+  } catch { rows = []; }
+  ruleCache.set(key, { at: Date.now(), rows });
+  return rows;
+}
+async function listRules(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_chat_rules').select('*').eq('organisation_id', orgId).eq('creator_id', creatorId).order('created_at', { ascending: false }).limit(200);
+  if (error) throw new AiChatError(/ai_rules/.test(error.message) ? 'Run database change 049 (chat rules) in Supabase first' : error.message, 409);
+  return { rules: data };
+}
+/** Your decision on a drafted rule: approved (the writer and Claude follow it from now on) or dismissed. */
+async function decideRule(orgId, creatorId, id, status) {
+  await pageAccount(orgId, creatorId);
+  if (!['approved', 'dismissed', 'draft'].includes(status)) throw new AiChatError('Approve or dismiss it');
+  const { error } = await supabaseAdmin.from('ai_chat_rules').update({ status, decided_at: status === 'draft' ? null : new Date().toISOString() }).eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
+  check(error);
+  ruleCache.delete(`${orgId}|${creatorId}`);
+  return listRules(orgId, creatorId);
+}
+/**
+ * Rules drafted from repeated marks (C2): three or more marks of one kind in one moment
+ * that no rule covers yet go to Claude, which writes 1–3 rules from what they share; they
+ * come back as drafts for your approval. Returns { drafted, groups, cost }.
+ */
+async function draftRules(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const [marks, rules] = await Promise.all([
+    supabaseAdmin.from('ai_feedback').select('id, kind, goal, note, better, his, her').eq('organisation_id', orgId).eq('creator_id', creatorId).eq('active', true).order('created_at', { ascending: false }).limit(300),
+    supabaseAdmin.from('ai_chat_rules').select('from_ids').eq('organisation_id', orgId).eq('creator_id', creatorId),
+  ]);
+  if (marks.error) throw new AiChatError(/ai_feedback/.test(marks.error.message) ? FEEDBACK_MISSING : marks.error.message, 409);
+  if (rules.error) throw new AiChatError(/ai_rules/.test(rules.error.message) ? 'Run database change 049 (chat rules) in Supabase first' : rules.error.message, 409);
+  const used = new Set((rules.data || []).flatMap(r => r.from_ids || []).map(Number));
+  const groups = new Map();
+  for (const m of marks.data || []) {
+    if (used.has(Number(m.id))) continue;
+    const k = `${m.kind}|${m.goal || ''}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(m);
+  }
+  const out = { drafted: 0, groups: 0, cost: 0 };
+  for (const [k, list] of groups) {
+    if (list.length < 3) continue;
+    out.groups += 1;
+    const [kind, goal] = k.split('|');
+    const r = await draftRulesFrom(list.slice(0, 12), { goal: goal || null, kind });
+    await logUsage(orgId, 'rules', CHECK_MODEL, r.usage, { creatorId });
+    out.cost += r.usage.cost || 0;
+    for (const rule of r.rules) {
+      if (rule.from.length < 2) continue;
+      const { error } = await supabaseAdmin.from('ai_chat_rules').insert({ organisation_id: orgId, creator_id: creatorId, text: rule.text, kind, goal: goal || null, status: 'draft', from_ids: rule.from });
+      if (!error) out.drafted += 1; else console.error('[ai-chat] rule save:', error.message);
+    }
+  }
+  if (out.drafted) console.log(`[ai-chat] ${out.drafted} rule${out.drafted === 1 ? '' : 's'} drafted from your marks`);
+  return out;
+}
+
+/**
+ * The weekly report (C1): this week and last week (Monday to Sunday, her time zone): what
+ * he did after her replies by moment and by who he is (Practice, as you played him; live
+ * later), Claude's score and the three weakest points with examples, the cost, and what
+ * changed since last week.
+ */
+async function weeklyReport(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const persona = await loadPersona(orgId, creatorId);
+  const timeZone = persona?.settings?.timezone || P.DEFAULT_TZ;
+  const today = Mem.dayIn(new Date(), timeZone);
+  const dow = (new Date(`${today}T12:00:00Z`).getUTCDay() + 6) % 7;      // Monday = 0
+  const monday = (weeks) => Mem.dayIn(new Date(Date.parse(`${today}T12:00:00Z`) - (dow + 7 * weeks) * 86400_000), 'UTC');
+  const thisMon = monday(0), lastMon = monday(1);
+  const since = new Date(Date.parse(`${lastMon}T00:00:00Z`) - 86400_000).toISOString();
+  const safe = async (q) => { try { return await all(q); } catch { return []; } };
+  const [outs, checks, usage] = await Promise.all([
+    safe(() => supabaseAdmin.from('ai_outcomes').select('goal, tier, happened, ppv, created_at').eq('organisation_id', orgId).eq('creator_id', creatorId).gte('created_at', since).order('created_at').order('id')),
+    safe(() => supabaseAdmin.from('ai_checks').select('overall, points, his, her, goal, created_at').eq('organisation_id', orgId).eq('creator_id', creatorId).gte('created_at', since).order('created_at').order('id')),
+    safe(() => supabaseAdmin.from('ai_usage').select('kind, cost_usd, created_at').eq('organisation_id', orgId).eq('creator_id', creatorId).gte('created_at', since).order('id')),
+  ]);
+  const weekOf = (iso) => { const d = Mem.dayIn(iso, timeZone); return d >= thisMon ? 'this' : d >= lastMon ? 'last' : null; };
+  const build = (w) => {
+    const o = outs.filter(r => weekOf(r.created_at) === w), c = checks.filter(r => weekOf(r.created_at) === w), u = usage.filter(r => weekOf(r.created_at) === w);
+    const tally = (list, key) => {
+      const m = new Map();
+      for (const r of list) {
+        const k = r[key] || 'unknown';
+        if (!m.has(k)) m.set(k, { key: k, n: 0, replied: 0, quiet: 0, bought: 0, not_bought: 0, ignored: 0 });
+        const t = m.get(k); t.n += 1; if (t[r.happened] != null) t[r.happened] += 1;
+      }
+      return [...m.values()].sort((a, b) => b.n - a.n);
+    };
+    const graded = c.filter(r => ['good', 'okay', 'weak'].includes(r.overall));
+    const score = graded.length ? Math.round((100 * graded.reduce((s, r) => s + (r.overall === 'good' ? 1 : r.overall === 'okay' ? 0.5 : 0), 0)) / graded.length) : null;
+    const weak = new Map();
+    for (const r of c) {
+      for (const [k, v] of Object.entries(r.points || {})) {
+        if (v?.verdict !== 'weak' || !CHECK_POINTS[k]) continue;
+        if (!weak.has(k)) weak.set(k, { point: k, label: CHECK_POINTS[k], count: 0, examples: [] });
+        const x = weak.get(k); x.count += 1;
+        if (x.examples.length < 2) x.examples.push({ note: clean(v.note), his: clean(r.his).slice(0, 200), her: r.her || [], goal: r.goal });
+      }
+    }
+    const sum = (k) => o.reduce((s, r) => s + (r.happened === k ? 1 : 0), 0);
+    const pct = (k) => (o.length ? Math.round((100 * sum(k)) / o.length) : null);
+    return {
+      replies: o.length, replied: pct('replied'), quiet: pct('quiet'), bought: pct('bought'), by_goal: tally(o, 'goal'), by_tier: tally(o, 'tier'),
+      checked: graded.length, score, fixed: c.filter(r => r.points?.fixed).length, weak: [...weak.values()].sort((a, b) => b.count - a.count).slice(0, 3),
+      cost: round(u.reduce((s, r) => s + (Number(r.cost_usd) || 0), 0), 4),
+    };
+  };
+  const thisW = build('this'), lastW = build('last');
+  const changes = [];
+  const delta = (label, a, b, unit = '') => { if (a == null || b == null) return; const d = Math.round((a - b) * 100) / 100; changes.push(`${label}: ${a}${unit}${d ? ` (${d > 0 ? '+' : ''}${d}${unit} vs last week)` : ' (the same as last week)'}`); };
+  delta('Claude\'s score', thisW.score, lastW.score, '%');
+  delta('He replied', thisW.replied, lastW.replied, '%');
+  delta('He went quiet', thisW.quiet, lastW.quiet, '%');
+  delta('He bought', thisW.bought, lastW.bought, '%');
+  for (const w of thisW.weak) { const b = lastW.weak.find(x => x.point === w.point); changes.push(`${w.label}: weak ${w.count} time${w.count === 1 ? '' : 's'}${b ? ` (${w.count - b.count > 0 ? '+' : ''}${w.count - b.count} vs last week)` : ' (not among the weakest last week)'}`); }
+  if (thisW.cost || lastW.cost) changes.push(`Cost: $${thisW.cost} this week, $${lastW.cost} last week`);
+  return { today, from: thisMon, last_from: lastMon, this_week: thisW, last_week: lastW, changes };
 }
 
 /** Your marks, newest first (switched-off ones too). */
@@ -1933,15 +2086,16 @@ async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = 
  *    that keeps the rules is shown, with what still sounds off as a note.
  * `voice` = what her voice is checked against (voiceFor).
  */
-async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice = null, speed, emojis, sell = null }) {
+// `fixWith`: Claude's notes on a weak reply (C3): the first draft is written with them, and one rewrite at most.
+async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice = null, speed, emojis, sell = null, fixWith = null }) {
   const started = Date.now();
   const out = { model, label: or.writerLabel(model), cost: 0 };
   const recent = voice?.recent || recentHer;
   const maxLevel = base.level?.max ?? 3;
   try {
-    let retry = null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
+    let retry = fixWith || null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
     const steps = [];                                       // each draft, for the decision map
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < (fixWith ? 2 : 3); attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
       const piece = base.plan?.length?.target === 'piece';                    // a paid written piece: more room (D1)
       const res = await or.chat({ model, maxTokens: piece ? 1000 : 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
@@ -2084,6 +2238,7 @@ async function usage(orgId) {
 }
 
 module.exports = {
+  loadRules, listRules, decideRule, draftRules, weeklyReport,
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
   saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia, getServices, saveServices, listRequests, decideRequest,

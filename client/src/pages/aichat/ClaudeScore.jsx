@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Gauge, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,136 @@ function Bar({ c }) {
   );
 }
 const counts = (c) => [`${c.good} good`, `${c.okay} okay`, `${c.weak} weak`, c.declined ? `${c.declined} not looked at` : null].filter(Boolean).join(' · ');
+const TIER_WORD = { new: 'new subscribers', none: 'no spend', small: 'small buyers', spender: 'spenders', whale: 'whales', tw: 'time wasters', unknown: 'unknown' };
+const dayShort = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString([], { day: 'numeric', month: 'short' });
+
+// The weekly report (C1): this week against last week, and what changed.
+function WeeklyReport({ creatorId, version }) {
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    api.get(`/api/ai-chat/pages/${creatorId}/report`).then(r => { if (live) { setReport(r.data); setError(''); } }).catch(e => { if (live) setError(errMsg(e, 'Could not load the weekly report')); });
+    return () => { live = false; };
+  }, [creatorId, version]);
+  if (error) return <p className='text-sm text-muted-foreground'>{error}</p>;
+  if (!report) return <p className='flex items-center gap-2 text-sm text-muted-foreground'><Loader2 className='size-4 animate-spin' />Adding up the week…</p>;
+  const w = report.this_week, l = report.last_week;
+  const row = (label, a, b, unit = '') => (
+    <div key={label} className='grid grid-cols-[minmax(0,1fr)_90px_90px] items-center gap-3 text-sm'>
+      <span className='truncate text-muted-foreground'>{label}</span>
+      <span className='font-medium'>{a == null ? '–' : `${a}${unit}`}</span>
+      <span className='text-muted-foreground'>{b == null ? '–' : `${b}${unit}`}</span>
+    </div>
+  );
+  const line = (t) => `${t.n} repl${t.n === 1 ? 'y' : 'ies'}: ${[['replied', t.replied], ['quiet', t.quiet], ['bought', t.bought], ['didn’t buy', t.not_bought], ['ignored', t.ignored]].filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(' · ') || 'nothing yet'}`;
+  return (
+    <section className='flex flex-col gap-2 rounded-lg border p-3'>
+      <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>The week: from Monday {dayShort(report.from)}, against last week (from {dayShort(report.last_from)})</h3>
+      <div className='grid grid-cols-[minmax(0,1fr)_90px_90px] gap-3 text-[11px] uppercase tracking-wide text-muted-foreground'><span /><span>This week</span><span>Last week</span></div>
+      {row('Replies with an outcome', w.replies, l.replies)}
+      {row('He replied', w.replied, l.replied, '%')}
+      {row('He went quiet', w.quiet, l.quiet, '%')}
+      {row('He bought', w.bought, l.bought, '%')}
+      {row('Claude\'s score', w.score, l.score, '%')}
+      {row('Replies Claude had fixed', w.fixed, l.fixed)}
+      {row('Cost', `$${w.cost}`, `$${l.cost}`)}
+      {w.by_goal.length > 0 && (
+        <div className='flex flex-col gap-0.5 text-xs'>
+          <span className='font-medium'>By moment, this week</span>
+          {w.by_goal.slice(0, 8).map(t => <span key={t.key} className='text-muted-foreground'>{GOAL_WORD[t.key] || t.key}: {line(t)}</span>)}
+        </div>
+      )}
+      {w.by_tier.length > 0 && (
+        <div className='flex flex-col gap-0.5 text-xs'>
+          <span className='font-medium'>By who he is, this week</span>
+          {w.by_tier.map(t => <span key={t.key} className='text-muted-foreground'>{TIER_WORD[t.key] || t.key}: {line(t)}</span>)}
+        </div>
+      )}
+      {w.weak.length > 0 && (
+        <div className='flex flex-col gap-1 text-xs'>
+          <span className='font-medium'>The weakest points this week</span>
+          {w.weak.map(x => (
+            <div key={x.point} className='flex flex-col gap-0.5 border-l-2 border-bad/40 ps-2'>
+              <span>{x.label} · weak {x.count} time{x.count === 1 ? '' : 's'}</span>
+              {x.examples.map((e, i) => <span key={i} className='text-muted-foreground'>{e.note} — he: {e.his || '(quiet)'} — her: {(e.her || []).join(' / ')}</span>)}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className='flex flex-col gap-0.5 text-xs'>
+        <span className='font-medium'>What changed since last week</span>
+        {report.changes.length ? report.changes.map((c, i) => <span key={i} className='text-muted-foreground'>{c}</span>) : <span className='text-muted-foreground'>Nothing to compare yet.</span>}
+      </div>
+    </section>
+  );
+}
+
+// Rules drafted from your marks (C2): approve them and the writer and Claude follow them.
+function Rules({ creatorId, version }) {
+  const [rules, setRules] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.get(`/api/ai-chat/pages/${creatorId}/rules`).then(r => { if (live) setRules(r.data.rules); }).catch(() => { if (live) setRules([]); });
+    return () => { live = false; };
+  }, [creatorId, version]);
+  const decide = async (r, status) => {
+    setBusy(true);
+    try { const { data } = await api.patch(`/api/ai-chat/pages/${creatorId}/rules/${r.id}`, { status }); setRules(data.rules); }
+    catch (e) { toast.error(errMsg(e, 'Could not save that')); }
+    finally { setBusy(false); }
+  };
+  const draft = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/api/ai-chat/pages/${creatorId}/rules/draft`);
+      setRules(data.rules);
+      toast.success(data.drafted ? `${data.drafted} rule${data.drafted === 1 ? '' : 's'} drafted from your marks` : data.groups ? 'Nothing new to draft: your marks don\'t share enough yet' : 'Not enough marks yet: three similar ones in one moment are needed');
+    } catch (e) { toast.error(errMsg(e, 'Could not draft rules')); }
+    finally { setBusy(false); }
+  };
+  const drafts = (rules || []).filter(r => r.status === 'draft'), approved = (rules || []).filter(r => r.status === 'approved');
+  return (
+    <section className='flex flex-col gap-2 rounded-lg border p-3'>
+      <div className='flex flex-wrap items-center justify-between gap-2'>
+        <h3 className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>Rules from your marks</h3>
+        <Button size='sm' variant='outline' className='h-7 text-xs' onClick={draft} disabled={busy}>{busy ? <Loader2 className='size-3 animate-spin' /> : null}Draft rules from my marks now</Button>
+      </div>
+      <p className='text-xs text-muted-foreground'>Three similar marks in one moment and a rule is drafted for you. Approve it and the writer reads it with every reply, and Claude checks against it.</p>
+      {rules === null ? <Loader2 className='size-4 animate-spin text-muted-foreground' /> : (
+        <>
+          {drafts.length > 0 && (
+            <div className='flex flex-col gap-1.5'>
+              {drafts.map(r => (
+                <div key={r.id} className='flex flex-col gap-1 rounded-md border border-warn/40 bg-warn/5 p-2 text-xs'>
+                  <span>{r.text}</span>
+                  <span className='text-muted-foreground'>{r.kind === 'wording' ? 'Wording' : 'A wrong call'}{r.goal ? ` · ${GOAL_WORD[r.goal] || r.goal}` : ''} · from {r.from_ids?.length || 0} marks</span>
+                  <div className='flex gap-1.5'>
+                    <Button size='sm' variant='outline' className='h-7 text-xs' onClick={() => decide(r, 'approved')} disabled={busy}>Approve</Button>
+                    <Button size='sm' variant='ghost' className='h-7 text-xs' onClick={() => decide(r, 'dismissed')} disabled={busy}>Dismiss</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {approved.length > 0 && (
+            <div className='flex flex-col gap-0.5 text-xs'>
+              <span className='font-medium'>In force</span>
+              {approved.map(r => (
+                <div key={r.id} className='flex items-start justify-between gap-2'>
+                  <span>{r.text}{r.goal ? <span className='text-muted-foreground'> · {GOAL_WORD[r.goal] || r.goal}</span> : null}</span>
+                  <button type='button' className='shrink-0 text-muted-foreground hover:underline' onClick={() => decide(r, 'dismissed')} disabled={busy}>Switch off</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {!drafts.length && !approved.length && <p className='text-xs text-muted-foreground'>No rules yet.</p>}
+        </>
+      )}
+    </section>
+  );
+}
 
 /**
  * Claude's score (Q49): a button with today's score, and the report it opens: the
@@ -82,6 +213,8 @@ export default function ClaudeScore({ creatorId, version = 0 }) {
               </button>
             ))}
           </div>
+          {open && <WeeklyReport creatorId={creatorId} version={version} />}
+          {open && <Rules creatorId={creatorId} version={version} />}
           {error ? <p className='text-sm text-muted-foreground'>{error}</p> : !shown ? (
             <p className='flex items-center gap-2 text-sm text-muted-foreground'><Loader2 className='size-4 animate-spin' />Adding up…</p>
           ) : !shown.total.checked ? (

@@ -250,6 +250,16 @@ function lessonsStep(lessons = []) {
 
 /** Claude's watch-only check of the reply (it never blocks or rewrites). */
 const POINT_LABEL = { answers_him: 'Answers him', fits_moment: 'Fits the moment', notes_facts: 'Notes and facts', selling: 'Selling call', lessons: 'Your notes' };
+/** Claude's fix of a weak reply (C3): its notes, which the writer used to write it again. Claude never writes her words. */
+function fixStep({ notes = [], summary = '' }) {
+  return step('fix', 'Claude\'s fix', {
+    status: 'decision',
+    result: `Claude found the reply weak${summary ? `: ${summary}` : ''}. The writer wrote it again with Claude's notes (never Claude's words)`,
+    why: notes.join(' '),
+    tags: ['C3', 'Claude'],
+    details: notes.map(n => ({ label: 'Note', value: n })),
+  });
+}
 function coachStep(label, coach) {
   const weak = Object.values(coach.points || {}).filter(p => p?.verdict === 'weak').length;
   return step('coach', `${label}: Claude's check (watch only)`, {
@@ -297,4 +307,5 @@ function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene 
   return out;
 }
 
-module.exports = { safetyStep, himStep, sessionStep, momentStep, planStep, storyStep, briefingStep, lessonsStep, coachStep, writerSteps, heatKind };
+module.exports = {
+  fixStep, safetyStep, himStep, sessionStep, momentStep, planStep, storyStep, briefingStep, lessonsStep, coachStep, writerSteps, heatKind };

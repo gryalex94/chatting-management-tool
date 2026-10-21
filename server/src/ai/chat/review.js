@@ -187,4 +187,27 @@ async function coachCheck({ profile = {}, fan = null, card = [], plan = null, ch
   return { points, overall, summary: String(summary || ''), usage: r.usage };
 }
 
-module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, coachCheck, MODEL };
+const RULES_SCHEMA = {
+  type: 'object',
+  properties: { rules: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, from: { type: 'array', items: { type: 'integer' } } }, required: ['text', 'from'], additionalProperties: false } } },
+  required: ['rules'],
+  additionalProperties: false,
+};
+/**
+ * Rules drafted from the manager's repeated marks (C2): one line each, general enough
+ * for similar moments, specific enough to act on; never her words. `marks` = ai_feedback
+ * rows ({ id, his, her, note, better }). Returns { rules: [{ text, from }], usage }.
+ */
+async function draftRulesFrom(marks, { goal = null, kind = 'wording' } = {}) {
+  const r = await ask(
+    'You turn a manager\'s marks on an AI character\'s chat replies (on Fanvue, a subscription site for verified adults; adult flirting and sex talk between adults is normal there) into short rules the writer follows every time. Never write her words for her: a rule says what to do or to avoid, not a line to send.',
+    `The manager marked these replies${goal ? ` (the moment: ${goal.replace(/_/g, ' ')})` : ''} as ${kind === 'wording' ? 'badly worded' : 'the wrong call'}. Each mark has an id.\n\n`
+      + marks.map(m => `#${m.id}\nHim: ${m.his || '(he was quiet)'}\nHer: ${(m.her || []).join(' / ') || '(her reply)'}\nThe manager: ${m.note}${m.better ? `\nBetter: ${m.better}` : ''}`).join('\n\n')
+      + '\n\nWrite 1 to 3 rules that cover what these marks have in common: each one line, starting with "When…", "Never…" or "Always…", general enough for similar moments, specific enough to act on. For each rule, list the ids of the marks it comes from (two or more). A mark that shares nothing with the others is left out.',
+    RULES_SCHEMA);
+  if (r.declined) return { rules: [], usage: r.usage };
+  const rules = (r.answer?.rules || []).map(x => ({ text: String(x.text || '').trim().slice(0, 300), from: (x.from || []).map(Number).filter(Number.isInteger) })).filter(x => x.text);
+  return { rules, usage: r.usage };
+}
+
+module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, coachCheck, draftRulesFrom, MODEL };

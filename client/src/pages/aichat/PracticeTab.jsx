@@ -155,6 +155,14 @@ function Draft({ result, startAt, kept, onKeep, canKeep, onGrow, creatorId, onMa
         <p className='text-xs text-warn'>Could sound better: {result.style.join(' ')}</p>
       )}
       {result.review && <p className='text-xs text-muted-foreground'>Claude checked it: {result.review.ok ? 'fine' : result.review.declined ? 'declined to look' : 'not fine'}.</p>}
+      {result.fixed && (
+        <div className='flex flex-col gap-1 rounded-md border border-primary/30 bg-primary/5 p-2 text-xs'>
+          <span className='font-medium'>Claude found the first version weak{result.fixed.summary ? `: ${result.fixed.summary}` : ''}. Rewritten with its notes (above).</span>
+          <span className='text-muted-foreground'>Claude&apos;s notes: {result.fixed.notes.join(' ')}</span>
+          <span className='text-muted-foreground'>Before the fix: {result.fixed.before.map(x => x.creator_message).join(' / ')}{result.fixed.before_ppv ? ` [PPV ${result.fixed.before_ppv.title}]` : ''}</span>
+          {result.fixed.coach && <span className={cn('font-medium', result.fixed.coach.overall === 'good' ? 'text-good' : result.fixed.coach.overall === 'okay' ? 'text-warn' : 'text-bad')}>After the fix, Claude says: {result.fixed.coach.overall}{result.fixed.coach.summary ? ` · ${result.fixed.coach.summary}` : ''}</span>}
+        </div>
+      )}
       {result.format_ok === false && <p className='text-xs text-muted-foreground'>This writer didn&apos;t answer in the format asked, so its whole answer is shown.</p>}
       {result.learned?.length > 0 && (
         <p className='text-xs text-muted-foreground'>Would remember: {result.learned.map(l => l.note).join(' · ')}</p>
@@ -669,16 +677,18 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         </div>
         {canAnswerLast && <Button size='sm' variant='outline' onClick={() => ask([])} disabled={busy || blocked}><MessageSquareReply />Answer his last message</Button>}
         {(test.length > 0 || rounds.length > 0) && (
-          <Select value={firstKind} onValueChange={setFirstKind}>
-            <SelectTrigger className='h-8 w-56 text-xs' aria-label='How she writes first'><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value='nudge'>He went quiet: a nudge</SelectItem>
-              <SelectItem value='opener'>A new conversation at his hour</SelectItem>
-              <SelectItem value='personal'>Her weekly personal message</SelectItem>
-              <SelectItem value='second_try'>A second try, different angle</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />She writes first</Button>
+          <span className='flex flex-wrap items-center gap-1.5'>
+            <Select value={firstKind} onValueChange={setFirstKind}>
+              <SelectTrigger className='h-8 w-56 text-xs' aria-label='How she writes first'><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value='nudge'>He went quiet: a nudge</SelectItem>
+                <SelectItem value='opener'>A new conversation at his hour</SelectItem>
+                <SelectItem value='personal'>Her weekly personal message</SelectItem>
+                <SelectItem value='second_try'>A second try, different angle</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />She writes first</Button>
+          </span>
         )}
       </div>
     </div>

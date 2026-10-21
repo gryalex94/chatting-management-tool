@@ -150,6 +150,23 @@ router.get('/pages/:creatorId/checks', async (req, res) => {
   try { res.json(await A.checkScore(org(req), req.params.creatorId, { days: req.query.days })); } catch (e) { fail(res, e, 'load Claude\'s score'); }
 });
 
+// The weekly report (C1) and the rules drafted from your marks (C2, database change 049)
+router.get('/pages/:creatorId/report', async (req, res) => {
+  try { res.json(await A.weeklyReport(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load the weekly report'); }
+});
+router.get('/pages/:creatorId/rules', async (req, res) => {
+  try { res.json(await A.listRules(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load the rules'); }
+});
+router.post('/pages/:creatorId/rules/draft', async (req, res) => {
+  try { const drafted = await A.draftRules(org(req), req.params.creatorId); res.json({ ...drafted, ...(await A.listRules(org(req), req.params.creatorId)) }); } catch (e) { fail(res, e, 'draft rules'); }
+});
+router.patch('/pages/:creatorId/rules/:id', async (req, res) => {
+  try {
+    if (!/^\d+$/.test(String(req.params.id))) return res.status(404).json({ error: 'Rule not found' });
+    res.json(await A.decideRule(org(req), req.params.creatorId, req.params.id, req.body?.status));
+  } catch (e) { fail(res, e, 'decide the rule'); }
+});
+
 // POST /pages/:creatorId/feedback { kind, step, note, better, his, her, goal, context }
 router.post('/pages/:creatorId/feedback', async (req, res) => {
   try { res.json(await A.saveFeedback(org(req), req.params.creatorId, req.user?.id, req.body || {})); } catch (e) { fail(res, e, 'save your note'); }
