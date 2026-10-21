@@ -101,7 +101,7 @@ router.post('/pages/:creatorId/reply', async (req, res) => {
     res.json(await A.reply(org(req), req.params.creatorId, {
       fanUuid: fanUuid || null, madeUp: madeUp && typeof madeUp === 'object' ? madeUp : null,
       test: Array.isArray(test) ? test : [], models: Array.isArray(models) ? models : [],
-      selling: selling === true, followUp: followUp === true,
+      selling: selling === true, followUp: followUp === true ? true : (typeof followUp === 'string' && ['nudge', 'opener', 'personal', 'second_try'].includes(followUp) ? followUp : false),
       whatIf: whatIf && typeof whatIf === 'object' ? whatIf : null, planOnly: planOnly === true,
       learned: Array.isArray(learned) ? learned : [],
       session: session && typeof session === 'object' ? session : null,

@@ -33,6 +33,7 @@ const Plan = require('../ai/chat/plan');
 const Mem = require('../ai/chat/memory');
 const S = require('../ai/chat/session');
 const Sl = require('../ai/chat/selling');
+const Sc = require('../ai/chat/schedule');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
@@ -477,8 +478,13 @@ async function fanDetail(orgId, creatorId, fanUuid) {
   const taste = Sl.tasteOf({ chat });
   const cadence = Sl.cadenceOf(profile.tier, { lastAttemptAt: state.last_ppv_at, seed: fanUuid });
   const pause = Sl.pauseOf({ chat, avgPrice: profile.avg_price });
+  // when she would write first next, and of what kind (B1–B4)
+  const next = Sc.nextFirst({ chat, tier: profile.tier, newSub: profile.new_sub, chatSince: chat.find(m => !m.mass)?.at || null, hours: state.hours, timeZone });
   return {
-    state: { ...state, tier: profile.tier_label, closeness: profile.closeness, taste: taste.text, cadence: cadence.why, plan: S.startSession({ profile, state, away: talk.away, cadence, pause, taste }) },
+    state: {
+      ...state, tier: profile.tier_label, closeness: profile.closeness, taste: taste.text, cadence: cadence.why, plan: S.startSession({ profile, state, away: talk.away, cadence, pause, taste }),
+      next_first: next ? { ...next, when: Sc.whenText(next, timeZone) } : null,
+    },
     fan: { fan_uuid: fanUuid, display_name: person.display_name || null, fan_username: person.handle || null, fan_nickname: person.nickname || null, top_spender: !!person.is_top_spender },
     memory: mem ? {
       facts: (mem.facts || []).map(f => ({ id: f.id, kind: f.kind, note: f.text, locked: !!f.locked, said_at: f.said_at || null, on: f.on || null })),
@@ -965,6 +971,14 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
   const now = new Date();
   const herHere = convo.slice(talk.start).filter(m => !m.from_fan && !m.mass).length;   // her messages in this conversation
+  // she writes first (B2–B4): of what kind. Practice names it; for a real fan the schedule says what's due
+  let firstMsg = null;
+  if (followUp) {
+    const kind = Sc.KINDS[followUp] ? followUp : null;
+    const due = !kind && fanUuid ? Sc.nextFirst({ chat, tier: 'none', hours: null, timeZone, now }) : null;
+    const k = kind || due?.kind || 'nudge';
+    firstMsg = { kind: k, text: Sc.KINDS[k], word: Sc.KIND_WORD[k] };
+  }
   // selling (A1–A7, E5): what he bought and how he took it, the PPVs sent in this conversation and today
   const taste = Sl.tasteOf({ chat: convo, content, seed: type?.taste || [] });
   const attempts = { here: convo.slice(talk.start).filter(m => !m.from_fan && !m.mass && m.media?.price).length, today: Sl.attemptsToday(convo.slice(0, talk.start), now.getTime()) };
@@ -1105,8 +1119,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
-    content, taste, stage, attempts, tip, creditIds, lastConv: state.last,
+    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg,
   });
+  // how long she'd wait before her first message (B7): shown, used by sending later
+  const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
+  replyPlan.first_wait = firstWait;
   // what this reply settles: a service delivered (a roleplay starts), a manager's decision used,
   // the selling steps done once per conversation (the direct ask, the readiness check, "why not", a cheaper piece, a reminder)
   if (!whatIf) {
@@ -1149,7 +1166,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.safetyStep(latest.length ? screen : null),
     T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, state, now, timeZone }),
     T.sessionStep({ session, state, herHere, stage, attempts }),
-    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen }),
+    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp: firstMsg || followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),

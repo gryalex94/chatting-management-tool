@@ -40,6 +40,7 @@ function MemoryEditor({ detail, busy, onSave, onBuild }) {
               {detail.state.hours?.text ? ` · ${detail.state.hours.text}` : ''}{detail.state.strikes30 ? ` · ${detail.state.strikes30} failed sale${detail.state.strikes30 === 1 ? '' : 's'} this month` : ''}
               {detail.state.last?.text ? ` · last time: ${detail.state.last.text}` : ''}
               {detail.state.taste ? ` · his taste: ${detail.state.taste}` : ''}{detail.state.cadence ? ` · sell attempts: ${detail.state.cadence}` : ''}
+              {detail.state.next_first ? ` · she writes first ${detail.state.next_first.when}: ${detail.state.next_first.word} (${detail.state.next_first.why})` : ' · nothing for her to write first right now'}
               {detail.state.plan ? ` · if he wrote now: ${detail.state.plan.aim.replace(/_/g, ' ')} (${detail.state.plan.why})` : ''}
             </p>
           )}

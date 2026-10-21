@@ -429,13 +429,14 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     const id = round.used?.request_id;
     if (id) { try { await api.patch(`/api/ai-chat/pages/${page.creator_id}/requests/${id}`, { status, terms }); } catch (e) { toast.error(errMsg(e, 'Could not save your decision')); } }
   };
+  const [firstKind, setFirstKind] = useState('nudge');   // she writes first: a nudge, a new conversation, her weekly personal message, a second try (B2–B4)
   // she writes without a new message from him (he went quiet, or just bought)
   const followUp = () => {
     if (busy || blocked) return;
     const outcome = outcomeOf(true);
     const { next, known } = withKept();
     setTest(next);
-    ask(next, { followUp: true, known, outcome });
+    ask(next, { followUp: firstKind, known, outcome });
   };
   // what he did with her PPV (the practice room plays him)
   const setPpv = (i, status, speed = null) => setTest(t => t.map((m, k) => (k === i ? { ...m, ppv: { ...m.ppv, status, speed } } : m)));
@@ -668,7 +669,16 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         </div>
         {canAnswerLast && <Button size='sm' variant='outline' onClick={() => ask([])} disabled={busy || blocked}><MessageSquareReply />Answer his last message</Button>}
         {(test.length > 0 || rounds.length > 0) && (
-          <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />He&apos;s quiet: let her write first</Button>
+          <Select value={firstKind} onValueChange={setFirstKind}>
+            <SelectTrigger className='h-8 w-56 text-xs' aria-label='How she writes first'><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value='nudge'>He went quiet: a nudge</SelectItem>
+              <SelectItem value='opener'>A new conversation at his hour</SelectItem>
+              <SelectItem value='personal'>Her weekly personal message</SelectItem>
+              <SelectItem value='second_try'>A second try, different angle</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size='sm' variant='outline' onClick={followUp} disabled={busy || blocked}><Hourglass />She writes first</Button>
         )}
       </div>
     </div>

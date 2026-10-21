@@ -120,7 +120,7 @@ function sessionStep({ session = null, state = null, herHere = 0, stage = null, 
 function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null, media = [] }) {
   const phaseWord = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[phase];
   return step('moment', 'The moment', {
-    result: followUp ? 'He has gone quiet: she writes first'
+    result: followUp ? `She writes first: ${followUp?.word || 'he has gone quiet'}`
       : `Mood: ${level.mood} · his last message: ${LEVEL_WORD[level.his]}${level.pulled_back ? ' · he\'s slowing down' : ''}`,
     tags: ['Planner (Ministral 8B)'],
     details: [
@@ -158,6 +158,7 @@ function planStep({ level, heat = '', voice = null, sell = false, noOffer = '', 
         plan.media ? { label: plan.media.failed ? 'His file' : 'His photo', value: plan.media.failed ? 'it wouldn\'t load: she says so and asks what it is (C9)' : `react to a real detail: ${plan.media.details.slice(0, 3).join(' · ') || plan.media.kind} (${plan.media.sexual === 'explicit' ? 'C4' : 'C5'})` } : null,
         plan.request ? { label: 'He asks for', value: `${plan.request.what} (${{ refuse: 'on the refusal list: a light no', custom: 'custom content: never made', unknown: 'not in her menu: a manager decides', off: 'a service switched off' }[plan.request.kind] || 'a service she sells'})` } : null,
         plan.budget ? { label: 'Free talk', value: `${plan.budget.used} of ${plan.budget.limit} small-talk messages${plan.aim === 'sell' ? ' (shorter today: the plan is to sell)' : ''}` } : null,
+        plan.first_wait ? { label: 'Timing', value: `she'd wait about ${plan.first_wait.wait_min} min before her first message, then type at her speed: ${plan.first_wait.why}` } : null,
         // what memory brings to this reply, near the top
         plan.check ? { label: 'Check with him', value: `"${plan.check.note}": ${plan.check.why}` } : null,
         plan.callback ? { label: 'From his notes', value: `"${plan.callback.note}" (${plan.callback.ask}): ${plan.callback.why}` } : null,

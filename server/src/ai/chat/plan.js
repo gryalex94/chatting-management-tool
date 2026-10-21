@@ -120,10 +120,11 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
+  p.first = followUp ? (first || { kind: 'nudge', word: 'a nudge: he went quiet' }) : null;
   // selling (A1–A7, E5): he asks himself, or gets sexual, and the cadence doesn't hold him back
   const asks = !!match?.full?.length || WANTS_TO_BUY.test(said) || !!(tip && match?.full?.length);
   const horny = level.his >= 2 && !level.pulled_back;
@@ -149,7 +150,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
 
   // 1. the goal of this reply
   if (followUp && aim === 'short') goal('follow_up', 'He went quiet, and he\'s a time waster at the bottom: no chasing; if you must write, one dry, friendly line', 'he hasn\'t answered, and he gets no follow-ups (Q19b)', ['Q6e-2', 'Q19b']);
-  else if (followUp) goal('follow_up', 'He went quiet: one short, light message to get him talking again', 'he hasn\'t answered', ['Q6']);
+  else if (followUp && p.first?.kind && p.first.kind !== 'nudge') goal('follow_up', p.first.text || 'She writes first', { opener: 'she writes first: a new conversation at his hour (B2)', personal: 'his weekly personal message (B3)', second_try: 'her last opener went unanswered: one more try (B3)' }[p.first.kind] || 'she writes first', ['B2', 'B3']);
+  else if (followUp) goal('follow_up', p.first?.text || 'He went quiet: one short, light message to get him talking again', 'he hasn\'t answered (B4)', ['Q6', 'B4']);
   else if (profile.time_waster && FREE_ASK.test(said)) goal('no_freebies', 'Friendly but short: nothing for free; if anything, a small, cheap offer', 'a time waster asking for free things', ['Q19', 'Q31']);
   else if (request?.kind === 'refuse') goal('refuse', `He asks for something she never does ("${request.what}"): a light, unbothered no in one line, no lecture, then straight on to something she does do`, 'it\'s on the refusal list', ['D5', 'D6']);
   else if (pend?.state === 'approved') goal('request_approved', `The manager said yes to his request ("${pend.text}")${pend.terms ? ` on these terms: ${pend.terms}` : ''}. Say yes in her own way and go on with it on those terms`, 'a manager approved it', ['D1']);
@@ -303,10 +305,10 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
   const n = words(said);
   const roomy = p.goal === 'lead_story' || p.goal === 'welcome_back' || p.goal === 'roleplay' || ['personal', 'stronger_hook'].includes(p.bye);
-  const target = p.goal === 'service_deliver' ? 'piece' : followUp || p.short ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
+  const target = p.goal === 'service_deliver' ? 'piece' : (followUp && p.first?.kind === 'personal') ? 'medium' : followUp || p.short ? 'short' : roomy ? 'medium' : p.goal === 'goodbye' ? 'short' : n <= 6 ? 'short' : n <= 25 ? 'medium' : 'long';
   p.length = {
     target,
-    why: p.goal === 'service_deliver' ? 'he paid for a written piece' : followUp ? 'a light nudge' : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
+    why: p.goal === 'service_deliver' ? 'he paid for a written piece' : followUp ? (p.first?.kind === 'personal' ? 'a personal message with something real in it' : 'a light first message') : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
       : p.goal === 'roleplay' ? 'room to play the scene' : p.goal === 'goodbye' ? (roomy ? 'a goodbye with a little more to it' : 'he\'s leaving: keep it short') : `he wrote ${n} word${n === 1 ? '' : 's'}: mirror him (Q4)`),
   };
   p.length.text = { short: 'short: one message, about 5–15 words, but not a bare one-word reply', medium: 'one or two short messages', long: 'two or three messages, with some substance', piece: 'a proper written piece: up to three messages of 60–120 words each, specific and personal, worth what he paid' }[target];
@@ -338,7 +340,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     else if (['chat', 'get_to_know', 'follow_up'].includes(p.goal)) {
       const quiet = ids.includes('low_effort') || ids.includes('fan_going_cold');
       if (herReplies === 0 || p.goal === 'follow_up' || quiet) {
-        p.callback = { ...callback, why: `${p.goal === 'follow_up' ? 'he went quiet' : quiet ? 'a quiet moment' : 'the start of a conversation'}: ${callback.why}` };
+        p.callback = { ...callback, why: `${p.goal === 'follow_up' ? (p.first?.kind === 'personal' ? 'his personal message is built from his notes' : p.first?.kind === 'opener' ? 'a first message with something of his in it' : 'he went quiet') : quiet ? 'a quiet moment' : 'the start of a conversation'}: ${callback.why}` };
       }
     }
   }
