@@ -87,16 +87,18 @@ const SELLING_GUIDE = [
 const CHAT_GUIDE = [
   'Answer what he said first. If he asks something, answer it plainly before anything else.',
   'Sound like a real girl texting, not a script: react to his words and build on what he tells you. Pick up one word or detail of his; never repeat his sentence back to him.',
-  'Short and simple: usually one message under 15 words; two now and then, three rarely. Everyday texting words, never an assistant\'s or an office\'s ("agenda", "plans for the day", "I must say", "indeed", "trips me up", "I like your honesty"), no clever or poetic lines.',
+  'Short and simple: most replies are 4–11 words in one message (real chatters average 7); a second short message about one reply in four, with any question in the last one; three is rare. Everyday texting words, never an assistant\'s or an office\'s ("agenda", "plans for the day", "I must say", "indeed", "trips me up", "I like your honesty"), no clever or poetic lines.',
   'Talk to him, not about him: never "someone\'s eager", "aren\'t they?" or "I like a man who…".',
-  'Questions: at most one per reply, and many replies have none: react, tease or tell him something about you instead. When he has told you what he wants, or said yes to something, don\'t ask again: do it, say yes or lead.',
+  'Questions: at most one per reply, in about four replies out of ten, mostly follow-ups on what he just said; never three replies in a row with one. The rest react, tease or tell him something about you instead. When he has told you what he wants, or said yes to something, don\'t ask again: do it, say yes or lead.',
   'Warm up first: get to know him and have a real chat before anything sexual. The chats that sold best had a long, friendly warm-up. But if he gets sexual first, don\'t stall or play coy: say yes in your own playful way and tease (see "Right now").',
   'Follow his lead on how sexual it gets (see "Right now"). Tease and hint rather than describe: teasing worked far better than going explicit too soon.',
   'If he jokes, joke back. If he pulls back or says it\'s going fast, laugh it off and go back to normal talk.',
   'Don\'t bring up your body or looks unless he does.',
   'You only know your own time. Don\'t guess his time of day or what he is doing ("up early", "up late") unless he told you.',
   'Vary how you start. Don\'t open with "hehe", "mmm" or "hey" (your worst habit), never start two replies the same way or reuse a phrase you already sent him, and once you are chatting don\'t greet him again.',
-  'Emojis are rare: most replies have none, never more than one, never the same one twice in a row. No dashes (— or –), no ~, no *stars*, no lists.',
+  'Emojis are rare: most replies have none, never more than one, never the same one twice in a row. A laugh word ("haha", "lol") now and then, about one reply in ten, when something is actually funny; never in a sad moment. No dashes (— or –), no ~, no *stars*, no lists.',
+  'Say how you feel about him rarely ("I care about you", "I miss you" at most once in a long while, and only once you are close): show warmth by understanding exactly what he said, not by declaring it.',
+  'When he shares something hard, reflect his own words and name the feeling; no story of your own, no advice he didn\'t ask for.',
   'Use his name or a pet name (babe, baby, hun) rarely: at most once every few replies. Use his name only if it is in the chat or your notes, and never invent things you did or talked about together.',
   'Don\'t be needy or pushy. After a hot moment, be warm and personal.',
   'When he is into it and you are past the warm-up, lead: say what you are doing or would do, one step at a time like a little story, instead of asking him what he wants again and again.',
@@ -164,7 +166,7 @@ function systemText(profile, { selling = false, story = false } = {}) {
     `# Your game plan (what works best, from the agency's analysed chats)\n${GAME_PLAN.map(r => `- ${r}`).join('\n')}`,
     selling ? `# How you sell (what worked in the agency's analysed chats)\n${SELLING_GUIDE.map(r => `- ${r}`).join('\n')}` : '',
     `# Your answer\nReply with JSON only, nothing else:\n{"messages": ["..."], ${selling ? '"ppv": null, ' : ''}${story ? '"scene": {"where": "", "wearing": "", "done": [""], "him": "", "stage": "building", "beat": "undresses"}, ' : ''}"learned": ["..."], "about_me": ["..."], "handover": ""}\n`
-      + '- messages: what you send him now. Usually ONE short message (under 15 words). Two only when the second really adds something; three is rare.\n'
+      + '- messages: what you send him now. Usually ONE short message (about 7 words, rarely over 15). Two only when the second really adds something, with any question in the last one; three is rare.\n'
       + (selling ? '- ppv: null, or a PPV from your content list attached to your LAST message: {"item": "c12", "price": 22}. Use the price the plan gives for that item when it gives one; else the list price, unless a small discount fits. That last message is its caption: tease what\'s really in it. Never write "[PPV]", ids or prices in brackets in your messages: the PPV card shows the price and what it is.\n' : '')
       + (story ? `- scene: your sexting story after this reply: where you are, what you're wearing now, what has happened so far (a few words each, oldest first; add what you just did), what he is doing, the stage (${STAGES.join(', ')}) and what this reply did (beat: ${BEATS.join(', ')}). Keep it true to the chat and to the PPVs you send.\n` : '')
       + '- learned: new facts about him from his latest messages, each under 15 words (empty list if none).\n'
@@ -220,7 +222,7 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ, now = new Date
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], rules = [], diary = [], mood = '', timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [] }) {
+function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], rules = [], diary = [], mood = '', timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [], candidates = 1 }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone, now);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -282,7 +284,7 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (voice?.openers?.length) now_.push(`Don't start like your last replies did (${voice.openers.map(o => `"${o}…"`).join(', ')}) and don't reuse their phrases.`);
   now_.push(...notes);
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
-  parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}Write your next reply to his latest message(s).`);
+  parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}${candidates > 1 ? `Write ${candidates} different replies to his latest message(s), as a JSON array of ${candidates} answer objects in the format above: different in shape (one may ask something, another not; different openers, different lengths), each a reply you could really send. The best one is picked for you.` : 'Write your next reply to his latest message(s).'}`);
   return [
     { role: 'system', content: systemText(profile, { selling, story: !!sexting?.on }) },
     { role: 'user', content: parts.join('\n\n') },
@@ -600,6 +602,32 @@ function parseJsonObject(text) {
   return null;
 }
 
+// Every JSON object at the top level of a model's answer (one reply, or an array of candidate replies).
+function parseJsonObjects(text, max = 4) {
+  const s = String(text || '').replace(/```(?:json)?/gi, '');
+  const out = [];
+  let depth = 0, inStr = false, esc = false, start = -1;
+  for (let i = 0; i < s.length && out.length < max; i++) {
+    const ch = s[i];
+    if (inStr) { if (esc) esc = false; else if (ch === '\\') esc = true; else if (ch === '"') inStr = false; continue; }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { if (depth === 0) start = i; depth += 1; }
+    else if (ch === '}') { depth -= 1; if (depth === 0 && start >= 0) { const j = tryJson(s.slice(start, i + 1)); if (j && typeof j === 'object') out.push(j); start = -1; } if (depth < 0) depth = 0; }
+  }
+  return out;
+}
+// A reply from one parsed answer object.
+function replyFromJson(j) {
+  const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
+  if (!j || !(Array.isArray(j.messages) || typeof j.messages === 'string')) return null;
+  const ppv = j.ppv && typeof j.ppv === 'object' && j.ppv.item ? { item: clean(j.ppv.item), price: Number(j.ppv.price) || null } : null;
+  return { messages: strings(j.messages), ppv, scene: readScene(j.scene), learned: strings(j.learned).slice(0, 10), about_me: strings(j.about_me).slice(0, 5), handover: clean(j.handover), format_ok: true };
+}
+/** The candidate replies in an answer (an array of answer objects), each as readReply gives it; [] when there is no array. */
+function readReplies(text) {
+  return parseJsonObjects(text).map(replyFromJson).filter(d => d && d.messages.length);
+}
+
 // A reply as the writer sent it: { messages, learned, handover, format_ok }.
 function readReply(text) {
   const j = parseJsonObject(text);
@@ -617,6 +645,48 @@ function readReply(text) {
   // not the JSON asked for: the whole answer is the reply, one message per line
   const lines = clean(text).split(/\n+/).map(clean).filter(Boolean);
   return { messages: lines, ppv: null, learned: [], about_me: [], handover: '', format_ok: false };
+}
+
+/**
+ * Bubbles like a person (research round 2): a message over 15 words with two or more sentences is
+ * split in two at the sentence boundary nearest its middle; when a two-bubble reply has its question
+ * first, the bubbles swap so the question goes last (where people put it 85% of the time). Never more
+ * than three bubbles.
+ */
+const SENTENCE_END = /(?<=[.!?…])\s+(?=[^\s])/u;
+function splitBubbles(list) {
+  const words = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
+  let out = [];
+  for (const m of list) {
+    const t = String(m).trim();
+    const parts = t.split(SENTENCE_END).map(x => x.trim()).filter(Boolean);
+    if (words(t) > 15 && parts.length >= 2 && out.length < 2) {
+      let best = 1, gap = Infinity;
+      for (let k = 1; k < parts.length; k += 1) {
+        const a = words(parts.slice(0, k).join(' ')), b = words(parts.slice(k).join(' '));
+        if (Math.abs(a - b) < gap) { gap = Math.abs(a - b); best = k; }
+      }
+      out.push(parts.slice(0, best).join(' '), parts.slice(best).join(' '));
+    } else if (parts.length === 2 && /\?$/.test(parts[0]) && !/\?/.test(parts[1]) && words(t) <= 15) out.push(`${parts[1]} ${parts[0]}`);   // the question goes last, like people put it
+    else out.push(t);
+  }
+  out = out.filter(Boolean).slice(0, 3);
+  if (out.length === 2 && /\?/.test(out[0]) && !/\?/.test(out[1])) out = [out[1], out[0]];
+  return out;
+}
+
+/**
+ * The surface of real texting (research round 2, measured on the agency's Fanvue chatters): about one
+ * reply in five starts in lowercase; a short last bubble doesn't end with a full stop (8% of theirs do,
+ * and a full stop at the end of a short text reads as less sincere).
+ */
+function surfacePass(list, { rand = Math.random } = {}) {
+  const out = list.map(t => String(t));
+  if (!out.length) return out;
+  if (rand() < 0.2 && /^[A-Z][a-z]/.test(out[0]) && !/^I(?:'|\s)/.test(out[0])) out[0] = out[0][0].toLowerCase() + out[0].slice(1);
+  const last = out.length - 1;
+  if (/[^.!?]\.$/.test(out[last]) && !/[.!?…]\s+\S/.test(out[last]) && (out[last].match(/[\p{L}\p{N}']+/gu) || []).length <= 14) out[last] = out[last].replace(/\.$/, '');
+  return out;
 }
 
 /**
@@ -645,4 +715,4 @@ function addTypo(list, { chance = 1 / 15, fixChance = 0.5, rand = Math.random } 
   return { messages: out, typo: { word: w, fixed } };
 }
 
-module.exports = { EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };
+module.exports = { parseJsonObjects, readReplies, splitBubbles, surfacePass, EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };

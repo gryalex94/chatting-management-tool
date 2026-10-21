@@ -103,10 +103,12 @@ function readPrompt({ chat, money, selling = false, notes = [] }) {
           + '- new: what is new or surprising in it, in one short line of at most 15 words (something she did not know, a turn she would not expect, a line that does not fit the chat so far), or "" if nothing.\n'
           + '- readings: when the message is really open to more than one reading, up to 3 ways to read it, each {"what": "…", "sure": 0–1}, "what" in at most 10 words (for example "he may be gay", "testing whether she is a bot", "wants a reaction"); [] when it is plain.\n'
           + '- curious: what a real girl in her place would want to ask him about it, one short question in plain words (at most 15 words), or "" (a question about what he meant, what he is into or who he is is fine; never a graphic one, never something he just answered).\n'
+          + '- asked: his open question(s) to her in his latest message(s), each as he put it, at most 3, [] if none.\n'
+          + '- promised: anything she told him earlier in these messages that is still open ("I\'ll show you later", "remind me to tell you"), at most 2, [] if none.\n'
           + '- odd: true when his message does not fit a man chatting up a girl on her page (he talks about other men or his own body in a way that does not involve her, a non-sequitur, a provocation, a line that reads like a test), false when it fits, however blunt.\n'
           + `- stance: the attitude that fits her reply, one of ${STANCES.join(', ')} (steady = warm and normal; curious = she wants to know more first; playful = tease it, don't take it seriously; match = he set the tone, go with it; deflect = don't take the bait, move it somewhere better; comfort = he needs care; firm = a clear boundary, kindly).\n`
           + (notes.length ? '- contradicts: if his latest message clearly contradicts one of the remembered notes (the note says he has a dog, now he says he has no pets), copy that note word for word; else "". New details that fit, or things he says about her, are not contradictions.\n' : '')
-          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "doing": "small_talk", "new": "", "readings": [], "curious": "", "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
+          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "doing": "small_talk", "new": "", "readings": [], "curious": "", "asked": [], "promised": [], "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -119,6 +121,8 @@ function readReading(json) {
   return {
     doing: DOING.includes(json.doing) ? json.doing : 'other', new: text(json.new, 200), readings,
     curious: text(json.curious, 160), stance: STANCES.includes(json.stance) ? json.stance : 'steady', odd: json.odd === true,
+    asked: (Array.isArray(json.asked) ? json.asked : []).map(x => text(x, 160)).filter(Boolean).slice(0, 3),
+    promised: (Array.isArray(json.promised) ? json.promised : []).map(x => text(x, 160)).filter(Boolean).slice(0, 2),
   };
 }
 

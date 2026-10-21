@@ -31,7 +31,7 @@ const STANCE_TEXT = {
 const BEATS = {
   welcome_new: ['welcome him, glad he found you', 'react to what he wrote', 'one question: what brought him here or what he is into'],
   curious: ['react to what he just said', 'one real question about it'],
-  share: ['react to what he said', 'a small real thing of yours that fits'],
+  share: ['react to what he said', 'a small real thing of yours, with a person in it (a friend, your sister, your flatmate)'],
   chat: ['react to what he said with real interest'],
   get_to_know: ['react to what he said', 'one easy question about him'],
   flirt: ['react to what he said', 'a playful compliment or a light tease'],
@@ -43,7 +43,7 @@ const BEATS = {
   offer: ['say yes, tease what you have', 'attach the piece, in your own words'],
   steer_to_sale: ['react to what he said', 'steer lightly toward what you have'],
   readiness_check: ['tease what you have', 'the one question: is he alone, is he ready'],
-  comfort: ['acknowledge what he said, warmly', 'one caring question, or just be there'],
+  comfort: ['reflect his specific words and name the feeling', 'one caring question, or just stay with him; no story of yours, no advice'],
   reassure: ['take it lightly', 'reassure him it is really you, in your style'],
   calm: ['stay calm and warm', 'move on to something easier'],
   ease_off: ['ease off: back to normal, friendly talk'],
@@ -74,6 +74,8 @@ function beatsFor(p) {
   if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
   if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  // the floor of the question band: she has asked little lately, and this reply has room for one follow-up
+  if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
   return base.slice(0, 3);
 }
 // how alike two short texts are (the questions she already asked): shared words over the longer one
@@ -189,7 +191,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -277,7 +279,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (dryNow && !session?.dry_bye) goal('dry_bye', 'Still dry: a short, warm sign-off ("I\'ll let you get on with your day, come find me when you feel chatty"), no question, nothing sold', 'he stays dry after her question (fix 1)', ['R1']);
   else if (dryNow) goal('no_reply', 'No reply: he\'s been dry for a while, so she waits for something real from him', 'dry after her sign-off: she says nothing (fix 1)', ['R1']);
   else if (level.pulled_back) goal('ease_off', 'He\'s slowing down: ease off, back to normal talk', 'he pulled back');
-  else if (mood === 'sad') goal('comfort', 'Comfort him: no flirting, no selling', `he seems sad${['spender', 'whale'].includes(profile.tier) ? ', and he spends: take your time' : ''}`, ['Q24', 'Q25']);
+  else if (mood === 'sad') goal('comfort', 'Comfort him: reflect his specific words and name the feeling; no story of your own, no advice he didn\'t ask for, no flirting, no selling', `he seems sad${['spender', 'whale'].includes(profile.tier) ? ', and he spends: take your time' : ''}`, ['Q24', 'Q25']);
   else if (profile.suspicious && !asks) goal('reassure', 'Calm and easy: reassure him it\'s really her account and she\'s here for him; if he asks outright whether she\'s an AI or a bot, she says so honestly, warmly, in her own style (never a denial); no selling', 'he doubts it\'s real or worth it (and isn\'t asking to buy)', ['Q24c']);
   else if (mood === 'annoyed') goal('calm', 'Stay calm and warm; no selling', 'he seems annoyed', ['Q1', 'Q24d']);
   else if (waiting?.open && ASKS_ABOUT_PPV.test(waiting.hisLatest || '')) goal('answer_ppv', 'Answer what he asks about her PPV, truthfully, then tease', 'he asks what\'s in it', ['Q42']);
@@ -324,7 +326,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
       ask: !voice?.noQuestion, flirt: level.max >= 1 || ['flirty', 'intimate', 'girlfriend'].includes(profile.closeness) || ['flirt', 'sexy'].includes(stageNow),
       tease: level.max >= 2 || stageNow === 'sexy', sell: sellOk, steer: sell && !noOffer && !holdFor('steer_to_sale'), check: sellOk && aim === 'sell' && !session?.asked_ready && !profile.time_waster,
     };
-    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, rand });
+    const hardNow = ['venting', 'complaining'].includes(p.reading?.doing) || gauges.mood < 40;
+    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, rand });
     p.scores = ranked.map(x => ({ move: x.move, score: x.score, allowed: x.allowed, why: x.why }));
     // the ladder's goal is the incumbent: another move has to beat it clearly (or the incumbent isn't allowed)
     const best = ranked.find(x => x.allowed);
@@ -338,6 +341,11 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
       goal(name, text, `the meters: ${best.why} (${G.gaugeText(gauges)})`, ['M1', ...(stageNow ? ['A1'] : [])]);
     }
   }
+  // he is sharing something hard (research round 2): warmth through understanding, no story of hers, no advice
+  p.hard = p.goal === 'comfort' || ['venting', 'complaining'].includes(p.reading?.doing) || (gauges ? gauges.mood < 40 : mood === 'sad');
+  p.questions = questions || null;
+  p.read_failed = !!readFailed;
+  p.promised = (p.reading && reading?.promised?.length ? reading.promised : []).slice(0, 2);
   // a service offered and not paid yet: nothing is delivered before his tip (D2)
   p.tip_first = svc?.state === 'offered' && p.goal !== 'service_offer' ? `You've named $${svc.price} for ${svc.label.toLowerCase()} and he hasn't tipped yet: don't deliver any of it; if he brings it up, remind him lightly that the tip comes first.` : '';
   // 2. selling: may a PPV go with this reply?
@@ -424,12 +432,14 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     dry_bye: 'a sign-off: no question (fix 1)', share: 'she shares, no question (M1)',
   }[p.goal];
   // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
-  const answerable = DIRECT_Q.test(said) && !politics && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
-  p.answer_first = answerable ? `He asked you something ("${said.slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
+  const hisQuestion = reading?.asked?.length ? reading.asked[0] : '';
+  const answerable = (DIRECT_Q.test(said) || !!hisQuestion) && !politics && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
+  p.answer_first = answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
     : ['direct_ask', 'readiness_check', 'why_not', 'curious'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)', curious: 'the one question: what she wants to know (R2)' }[p.goal] }
-    : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal } : { allowed: true, why: 'one at most (Q5)' };
+    : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal }
+    : questions && questions.n >= 4 && questions.share < 0.3 ? { allowed: true, why: `one follow-up question would be good now: you asked in only ${questions.asked} of your last ${questions.n} replies (humans: about 4 in 10)` } : { allowed: true, why: 'one at most (Q5)' };
 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
   const n = words(said);
@@ -440,7 +450,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     why: p.goal === 'service_deliver' ? 'he paid for a written piece' : followUp ? (p.first?.kind === 'personal' ? 'a personal message with something real in it' : 'a light first message') : p.short || (p.goal === 'lead_story' ? 'room for a story move' : p.goal === 'welcome_back' ? 'a welcome back plus one thing more'
       : p.goal === 'roleplay' ? 'room to play the scene' : p.goal === 'goodbye' ? (roomy ? 'a goodbye with a little more to it' : 'he\'s leaving: keep it short') : `he wrote ${n} word${n === 1 ? '' : 's'}: mirror him (Q4)`),
   };
-  p.length.text = { short: 'short: one message, about 5–15 words, but not a bare one-word reply', medium: 'one or two short messages', long: 'two or three messages, with some substance', piece: 'a proper written piece: up to three messages of 60–120 words each, specific and personal, worth what he paid' }[target];
+  p.length.text = { short: 'short: one message of about 3–10 words (not a bare one-word reply)', medium: 'about 7 words in one message; a second short message only if it really adds something (any question goes in the last one)', long: 'two or three short messages of about 7 words each, with some substance; any question in the last one', piece: 'a proper written piece: up to three messages of 60–120 words each, specific and personal, worth what he paid' }[target];
 
   // 5. how far she may go, and whether she leads (decided by the warm-up rules); close
   //    fans get a little flirting even in small talk (Q16)
@@ -520,6 +530,9 @@ function planText(p) {
   if (p.reading?.readings?.length) lines.push(`You're not sure what he means: ${p.reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}% sure)`).join('; ')}. Don't assume; ask lightly or tease around it.`);
   if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
+  if (p.hard) lines.push('He is sharing something hard: show you understood exactly what he said (his own words, the feeling named), nothing about your own day or a similar story of yours, no advice he didn\'t ask for; warmth through understanding, not through saying how much you care.');
+  if (p.promised?.length) lines.push(`You told him earlier: ${p.promised.map(x => `"${x}"`).join(', ')}. Don't leave it hanging: keep it (content only ever as a PPV), or say honestly where it stands.`);
+  if (p.read_failed) lines.push('His message couldn\'t be read properly this time: answer what he literally wrote, simply and safely; nothing sold, nothing assumed about his mood.');
   if (p.open?.length) lines.push(`Still open about him from earlier: ${p.open.map(o => `${o.what} (${Math.round(o.sure * 100)}% sure)`).join('; ')}. Keep it in mind; don't assume either way.`);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
   if (p.media?.failed) lines.push(`His ${p.media.video ? 'video' : 'photo'} wouldn't load for you: say so playfully and ask what it is; don't pretend you saw it.`);

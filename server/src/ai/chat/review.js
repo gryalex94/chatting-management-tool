@@ -152,10 +152,10 @@ const POINT = {
 const COACH_SCHEMA = {
   type: 'object',
   properties: {
-    answers_him: POINT, fits_moment: POINT, notes_facts: POINT, selling: POINT, lessons: POINT,
+    answers_him: POINT, understood: POINT, fits_moment: POINT, notes_facts: POINT, selling: POINT, lessons: POINT,
     overall: { type: 'string', enum: ['good', 'okay', 'weak'] }, summary: { type: 'string' },
   },
-  required: ['answers_him', 'fits_moment', 'notes_facts', 'selling', 'lessons', 'overall', 'summary'],
+  required: ['answers_him', 'understood', 'fits_moment', 'notes_facts', 'selling', 'lessons', 'overall', 'summary'],
   additionalProperties: false,
 };
 async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [], diary = [] }) {
@@ -176,6 +176,7 @@ async function coachCheck({ profile = {}, fan = null, card = [], plan = null, ch
       + `The manager's notes on earlier replies (mistakes not to repeat):\n${lessons.length ? lessons.map(l => `- ${l.kind === 'wording' ? 'Wording' : 'Decision'}: "${l.note}"${l.better ? ` (better: ${l.better})` : ''}`).join('\n') : '- none yet'}\n\n`
       + 'Judge the reply on each point: good, weak, or n/a; a short note for each (what exactly is weak, or why it\'s good):\n'
       + '- answers_him: does it answer or react to what he actually said (no ignored question, no going off on something else)?\n'
+      + '- understood: does it show she understood exactly what he said: a specific detail of his picked up, the feeling named in his own words when he shared something? Declared feelings ("I care so much", "I miss you", "you mean the world to me") count against this point, not for it; never ask for a warmer reply.\n'
       + '- fits_moment: does it fit the stage of the chat, his mood and the plan (leading vs stalling, no selling to a sad fan, the right length)?\n'
       + '- notes_facts: are his notes and her own facts used right (nothing invented, nothing contradicted, callbacks natural)? n/a if none are touched.\n'
       + '- selling: if it sells or talks price: right moment, item and price? n/a if it doesn\'t sell.\n'

@@ -1041,7 +1041,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const askedHere = sell && first.new_sub && !taste.bought && !match?.full?.length ? C.matchRequest(hisHere, content) : null;
   const direct = first.new_sub && !taste.bought && (asksNow || (herHere <= 2 && !!askedHere?.full?.length));
   // a time waster's attempt fits his short free talk (E5): the warm-up floor shrinks to 3 of her messages
-  const { plan, level, library, phase, sales, reading, reader } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: asksNow ? (first.new_sub ? 1 : 0) : first.time_waster ? Math.min(session.warm_up, 3) : session.warm_up, herHere });
+  const { plan, level, library, phase, sales, reading, reader, readFailed } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: asksNow ? (first.new_sub ? 1 : 0) : first.time_waster ? Math.min(session.warm_up, 3) : session.warm_up, herHere });
   if (attempts.here > 0 && !level.warm) level.warm = true;              // a PPV already went this conversation: the warm-up is behind them
   // a sad or annoyed mood sticks (B4); no selling for the rest of a conversation he was sad, annoyed or suspicious in (B3)
   // "very actively horny" (A7) is judged from his own words in code, not the planner's read of the moment
@@ -1134,9 +1134,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const seenLevel = latestSeen.some(s => s.sexual === 'explicit') ? 3 : latestSeen.some(s => s.sexual === 'suggestive') ? 2 : 0;
   if (seenLevel > level.his) { level.his = seenLevel; level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match }); }
   // why no PPV can go out right now (then she mustn't promise one either)
-  let noOffer = !sell ? '' : !level.warm ? `you are still in the warm-up (${herHere} of ${session.warm_up} of your messages this conversation), so get to know him first.`
+  let noOffer = !sell ? '' : readFailed ? 'the read of his message failed (no planner answered): nothing sold on a blind read.' : !level.warm ? `you are still in the warm-up (${herHere} of ${session.warm_up} of your messages this conversation), so get to know him first.`
     : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : session.no_sell ? `${session.no_sell}.` : '';
-  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes };
+  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes, closeness: first.closeness, lately: herReplies(convo).slice(-15) };
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
   // a new subscriber sexts after his first buy, not before (A1): the probe comes first
@@ -1157,6 +1157,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const hook = Mem.hookFor({ card, now, timeZone });
   const clash = plan.contradicts ? checkable[plan.contradicts - 1] : null;
   const hisBefore = here.slice(0, Math.max(0, here.length - latest.length)).filter(m => m.from_fan).map(m => m.text).join(' ');
+  // her questions lately (research round 2): over her last 10 replies to him, whatever the conversation
+  const herLast = herReplies(convo).slice(-10);
+  let qRun = 0;
+  for (let i = herLast.length - 1; i >= 0 && /\?/.test(herLast[i]); i -= 1) qRun += 1;
+  const questions = { n: herLast.length, asked: herLast.filter(r => /\?/.test(r)).length, share: herLast.length ? herLast.filter(r => /\?/.test(r)).length / herLast.length : 0, run: qRun };
   // the meters (engine v2, step 3): moved by the numbers and the reading, kept in the session
   const gauged = G.updateGauges(session.gauges || G.startGauges({ profile: first }), {
     level, reading, profile: first, session, dry, asks: asksNow, tip: latestTip > 0, nWords, question: /\?/.test(saidNow), media: latestSeen.length > 0, cools,
@@ -1170,7 +1175,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
     content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
-    gauges: gauged.gauges, gaugeChanges: gauged.changes,
+    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed,
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
@@ -1236,8 +1241,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.safetyStep(latest.length ? screen : null),
     T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, state, now, timeZone }),
     T.sessionStep({ session, state, herHere, stage, attempts }),
-    T.gaugesStep({ gauges: gauged.gauges, changes: gauged.changes, scores: replyPlan.scores }),
-    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp: firstMsg || followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen, reading: replyPlan.reading || reading, reader }),
+    T.gaugesStep({ gauges: gauged.gauges, changes: gauged.changes, scores: replyPlan.scores, questions }),
+    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp: firstMsg || followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen, reading: replyPlan.reading || reading, reader, readFailed }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
@@ -1278,7 +1283,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       saveCheck(c, r.replies.map(x => x.creator_message));
       // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it
       // once more; not in selling moments (fix 9): Claude's taste disagrees with the proven answers there
-      if ((c.overall === 'weak' || (replyPlan.answer_first && c.points?.answers_him?.verdict === 'weak')) && !c.declined && !SELL_GOALS.has(replyPlan.goal)) {
+      if ((c.overall === 'weak' || (replyPlan.answer_first && c.points?.answers_him?.verdict === 'weak') || (replyPlan.hard && c.points?.understood?.verdict === 'weak')) && !c.declined && !SELL_GOALS.has(replyPlan.goal)) {
         const notes = Object.entries(c.points || {}).filter(([k, v]) => v?.verdict === 'weak' && CHECK_POINTS[k]).map(([k, v]) => `${CHECK_POINTS[k]}: ${clean(v.note)}`);
         const instruction = `Your coach found this reply weak${c.summary ? ` (${clean(c.summary)})` : ''}. ${notes.join(' ')} Write it again, fixing exactly that and keeping what was right: the same moment, the same length.`;
         const fixed = await writeOne({ orgId, creatorId, fanUuid, model: r.model, base, latest, recentHer, voice, speed, emojis, sell: sellFor, fixWith: instruction });
@@ -1808,7 +1813,7 @@ async function setDiaryFact(orgId, creatorId, text, off) {
 // Claude's watch-only checks of Practice replies (ai_checks), added up: a score per
 // day (good = 1, okay = ½, weak = 0; declined ones don't count) and the most common
 // weak points, each with a few examples. Nothing is sent anywhere.
-const CHECK_POINTS = { answers_him: 'Answering him', fits_moment: 'Fitting the moment', notes_facts: 'His notes and her facts', selling: 'Selling', lessons: 'Repeating a marked mistake' };
+const CHECK_POINTS = { answers_him: 'Answering him', understood: 'Understanding him', fits_moment: 'Fitting the moment', notes_facts: 'His notes and her facts', selling: 'Selling', lessons: 'Repeating a marked mistake' };
 const scoreOf = (c) => {
   const n = c.good + c.okay + c.weak;
   return n ? Math.round((100 * (c.good + c.okay / 2)) / n) : null;
@@ -2014,12 +2019,14 @@ function hisNames(chat, fan = {}) {
 // wants, or she has asked a lot lately. '' = one question is fine.
 const SAID_YES = /^\W*(?:yes+|yeah+|yep|ya+s*|sure|ok(?:ay)?|of course|absolutely|definitely|why not|both|all of (?:it|them)|all at once|go (?:on|ahead)|do it|please|let'?s go|i do|i am|i'?m in|keep going|more)\b/i;
 const WANTS = /\b(?:i\s+(?:want|wanna|need|would\s+love)|i'?d\s+love|wanna|let'?s|show\s+me|send\s+me|give\s+me|surprise\s+me|make\s+me|tell\s+me|keep\s+going|i'?m\s+(?:about\s+to|so\s+close|close\s+to))\b/i;
-function noQuestionWhy({ recent = [], latest = [] }) {
+function noQuestionWhy({ recent = [], recent10 = null, latest = [] }) {
   const said = latest.join(' ');
   const lastAsked = recent.length > 0 && recent[recent.length - 1].includes('?');
   if (lastAsked && SAID_YES.test(said) && said.split(/\s+/).length <= 8) return 'he just answered your question: do what he chose or said yes to, don\'t ask again.';
   if (WANTS.test(said)) return 'he told you what he wants: say yes, react or lead.';
-  if (recent.slice(-3).filter(r => r.includes('?')).length >= 2) return 'you asked him something in your last replies; this time react, tease or tell him something instead.';
+  if (recent.slice(-2).length === 2 && recent.slice(-2).every(r => r.includes('?'))) return 'you asked him something in your last two replies; this time react, tease or tell him something instead.';
+  const ten = (recent10 || recent).slice(-10);
+  if (ten.length >= 6 && ten.filter(r => r.includes('?')).length / ten.length > 0.5) return 'you have asked in more than half of your last replies; this time react, tease or tell him something instead.';
   return '';
 }
 
@@ -2035,7 +2042,7 @@ function voiceFor({ chat, fan = {}, latest = [], followUp = false, from = 0 }) {
   return {
     recent, names: hisNames(chat, fan),
     his: chat.filter(m => m.from_fan).slice(-6).map(m => clean(m.text)).join('\n'),
-    noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), latest }),
+    noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), recent10: herReplies(chat).slice(-10), latest }),
     openers: recent.slice(-4).map(r => r.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '')).filter(Boolean),
   };
 }
@@ -2225,7 +2232,7 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
     else if (warm && his >= 2 && !pulled_back) phase = 'offer';
   }
   const sales = phase ? await sellingExamples(orgId, { phase, ids: plan.ids, his, max, mood, said }) : [];
-  return { plan, level: { ...level, warm }, library, phase, sales, reading: plan.reading || null, reader: plan.reader || null };
+  return { plan, level: { ...level, warm }, library, phase, sales, reading: plan.reading || null, reader: plan.reader || null, readFailed: plan.failed === true };
 }
 
 /**
@@ -2320,7 +2327,7 @@ async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = 
     return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), contradicts: strategy.readContradiction(j, notes), reading: null, reader: res.model, cost: res.usage.cost || 0 };
   } catch (e) {
     console.error('[ai-chat] situations:', e.message);
-    return { ids: [], mood: strategy.readMood(null), contradicts: 0, reading: null, reader: null, cost: 0 };
+    return { ids: [], mood: strategy.readMood(null), contradicts: 0, reading: null, reader: null, failed: true, cost: 0 };
   }
 }
 
@@ -2346,13 +2353,35 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     for (let attempt = 0; attempt < (fixWith ? 2 : 3); attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
       const piece = base.plan?.length?.target === 'piece';                    // a paid written piece: more room (D1)
-      const res = await or.chat({ model, maxTokens: piece ? 1000 : 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask }) });
+      // talk moments get several candidates in one call (research round 2: variety from one prompt); selling,
+      // sexting, a paid piece and Claude's fix get one
+      const goalNow = base.plan?.goal || '';
+      const candidates = fixWith || attempt > 0 || !base.plan || SELL_GOALS.has(goalNow) || base.sexting?.on || piece ? 1 : 3;
+      const res = await or.chat({ model, maxTokens: piece ? 1000 : candidates > 1 ? 900 : 400, temperature: 0.85, messages: P.replyPrompt({ ...base, retry: ask, candidates }) });
       drafts += 1;
       out.cost += res.usage.cost || 0;
       await logUsage(orgId, 'reply', res.model, res.usage, { creatorId, fanUuid });
-      const draft = P.readReply(res.text);
-      const raw = [...draft.messages];                        // as the writer wrote it, before the code tidied it
-      if (noPpv) draft.ppv = null;
+      // tidied in code: her habit openers, his name said again, an emoji she just used; questions she shouldn't ask
+      // turned into statements or left out; long messages split into bubbles like a person's
+      const prep = (d) => {
+        if (noPpv) d.ppv = null;
+        d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
+        if (voice) d.messages = P.dropSentences(d.messages, { his: voice.his, noOffer: d.ppv ? '' : noPpv || base.noOffer || '' });
+        const n = voice ? questionsIn(d.messages, voice.his) : 0;
+        if (voice && ((voice.noQuestion && n) || n > 1)) d.messages = P.unQuestion(d.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
+        if (!piece) d.messages = P.splitBubbles(d.messages);
+        return d;
+      };
+      let draft = null, raw = [], picked = null;
+      if (candidates > 1) {
+        const list = P.readReplies(res.text).map(d => ({ ...d, raw: [...d.messages] }));
+        if (list.length >= 2) {
+          list.forEach(prep);
+          picked = pickCandidate(list, { plan: base.plan, voice, closeness: voice?.closeness || 'new' });
+          draft = picked.draft; raw = draft.raw;
+        }
+      }
+      if (!draft) { draft = P.readReply(res.text); raw = [...draft.messages]; prep(draft); }   // as the writer wrote it, before the code tidied it
       // a PPV she attached: is it in her list, and allowed right now?
       let offerProblem = null;
       draft.offer = null;
@@ -2362,15 +2391,10 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         if (!o.problem && base.plan && !base.plan.sell.allowed) o.problem = `It attached a PPV, but none should go with this reply: ${base.plan.sell.why}`;
         if (o.problem) offerProblem = o.problem; else draft.offer = o;
       }
-      // her habit openers, his name said again, an emoji she just used: tidied in code;
-      // questions she shouldn't ask turned into statements or left out where that reads well
-      draft.messages = P.tidyMessages(draft.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
-      if (voice) draft.messages = P.dropSentences(draft.messages, { his: voice.his, noOffer: draft.ppv ? '' : noPpv || base.noOffer || '' });
       const asks = voice ? questionsIn(draft.messages, voice.his) : 0;
       // he sent a photo or video: her reply must pick up something she saw in it (C4, C5)
       const seen = (base.media || []).find(s => s.description && !s.flagged);
       const ignoresMedia = !!seen && !V.reactsTo(draft.messages, seen);
-      if (voice && ((voice.noQuestion && asks) || asks > 1)) draft.messages = P.unQuestion(draft.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
       if (draft.handover) {
         steps.push({ raw, final: [...draft.messages], ppv: null, offer: null, problems: [`It asks a person to take over: ${draft.handover}`], style: [], review: null, verdict: 'handover' });
         return { ...out, status: 'handover', reason: draft.handover, replies: draft.messages.map(m => ({ creator_message: m })), learned: [], ms: Date.now() - started, trace: T.writerSteps({ label: out.label, drafts: steps, pick: steps.length - 1, status: 'handover' }) };
@@ -2425,6 +2449,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (draft.offer && !draft.offer.item.series && C.levelOf(draft.offer.item) <= (base.level?.his ?? 0) - 2) {
         now.style.push(`The PPV "${draft.offer.item.title}" is much tamer than where the chat is: offer something closer to what he wants.`);
       }
+      if (picked) now.style.push(`(picked 1 of ${picked.n} candidates: ${picked.why})`);
       steps.push({
         raw, final: [...draft.messages], ppv: draft.ppv ? `${draft.ppv.item} at $${draft.ppv.price ?? '?'}${offerProblem ? `: ${offerProblem}` : ''}` : null,
         offer: draft.offer ? `${draft.offer.item.title}, $${draft.offer.price}` : null, problems, style: now.style, review, verdict,
@@ -2450,6 +2475,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       draft.messages = t.messages;
       typo = t.typo;
     }
+    if (pick.verdict !== 'block' && base.plan?.length?.target !== 'piece') draft.messages = P.surfacePass(draft.messages);   // lowercase starts now and then, no full stop on a short last bubble
     if (noPpv && pick === kept && !draft.offer) notes.push(`Written again without a PPV: ${noPpv}`);
     const status = pick.verdict === 'ok' ? 'ok' : pick.verdict === 'person' ? 'check' : 'blocked';
     // the PPV on her last message (only when the reply passed)
@@ -2479,6 +2505,37 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     console.error('[ai-chat] reply:', e.message);
     return { ...out, status: 'error', error: e.message, replies: [], learned: [], ms: Date.now() - started };
   }
+}
+
+// The candidate reply that fits the bands best (research round 2): the question the plan wants (or none),
+// the length target, no repeated opener, bubbles like a person's, no declared feelings early on.
+const DECLARED_RE = /\b(?:i\s+(?:really\s+|truly\s+|so\s+)?(?:care\s+(?:about|for)|miss|adore|love|need)\s+(?:you|u)\b|you\s+mean\s+(?:so\s+much|a\s+lot|the\s+world|everything)\s+to\s+me|i\s+feel\s+(?:the\s+same|it\s+too))\b/i;
+const QUESTION_GOALS = new Set(['curious', 'direct_ask', 'dry_ask', 'readiness_check', 'why_not', 'welcome_new', 'get_to_know']);
+function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = {}) {
+  const words = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
+  const target = { short: 7, medium: 9, long: 14, piece: 90 }[plan?.length?.target] || 9;
+  const wantsQ = QUESTION_GOALS.has(plan?.goal) || /would be good now/.test(plan?.ask?.why || '');
+  const noQ = !!voice?.noQuestion || (plan && !plan.ask?.allowed);
+  const openers = new Set((voice?.openers || []).map(o => o.toLowerCase()));
+  const scored = list.map((d) => {
+    const text = d.messages.join(' ');
+    const asks = /\?/.test(text);
+    const n = words(text);
+    const why = [];
+    let score = 50 - Math.abs(n - target) * 1.5;
+    if (asks && noQ) { score -= 30; why.push('asks when it shouldn\'t'); }
+    if (asks && wantsQ && !noQ) { score += 15; why.push('asks, as planned'); }
+    if (!asks && wantsQ && !noQ) { score -= 20; why.push('no question, one was planned'); }
+    if (!asks && !wantsQ && !noQ) { score += 4; }
+    const opener = d.messages[0]?.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '').toLowerCase();
+    if (opener && openers.has(opener)) { score -= 25; why.push('starts like a recent reply'); }
+    if (d.messages.length === 2 && /\?/.test(d.messages[1])) { score += 6; }
+    if (d.messages.length > 3) { score -= 20; why.push('too many messages'); }
+    if (d.messages.some(m => words(m) > 15)) { score -= 10; why.push('a long message'); }
+    if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
+    return { d, score, why: why.join(', ') || `${n} words, fits the target` };
+  }).sort((a, b) => b.score - a.score);
+  return { draft: scored[0].d, n: list.length, why: scored[0].why, scores: scored.map(x => x.score) };
 }
 
 /** What the AI chat cost: today and the last 30 days, by kind. */

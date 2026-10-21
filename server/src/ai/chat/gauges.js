@@ -117,7 +117,7 @@ function updateGauges(prev, ctx = {}) {
 const MOVES = {
   react: { goal: 'chat', text: 'React to what he said with real interest, in your own words; nothing steered' },
   curious: { goal: 'curious', text: 'React, then one real question about the new thing he said' },
-  share: { goal: 'share', text: 'React, then a small real thing of yours that fits (your day, something you like); no question' },
+  share: { goal: 'share', text: 'React, then a small real thing of yours with a person in it (a friend, your sister, your flatmate, a date that went wrong); no question' },
   get_to_know: { goal: 'get_to_know', text: 'Get to know him: one easy question about him' },
   flirt: { goal: 'flirt', text: 'Flirt: playful, a compliment, light teasing' },
   tease: { goal: 'tease', text: 'He got sexual: say yes playfully and tease; don\'t stall' },
@@ -148,15 +148,17 @@ function scoreMoves(g, ctx = {}) {
     out.push({ move, goal: MOVES[move].goal, text: MOVES[move].text, score: Math.round(score), allowed: ok, why: ok ? top.join(', ') || 'the default' : whyNot });
   };
   const tw = !!ctx.timeWaster;
+  const q = ctx.questions || { share: 0.4, run: 0, n: 0 };   // her questions lately: humans ask in 35–45% of replies, rarely three in a row
+  const band = (w) => ([['few questions lately: one would be good', q.n >= 4 && q.share < 0.3 ? w : 0], ['many questions lately', q.n >= 4 && q.share > 0.45 ? -w : 0], ['two questions in a row already', q.run >= 2 ? -40 : 0]]);
   const sexual = ['sexting', 'flirting'].includes(r.doing);
   const matching = ['match', 'playful'].includes(r.stance);
   add('react', true, '', parts(['the safe default', 35], ['something new to react to', g.surprise * 0.1], ['he puts little in', g.engagement < 40 ? 10 : 0]));
   add('curious', !!a.ask && !!r.curious && inStage(['vibe', 'flirt', 'sexy']) && !tw, !a.ask ? 'no question this time' : !r.curious ? 'nothing she wants to ask' : tw ? 'a time waster gets no questions' : 'not at this stage',
-    parts(['something new or surprising', g.surprise * 0.55], ['she barely knows him', (100 - g.rapport) * 0.15], ['he opens up', ['sharing', 'venting'].includes(r.doing) ? 15 : 0], ['he tests or provokes', ['testing', 'provoking'].includes(r.doing) ? 15 : 0], ['it can be read more than one way', (r.readings || []).length >= 2 ? 10 : 0], ['an odd line: a real girl would ask', r.odd ? 20 : 0], ['base', 15], ['the stage has a job: flirting, or the sexy vibe', ['flirt', 'sexy'].includes(stage) ? -12 : 0], ['he is flirting or sexting: not an interview', sexual && !r.odd ? -15 : 0], ['a sexting flow is on: don\'t interrupt it', g.heat > 60 && g.rapport > 50 ? -g.heat * 0.2 : 0]));
-  add('share', inStage(['vibe', 'flirt', 'sexy']) && !tw, tw ? 'a time waster gets nothing of hers' : 'not at this stage',
-    parts(['they are close', g.rapport * 0.25], ['he puts little in', g.engagement < 45 ? 15 : 0], ['he asked about her', r.doing === 'asking' ? 15 : 0], ['base', 10], ['something surprising comes first', -g.surprise * 0.3]));
+    parts(['something new or surprising', g.surprise * 0.55], ['she barely knows him', (100 - g.rapport) * 0.15], ['he opens up', ['sharing', 'venting'].includes(r.doing) ? 15 : 0], ['he tests or provokes', ['testing', 'provoking'].includes(r.doing) ? 15 : 0], ['it can be read more than one way', (r.readings || []).length >= 2 ? 10 : 0], ['an odd line: a real girl would ask', r.odd ? 20 : 0], ['base', 15], ['the stage has a job: flirting, or the sexy vibe', ['flirt', 'sexy'].includes(stage) ? -12 : 0], ...band(15), ['he is flirting or sexting: not an interview', sexual && !r.odd ? -15 : 0], ['a sexting flow is on: don\'t interrupt it', g.heat > 60 && g.rapport > 50 ? -g.heat * 0.2 : 0]));
+  add('share', inStage(['vibe', 'flirt', 'sexy']) && !tw && !ctx.hard, ctx.hard ? 'he is sharing something hard: no story of hers' : tw ? 'a time waster gets nothing of hers' : 'not at this stage',
+    parts(['they are close', g.rapport * 0.25], ['he puts little in', g.engagement < 45 ? 15 : 0], ['he asked about her', r.doing === 'asking' ? 15 : 0], ['a quiet, friendly moment', g.heat < 40 && g.mood >= 45 ? 8 : 0], ['base', 14], ['something surprising comes first', -g.surprise * 0.3], ['many questions lately: tell him something instead', q.n >= 4 && q.share > 0.45 ? 10 : 0]));
   add('get_to_know', !!a.ask && inStage(['vibe']) && !tw, !a.ask ? 'no question this time' : tw ? 'a time waster gets no questions' : 'past the getting-to-know stage',
-    parts(['she barely knows him', (100 - g.rapport) * 0.3], ['base', 20], ['the vibe stage', stage === 'vibe' ? 10 : 0], ['something surprising comes first', -g.surprise * 0.2], ['he is in a sexual mood', -g.heat * 0.3]));
+    parts(['she barely knows him', (100 - g.rapport) * 0.3], ['base', 20], ['the vibe stage', stage === 'vibe' ? 10 : 0], ['something surprising comes first', -g.surprise * 0.2], ['he is in a sexual mood', -g.heat * 0.3], ['a question just went out: a new-topic one now reads like an interview', q.run >= 1 ? -12 : 0], ...band(12)));
   add('flirt', !!a.flirt && inStage(['flirt', 'sexy']) && !tw, !a.flirt ? 'flirting isn\'t allowed yet' : tw ? 'a time waster' : 'not at this stage',
     parts(['his heat', g.heat * 0.35], ['rapport', g.rapport * 0.25], ['his mood', g.mood * 0.1], ['the flirting stage', stage === 'flirt' ? 25 : 0], ['he is flirting', r.doing === 'flirting' ? 10 : 0], ['base', 10], ['an odd line', r.odd ? -10 : 0], ['he doubts her', -g.doubt * 0.4], ['something surprising comes first', -g.surprise * 0.2]));
   add('tease', !!a.tease && inStage(['sexy']) && !tw, !a.tease ? 'the reply may not get that sexual yet' : tw ? 'a time waster' : 'not at this stage',

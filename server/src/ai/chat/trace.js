@@ -118,18 +118,21 @@ function sessionStep({ session = null, state = null, herHere = 0, stage = null, 
 }
 
 /** 3. The moment: the planner's read of him, and where the chat is. */
-function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null, media = [], reading = null, reader = null }) {
+function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = null, waiting = null, followUp = false, away = null, herHere = null, clash = null, media = [], reading = null, reader = null, readFailed = false }) {
   const readerWord = reader ? (/claude-haiku/.test(reader) ? 'Reader (Claude Haiku)' : /claude-sonnet/.test(reader) ? 'Reader (Claude Sonnet)' : /ministral/.test(reader) ? 'Planner (Ministral 8B)' : `Reader (${reader})`) : 'Planner (Ministral 8B)';
   const phaseWord = { offer: 'time to offer', waiting: 'a PPV is waiting for him', after_buy: 'after a buy', no_buy: 'after a no' }[phase];
   return step('moment', 'The moment', {
     result: followUp ? `She writes first: ${followUp?.word || 'he has gone quiet'}`
+      : readFailed ? 'The read of his message failed (no planner answered): she plays it safe, nothing sold, nothing assumed'
       : `Mood: ${level.mood} · his last message: ${LEVEL_WORD[level.his]}${level.pulled_back ? ' · he\'s slowing down' : ''}${reading ? ` · he's ${reading.doing.replace(/_/g, ' ')} · stance: ${reading.stance}` : ''}`,
-    tags: [readerWord, ...(reading ? ['R2'] : [])],
+    tags: [readFailed ? 'The read failed' : readerWord, ...(reading ? ['R2'] : [])],
     details: [
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
       reading?.new ? { label: 'What\'s new', value: reading.new } : null,
       reading?.readings?.length ? { label: 'Could mean', value: reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}%)`).join(' · ') } : null,
       reading?.curious ? { label: 'She\'d want to ask', value: reading.curious } : null,
+      reading?.asked?.length ? { label: 'He asks', value: reading.asked.join(' · ') } : null,
+      reading?.promised?.length ? { label: 'She promised', value: reading.promised.join(' · ') } : null,
       ...media.map(s => ({ label: 'He sent', value: s.flagged ? `a ${s.video ? 'video' : 'photo'} that was flagged: the AI leaves this chat (C3)` : s.description ? `a ${s.video ? 'video' : 'photo'} of ${s.kind} (${s.sexual === 'none' ? 'nothing sexual' : s.sexual}): ${s.description}` : `a ${s.video ? 'video' : 'photo'} that couldn't be seen${s.failed ? ` (${s.failed})` : ''}` })),
       herHere != null ? { label: 'This conversation', value: `${herHere} of her replies so far${away ? `; he was away ${awayText(away)} before it` : ''}` } : null,
       clash ? { label: 'Doesn\'t fit his notes', value: `his latest message contradicts "${clash}"` } : null,
@@ -142,7 +145,7 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
 }
 
 /** 3b. The meters (engine v2, step 3): the gauges, how they moved this turn, and the scored moves. */
-function gaugesStep({ gauges = null, changes = [], scores = null }) {
+function gaugesStep({ gauges = null, changes = [], scores = null, questions = null }) {
   if (!gauges) return null;
   const G = require('./gauges');
   const best = scores?.find(x => x.allowed) || null;
@@ -153,6 +156,7 @@ function gaugesStep({ gauges = null, changes = [], scores = null }) {
     tags: ['M1'],
     details: [
       ...changes.map(c => ({ label: c.gauge, value: `${c.from} → ${c.to}: ${c.why}` })),
+      questions && questions.n ? { label: 'Questions lately', value: `${questions.asked} of her last ${questions.n} replies${questions.run >= 2 ? `, the last ${questions.run} in a row` : ''} (humans: about 4 in 10, rarely three in a row)` } : null,
       scores ? { label: 'Scores', value: scores.map(x => `${x.move} ${x.score}${x.allowed ? '' : ` (no: ${x.why})`}`).join(' · ') } : null,
     ],
   });
