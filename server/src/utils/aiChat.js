@@ -19,7 +19,7 @@ const or = require('../integrations/openrouter');
 const fv = require('../integrations/fanvue');
 const V = require('../ai/chat/vision');
 const Sv = require('../ai/chat/services');
-const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE } = require('../ai/chat/safety');
+const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE, SEXUAL_INTENT } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { RULES } = require('../ai/chat/rules');
@@ -973,14 +973,6 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (!fanUuid && type?.away && talk.start === 0 && talk.away == null) talk.away = type.away;   // a made-up fan back after a break
   const now = new Date();
   const herHere = convo.slice(talk.start).filter(m => !m.from_fan && !m.mass).length;   // her messages in this conversation
-  // she writes first (B2–B4): of what kind. Practice names it; for a real fan the schedule says what's due
-  let firstMsg = null;
-  if (followUp) {
-    const kind = Sc.KINDS[followUp] ? followUp : null;
-    const due = !kind && fanUuid ? Sc.nextFirst({ chat, tier: 'none', hours: null, timeZone, now }) : null;
-    const k = kind || due?.kind || 'nudge';
-    firstMsg = { kind: k, text: Sc.KINDS[k], word: Sc.KIND_WORD[k] };
-  }
   // he's gone dry (fix 1): his one-word replies in a row at the end of this conversation
   const dry = dryStreak(convo.slice(talk.start));
   // selling (A1–A7, E5): what he bought and how he took it, the PPVs sent in this conversation and today
@@ -1013,6 +1005,14 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const pageUsd = await pageMonthly(account.id);
   const first = Plan.fanProfile({ money, type, chat: convo, ids: [], mood: '', pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, latest, now });
   const state = fanUuid ? S.fanStateOf({ chat, profile: first, away: talk.away, timeZone, now }) : S.madeUpState(type, first);
+  // she writes first (B2–B4): of what kind. Practice names it; for a real fan the schedule says what's due
+  let firstMsg = null;
+  if (followUp) {
+    const kind = Sc.KINDS[followUp] ? followUp : null;
+    const due = !kind && fanUuid ? Sc.nextFirst({ chat, tier: first.tier, newSub: first.new_sub, chatSince: chat.find(m => !m.mass)?.at || null, hours: state.hours, timeZone, now }) : null;
+    const k = kind || due?.kind || 'nudge';
+    firstMsg = { kind: k, text: Sc.KINDS[k], word: Sc.KIND_WORD[k] };
+  }
   // how often she plans an attempt with him (E5), and a pause after a big spend (A7)
   const cadence = Sl.cadenceOf(first.tier, { lastAttemptAt: state.last_ppv_at || Sl.lastAttemptAt(convo.slice(0, talk.start)), now, seed: fanUuid || fan.name || 'fan' });
   const pause = Sl.pauseOf({ chat: convo, avgPrice: first.avg_price, now });
@@ -1032,7 +1032,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // he says exactly what he wants, or asks what she has: the warm-up floor doesn't hold her back (A1, E5);
   // a new subscriber then skips the stages, and the offer may come in her second reply
   const asksNow = !!match?.full?.length || S.WANTS_TO_BUY.test(latest.join(' '));
-  const direct = first.new_sub && !taste.bought && asksNow;
+  // what he asked for earlier in this conversation (deep dive): a new subscriber's first message often says it ("how much
+  // for your nudes?") and the welcome comes first; his request still shapes the probe, and counts as direct in her first replies
+  const hisHere = convo.slice(talk.start).filter(m => m.from_fan && !m.mass).map(m => clean(m.text)).join(' ');
+  const askedHere = sell && first.new_sub && !taste.bought && !match?.full?.length ? C.matchRequest(hisHere, content) : null;
+  const direct = first.new_sub && !taste.bought && (asksNow || (herHere <= 2 && !!askedHere?.full?.length));
   // a time waster's attempt fits his short free talk (E5): the warm-up floor shrinks to 3 of her messages
   const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: asksNow ? (first.new_sub ? 1 : 0) : first.time_waster ? Math.min(session.warm_up, 3) : session.warm_up, herHere });
   if (attempts.here > 0 && !level.warm) level.warm = true;              // a PPV already went this conversation: the warm-up is behind them
@@ -1044,14 +1048,31 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // dry flags reset once he writes something real (fix 1)
   if (!dry && (session.dry_asked || session.dry_bye)) session = { ...session, dry_asked: false, dry_bye: false };
   // foreign swearing and politicians aren't sexual (fix 3): the planner's level is capped by his own words
-  if (level.his >= 2 && NOT_SEXUAL.test(latest.join(' ')) && replyLevel(latest.join(' ')) === 0) {
-    level.his = 0; level.match = false; level.lead = !level.pulled_back && level.warm;
-    level.max = P.maxLevel({ his: 0, heat: persona.profile?.heat, lead: level.lead, match: false });
-  }
+  const relevel = () => {
+    level.lead = !level.pulled_back && (level.warm || (level.his >= 2 && level.since >= LEAD_AFTER));
+    level.match = level.his >= 2 && !level.pulled_back && level.since >= MATCH_AFTER;
+    level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match });
+  };
+  const saidNow = latest.join(' ');
+  if (level.his >= 2 && NOT_SEXUAL.test(saidNow) && replyLevel(saidNow) === 0) { level.his = 0; relevel(); }
+  if (level.his < 2 && SEXUAL_INTENT.test(saidNow)) { level.his = 2; relevel(); }   // his own words are unmistakable: at least suggestive
+  // the planner's read of his level is checked against his own words (deep dive): a short message with nothing sexual
+  // in it ("hey babe", "show me more") is flirty at most, and "pulled back" needs something to pull back from
+  const nWords = (saidNow.match(/[\p{L}\p{N}']+/gu) || []).length;
+  const cools = COOLS.test(saidNow);
+  if (level.pulled_back && !(session.hot && (cools || nWords >= 4))) { level.pulled_back = false; relevel(); }
+  if (level.his >= 2 && !session.hot && replyLevel(saidNow) === 0 && nWords <= 3) { level.his = 1; relevel(); }
+  // the sexting flow: a short neutral reply while they're in it ("ok", "mmm", "yes") keeps his level, so the story goes
+  // on instead of falling back to small talk; the flow ends when he cools it or really talks about something else
+  if (level.his >= 2) session = { ...session, hot: true };
+  else if (session.hot && !level.pulled_back && !cools && nWords <= 3 && !/\?/.test(saidNow) && latest.length) { level.his = 2; relevel(); }
+  else if (level.pulled_back || cools || nWords >= 4) session = { ...session, hot: false };
   // a new subscriber's path to his first sale (A1): where he is on it in this conversation. It pauses
   // while a heavy mood holds or he is dry (fix 8): those replies don't count as progress
   const held = !!session.mood || dry >= 3;
-  const progress = Math.max(0, herHere - (session.first_sale?.held || 0));
+  // her replies (turns), not her messages: a reply of two messages is still one exchange (deep dive)
+  const herTurns = herReplies(convo.slice(talk.start)).length;
+  const progress = Math.max(0, herTurns - (session.first_sale?.held || 0));
   const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: level.his, since: level.since, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
   if (stage?.stage === 'offer' && !level.warm) level.warm = true;       // the path says: offer now
   // paid requests, refusals and unusual asks (services.js, D1–D9), and what they change in the session
@@ -1087,7 +1108,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       }
       // he brings it up again: "still thinking about it, don't rush me" (D4); it isn't a new content question
       session.pending.again = session.pending.state === 'waiting' && (ASKS_AGAIN.test(latest.join(' ')) || (request?.kind === 'unknown' && request.what === session.pending.what));
-      if (session.pending.again) { match = null; request = null; }
+      if (session.pending.again) { match = null; request = null; if (level.his > 1) { level.his = 1; relevel(); } session.hot = false; }
     }
     if (request && services[request.kind] && !session.service) session.service = { kind: request.kind, label: services[request.kind].label, price: request.price, state: 'offered', tip: 0 };
     if (session.service?.state === 'offered' && latestTip > 0) { session.service.tip += latestTip; if (Sv.covers(session.service.tip, session.service.price)) session.service.state = 'paid'; }
@@ -1133,11 +1154,13 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
-    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry,
+    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere,
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
   replyPlan.first_wait = firstWait;
+  // his question is about politics, religion or a public figure (fix 5): the non-answer in the safety note is the answer
+  if (replyPlan.answer_first && screen.notes.some(n => /politics, religion/.test(n))) replyPlan.answer_first = '';
   // what this reply settles: a service delivered (a roleplay starts), a manager's decision used,
   // the selling steps done once per conversation (the direct ask, the readiness check, "why not", a cheaper piece, a reminder)
   if (!whatIf) {
@@ -1191,7 +1214,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
     T.lessonsStep(lessons),
   ].filter(Boolean);
-  if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile, session, state, stage, attempts } };
+  if (planOnly) return { screen, results: [], used: { trace, said: latest, follow_up: !!followUp, what_if: whatIf, plan: replyPlan, profile, session, state, stage, attempts, level } };
   // she says nothing (fix 1): a dry fan after her sign-off; nothing is written and nothing would be sent
   if (replyPlan.goal === 'no_reply') return { screen, results: [], quiet: { text: replyPlan.goal_text, why: replyPlan.why }, used: { trace, said: latest, plan: replyPlan, profile, session, state, stage, attempts } };
 
@@ -1548,17 +1571,20 @@ async function saveServices(orgId, creatorId, { services = {}, session_total: to
 // selling moments: Claude's fixes stay out of them (fix 9)
 const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'lead_story', 'after_buy', 'cheaper', 'sexy_vibe', 'direct_ask', 'readiness_check', 'service_offer', 'service_deliver', 'roleplay', 'point_to_ppv', 'answer_ppv']);
 // foreign swearing, slang and politicians read as sexual by the planner (fix 3)
-const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|wtf|damn|dammit|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu|musk)\b/i;
+const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu)\b/i;
+// he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
+const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
 // his one-word replies in a row at the end of a conversation (fix 1): "ok", "k", "lol", "yes"…
 function dryStreak(here = []) {
   const groups = [];
-  let cur = null;
+  let cur = null, hers = false;
   for (const m of here) {
     if (m.mass) continue;
-    if (m.from_fan) { if (!cur) { cur = []; groups.push(cur); } cur.push(clean(m.text)); }
-    else cur = null;
+    // his opener before her first reply ("hey") isn't dryness, and a photo, video or tip is never a one-word reply (deep dive)
+    if (m.from_fan) { if (!hers) continue; if (!cur) { cur = []; groups.push(cur); } cur.push(m.media || m.tip ? null : clean(m.text)); }
+    else { cur = null; hers = true; }
   }
-  const isDry = (g) => g.length > 0 && g.every(t => !t || ((t.match(/[\p{L}\p{N}']+/gu) || []).length <= 2 && !/\?/.test(t)));
+  const isDry = (g) => g.length > 0 && g.every(t => t !== null && (!t || ((t.match(/[\p{L}\p{N}']+/gu) || []).length <= 2 && !/\?/.test(t))));
   let n = 0;
   for (let i = groups.length - 1; i >= 0 && isDry(groups[i]); i -= 1) n += 1;
   return n;
@@ -1566,7 +1592,7 @@ function dryStreak(here = []) {
 // he asks for content (photos, videos…) rather than a service
 const CONTENT_WORDS = /\b(?:pics?|photos?|pictures?|videos?|vids?|clips?|sets?|content|nudes?|selfies?|snaps?)\b/i;
 // he asks about his parked request again (D4)
-const ASKS_AGAIN = /\b(?:did (?:you|u) (?:think|decide)|thought about (?:it|that|my)|what about (?:my|that|the) (?:request|thing|idea|question|offer)|any (?:news|answer|decision)|have (?:you|u) decided|still thinking|(?:you|u) never answered|what do (?:you|u) say|so\?+$|decided yet)\b/i;
+const ASKS_AGAIN = /\b(?:did (?:you|u) (?:think|decide)|thought about (?:it|that|my)|what about (?:my|that|the) (?:request|thing|idea|question|offer)|any (?:news|answer|decision)|have (?:you|u) decided|still thinking|(?:you|u) never answered|what do (?:you|u) say|so(?=\?+\s*$)|decided yet|yes or no|(?:are )?(?:you|u) in(?=\s*\??\s*$)|(?:the|that|my) \w+ thing\b|still (?:waiting|no answer))\b/i;
 /** A request's decision, as made in Her content → Services and requests. */
 async function requestStatus(orgId, creatorId, id) {
   try {
@@ -1928,7 +1954,7 @@ function practicePpv(p, content) {
 }
 
 // He asks about a PPV she sent: "what's in it?", "is it nude?", "how long is it?"…
-const ASKS_ABOUT_IT = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this|there)\b|does\s+(?:it|that)\b|do\s+(?:it|they)\s+(?:have|show)|any\s+\w+\s+in\s+(?:it|there)|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
+const ASKS_ABOUT_IT = C.ASKS_ABOUT_PPV;
 // He wants something other than the PPV waiting for him: "something more interesting", "not that one".
 const WANTS_OTHER = /\b(?:something|anything)\s+(?:else|more|better|different|hotter|spicier|naughtier|nastier|dirtier|crazier)\b|\bnot\s+(?:that|this)(?:\s+one)?\b|\bshow\s+me\s+more\b|\bmore\s+(?:interesting|explicit|naked|nude)\b|\bsurprise\s+me\b|\bwhat\s+else\b/i;
 
@@ -1949,7 +1975,8 @@ function lastPpv(convo) {
   while (k > 0 && after[k - 1].from_fan) k -= 1;
   const hisLatest = after.slice(k).map(m => clean(m.text)).join(' ');
   const wantsOther = WANTS_OTHER.test(hisAfter);
-  const open = (p.status === 'pending' && !wantsOther) || (p.status === 'ignored' && !herAfter);
+  // a price objection to it ("too expensive") is a no (deep dive): she doesn't point him back to that one
+  const open = (p.status === 'pending' && !wantsOther && !Sl.priceObjection(hisAfter)) || (p.status === 'ignored' && !herAfter);
   return { i, p, herAfter, hisAfter, hisLatest, wantsOther, open };
 }
 
@@ -2223,6 +2250,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       }
       const now = { draft, verdict, problems, review, style: [...(c.style || [])], index: attempt };
       if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
+      // an offer that doesn't offer (deep dive): on a planned sell day the piece has to be attached, not just talked about
+      if (sell && ['offer', 'first_offer', 'steer_to_sale'].includes(base.plan?.goal) && base.plan?.sell?.allowed && !draft.ppv && !noPpv) now.style.push('The plan is to offer now: attach one of the pieces it picked (the "ppv" field), don\'t only talk about it.');
       // the direct ask (A1) must ask: a reply without a question doesn't do its job
       if (base.plan?.goal === 'direct_ask' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('This reply has to ask him what he\'d like to see of you (or whether he\'s alone and wants to see something): one real question.');
       // he asked something (fix 4): a reply that is only questions didn't answer him

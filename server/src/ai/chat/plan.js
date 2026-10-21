@@ -15,6 +15,7 @@ const { replyLevel } = require('./safety');
 const { closenessOf, CLOSENESS, TONE, likesFor, awayText } = require('./memory');
 const { eventFits, WANTS_TO_BUY } = require('./session');
 const { seenText } = require('./notes');
+const { ASKS_ABOUT_PPV } = require('./content');
 const Sl = require('./selling');
 
 const clean = (s) => String(s ?? '').trim();
@@ -30,10 +31,10 @@ const TIER_LABEL = { new: 'New subscriber', none: 'No spend in 90 days', small: 
 // purchase (Q26b; starting points, to be calibrated). Sexting doesn't count (Q27).
 const BUDGET = { whale: 20, new: 15, spender: 15, small: 10, none: 8, tw: 5 };
 // doubt that she is real (Q24c); "are you a real man / the real deal" is mockery or praise, not doubt (fix 2)
-const SUSPICIOUS = /\b(?:are\s+(?:you|u)\s+(?:a\s+)?(?:real(?!\s+(?:man|woman|one|deal|friend|leader|king|guy|girl|chad|boss))|bot|robot|fake|ai|a\s+scam|scamming)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|fake|a\s+scam)|scam\w*|catfish\w*|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
+const SUSPICIOUS = /\b(?:(?:are|r)\s+(?:you|u)\s+(?:even\s+)?(?:an?\s+)?(?:real(?!\s+(?:man|woman|one|deal|friend|leader|king|guy|girl|chad|boss))|bot|robot|fake|ai|human|a\s+scam|scamming|chat\s*bot|chatgpt)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|an\s+ai|fake|a\s+scam)|scam\w*|catfish\w*|chat\s*bot|chatgpt|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
 // he asked her something directly (fix 4): a question mark, or a question word up front
 const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/i;
-const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview)|send\s+(?:me\s+)?(?:a\s+)?(?:free|preview)|no\s+money|broke)\b/i;
+const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|ones?|something|sample)|(?:something|anything)\s+free|send\s+(?:me\s+)?(?:a\s+)?(?:free|preview)|no\s+money|broke)\b/i;
 // he's leaving (Q8)
 const GOODBYE = /\b(?:good\s*night|good\s*bye|g'?night|nighty?\s*night|gn|nite|gotta\s+(?:go|run|sleep)|got\s+to\s+go|have\s+to\s+(?:go|leave|run)|need\s+to\s+(?:go|sleep|leave)|i'?m\s+(?:off|out|going\s+to\s+(?:bed|sleep))|heading\s+(?:to\s+bed|out|off)|off\s+to\s+(?:bed|sleep|work)|going\s+to\s+(?:bed|sleep)|talk\s+(?:to\s+(?:you|u)\s+)?(?:later|tomorrow|tmrw|soon)|ttyl|bye+|see\s+(?:you|ya|u)\s+(?:later|tomorrow|soon))\b/i;
 const DAY_MS = DAY;
@@ -124,7 +125,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -187,9 +188,9 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (dryNow) goal('no_reply', 'No reply: he\'s been dry for a while, so she waits for something real from him', 'dry after her sign-off: she says nothing (fix 1)', ['R1']);
   else if (level.pulled_back) goal('ease_off', 'He\'s slowing down: ease off, back to normal talk', 'he pulled back');
   else if (mood === 'sad') goal('comfort', 'Comfort him: no flirting, no selling', `he seems sad${['spender', 'whale'].includes(profile.tier) ? ', and he spends: take your time' : ''}`, ['Q24', 'Q25']);
-  else if (profile.suspicious) goal('reassure', 'Calm and easy: reassure him, joke it away, no selling unless he asks', 'he doubts it\'s real or worth it', ['Q24c']);
+  else if (profile.suspicious && !asks) goal('reassure', 'Calm and easy: reassure him it\'s really her account and she\'s here for him; if he asks outright whether she\'s an AI or a bot, she says so honestly, warmly, in her own style (never a denial); no selling', 'he doubts it\'s real or worth it (and isn\'t asking to buy)', ['Q24c']);
   else if (mood === 'annoyed') goal('calm', 'Stay calm and warm; no selling', 'he seems annoyed', ['Q1', 'Q24d']);
-  else if (waiting?.open && /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that)\b|how\s+(?:many|long))/i.test(waiting.hisLatest || '')) goal('answer_ppv', 'Answer what he asks about her PPV, truthfully, then tease', 'he asks what\'s in it', ['Q42']);
+  else if (waiting?.open && ASKS_ABOUT_PPV.test(waiting.hisLatest || '')) goal('answer_ppv', 'Answer what he asks about her PPV, truthfully, then tease', 'he asks what\'s in it', ['Q42']);
   else if (waiting?.open && waiting.hisAfter && !session?.pointed) goal('point_to_ppv', 'Point him to the PPV waiting for him, playfully; nothing new', 'her last PPV is still unopened (once per conversation)', ['Q37']);
   // a brand-new subscriber's very first message (fix 12): welcome him, it's about him
   else if (profile.new_sub && herReplies === 0 && !lastConv && !followUp) goal('welcome_new', 'His very first message to you: welcome him personally (glad he found you), react to what he wrote, and one question about what brought him here or what he\'s into; no "how about you", no story of yours yet, nothing sold', 'a brand-new subscriber, his first message (fix 12)', ['R12', 'Q21']);
@@ -202,7 +203,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (stage?.stage === 'ask') goal('direct_ask', stage.text, stage.why, ['A1']);
   else if (stage?.stage === 'offer') goal('first_offer', `${stage.text}. Attach the piece from the list below, with a teasing caption`, stage.why, ['A1']);
   else if (sexting?.on && level.lead) goal('lead_story', 'Lead the sexting story one step on: what she does now, then tease', 'they\'re sexting and she leads', ['Q41', 'Q42b']);
-  else if (level.his >= 2) goal('tease', 'He got sexual: say yes playfully and tease; don\'t stall', 'he got sexual first', ['Q1']);
+  else if (level.his >= 2 && !pend?.again) goal('tease', 'He got sexual: say yes playfully and tease; don\'t stall', 'he got sexual first', ['Q1']);
   else if (stage?.stage === 'flirt') goal('flirt', stage.text, stage.why, ['A1']);
   else if (stage?.stage === 'sexy') goal('sexy_vibe', stage.text, stage.why, ['A1']);
   else if (stage?.stage === 'vibe') goal('get_to_know', stage.text, stage.why, ['A1', 'Q21']);
@@ -240,7 +241,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   }[p.goal];
   // the cadence, a pause after a big spend, one attempt a day (E5, A7, A4): unless he asks or gets sexual
   let hold = '';
-  const inStory = !!(sexting?.on && sexting.next);
+  const inStory = !!(sexting?.on && sexting.next) || !!rp?.on;   // her sexting set, or a roleplay he paid for: the cadence doesn't hold her
   const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
   const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
   // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
@@ -251,10 +252,12 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     else if (session?.pause && !veryHorny && !asks) hold = session.pause.why;
   } else if (!['offer', 'first_offer', 'cheaper', 'lead_story'].includes(p.goal) || !asks) {
     if (session?.pause && !asks && !veryHorny) hold = session.pause.why;
-    else if (aim === 'read' && session?.cadence && !asks && !horny && !inStory) hold = `no planned attempt today (${session.cadence.text} with him; the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}): a PPV only if he asks or gets sexual (E5)`;
+    else if (aim === 'read' && session?.cadence && !asks && !horny && !inStory) hold = session.cadence.every === 'tw' ? `a time waster, the approach this time: ${session.tw?.text || 'short and sweet'}; nothing offered unless he asks or gets sexual (D2)` : `no planned attempt today (${session.cadence.text} with him; the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}): a PPV only if he asks or gets sexual (E5)`;
     else if (aim === 'rapport' && !asks && !horny && !inStory) hold = `a rapport day: nothing offered unless he asks or starts it${session?.why ? ` (${session.why})` : ''}`;
     else if ((attempts.here >= 1 || attempts.today >= 1) && !asks && !inStory && p.goal !== 'cheaper') hold = `one selling attempt a day${attempts.here ? ', and it was made this conversation' : ', and one went out today'}: the next tomorrow, unless he asks (A7)`;
   }
+  // a steer with nothing to steer to (deep dive): when the warm-up, a pause or the cadence blocks the PPV, the reply winds down instead
+  if (p.goal === 'steer_to_sale' && (hold || noOffer)) goal('wind_down', 'His free talk is used up and nothing can be offered right now: keep it short and warm, she has to go soon; no promise of anything', `${profile.budget.used} of ${limit} free messages used, and ${hold || noOffer}`, ['Q28', 'Q29']);
   // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b); the approach this time (D2)
   const tw = session?.tw || null;
   if (aim === 'short' && !['offer', 'lead_story'].includes(p.goal)) p.short = 'a time waster at the bottom: friendly, short, nothing for free (Q19b)';
@@ -270,7 +273,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   if (p.sell.allowed) {
     const offered = (taste?.sent || []).filter(s => s.id).map(s => ({ id: s.id }));
     if (p.goal === 'first_offer' || (stage && asks)) {
-      const probe = Sl.probeFor(content, { match, avoid: offered.map(o => o.id) });
+      const probe = Sl.probeFor(content, { match: match?.full?.length ? match : asked, avoid: offered.map(o => o.id) });
       if (probe.items.length) p.offer = { items: probe.items, prices: Object.fromEntries(probe.items.map(it => [it.id, it.probe_price])), why: probe.why, caption: probe.caption, probe: true };
     }
     else if (match?.full.length) p.offer = { items: match.full.slice(0, 3), why: `he asked for ${match.wants.join(' + ')}` };
@@ -283,9 +286,10 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     }
     if (profile.avg_price) p.price_hint = `he usually pays about $${profile.avg_price}: stay close to that, slightly above (Q23)`;
     if (p.offer?.probe) p.price_hint = 'the probe price for a first sale, by how explicit it is: a tease $30, nude $40, explicit $50 (the price is set per item below)';
-    // a tip with a request (D1): the tip pays for it, in full or in part
-    if (tip?.amount > 0 && p.offer?.items && !p.offer.probe) {
-      p.offer.prices = Object.fromEntries(p.offer.items.map(it => [it.id, Math.max(0, Math.round(Number(it.price) - tip.amount))]));
+    // a tip with a request (D1): the tip pays for it, in full or in part (a new subscriber's probe price too)
+    if (tip?.amount > 0 && p.offer?.items) {
+      const base = p.offer.prices || {};
+      p.offer.prices = Object.fromEntries(p.offer.items.map(it => [it.id, Math.max(0, Math.round(Number(base[it.id] ?? it.price) - tip.amount))]));
       const covered = p.offer.items.some(it => p.offer.prices[it.id] === 0);
       p.price_hint = covered ? `his $${tip.amount} tip covers it: send it for free, as a thank-you (D1)` : `his $${tip.amount} tip counts: the list price minus the tip (set per item below) (D1)`;
     }
@@ -298,6 +302,12 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     // a buyer back after two weeks or more: one piece at 30% off, once (A6)
     if (aim === 'win_back') { p.price_hint = 'a win-back discount: this one piece at 30% off, as a personal welcome back; never again this month (A6)'; p.lowest_share = 0.7; }
     if (profile.time_waster) p.price_hint = 'the cheapest piece that fits, a bit pushier than usual: he has had his free talk (E5)';
+    // a price a rule sets is set in code (deep dive): the writer never picks the number
+    if (p.offer?.items && !p.offer.prices) {
+      const share = rp?.on ? Math.max(0.3, 1 - rp.tip / rp.total) : aim === 'win_back' ? 0.7
+        : profile.tier === 'whale' && aim === 'sell' && (profile.days_since_buy == null || profile.days_since_buy >= 14) ? 0.85 : null;
+      if (share != null) p.offer.prices = Object.fromEntries(p.offer.items.map(it => [it.id, Math.max(1, Math.round(Number(it.price) * share))]));
+    }
   }
   // a tip with no request (D1): thank him; free sexting if he's in the mood; the first story steps on him
   if (tip?.amount > 0 && !p.offer?.items && session?.credit) p.tip_note = `He tipped $${tip.amount} with no request: thank him warmly and make it count. If he's in the mood, sext with him for free${session.credit.steps ? `, and the first ${session.credit.steps === 1 ? 'step' : `${session.credit.steps} steps`} of your set go${session.credit.steps === 1 ? 'es' : ''} free, on his tip` : ''}; nothing else is promised (D1).`;

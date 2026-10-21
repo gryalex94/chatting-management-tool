@@ -530,6 +530,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='font-medium'>This conversation: {session.aim.replace(/_/g, ' ')}</span>
           <span className='text-muted-foreground'>{session.aim_text}. Because {session.why}.</span>
           {session.no_sell && <span className='text-warn'>{session.no_sell}.</span>}
+          {session.hot && <span className='text-muted-foreground'>Sexting flow on: his short replies keep it going until he cools it, changes the subject, or goes dry.</span>}
           {session.cadence && <span className='text-muted-foreground'>Sell attempts: {session.cadence.text}; {session.cadence.due ? 'one is due today' : `the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}`}.</span>}
           {session.pause && <span className='text-warn'>After his big spend: {session.pause.why}.</span>}
           {session.taste_text && <span className='text-muted-foreground'>His taste: {session.taste_text}.</span>}

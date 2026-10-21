@@ -179,12 +179,13 @@ const CONCEPTS = [
   ['a toy', /\b(?:toy|toys|dildo|vibrator|plug)\b/i, it => has(it, 'dildo', 'vibrator', 'plug', 'sex toy') || (it.seen?.objects || []).some(o => /toy|dildo|vibrator/.test(o))],
   ['the shower or bath', /\b(?:shower|bath|bathtub|tub)\b/i, it => has(it, 'shower', 'bath')],
   ['a video', /\b(?:video|vid|vids|clip|movie)\b/i, it => it.kind === 'video' || it.kind === 'bundle'],
-  ['full nudity', /\b(?:nude|naked|everything|all of you|full(?:y)? (?:nude|naked))\b/i, it => ['nude', 'explicit'].includes(it.nudity)],
+  ['full nudity', /\b(?:nudes?|naked|everything|all of you|full(?:y)? (?:nude|naked))\b/i, it => ['nude', 'explicit'].includes(it.nudity)],
   ['lace', /\blace\b/i, it => about(it, 'lace')],
   ['lingerie', /\b(?:lingerie|bra|panties|thong|bodysuit|underwear)\b/i, it => about(it, 'lingerie', 'bra', 'panties', 'thong', 'bodysuit', 'underwear')],
   ['her feet', /\b(?:feet|foot|toes|soles)\b/i, it => about(it, 'feet', 'foot', 'toes', 'soles')],
-  ['her ass', /\b(?:ass|butt|booty|behind)\b/i, it => has(it, 'ass', 'buttock', 'booty')],
-  ['her breasts', /\b(?:tits|boobs|breasts|titties|nipples)\b/i, it => has(it, 'boobs', 'breast', 'nipple')],
+  ['her ass', /\b(?:ass|butt|booty|behind)\b/i, it => has(it, 'ass', 'buttock', 'booty', 'back shot', 'from behind', 'her behind')],
+  // breasts shown (topless or more), or a set that is about them ("cleavage"); a covered lingerie set that mentions them isn't "tits" (deep dive)
+  ['her breasts', /\b(?:tits|boobs|breasts|titties|nipples)\b/i, it => (['topless', 'nude', 'explicit'].includes(it.nudity) && has(it, 'boobs', 'breast', 'nipple', 'tits')) || about(it, 'boobs', 'breasts', 'tits', 'cleavage', 'topless')],
   ['anal', /\b(?:anal|ass ?fuck)\b/i, it => has(it, 'anal')],
   ['oral', /\b(?:blow ?job|bj|oral|suck(?:ing)? (?:a |his )?(?:cock|dick))\b/i, it => has(it, 'oral', 'blowjob', 'fellatio')],
   ['touching herself', /\b(?:touch(?:ing)? (?:yourself|herself)|masturbat\w*|finger(?:ing)?|play(?:ing)? with (?:yourself|herself))\b/i, it => has(it, 'masturbat', 'fingering')],
@@ -206,7 +207,9 @@ function matchRequest(text, items) {
   return { wants: wants.map(([label]) => label), full, close };
 }
 
+/** He asks about the PPV she sent (what's in it, is there X in it, how many, is it a video…), one pattern for the plan and the engine. */
+const ASKS_ABOUT_PPV = /\b(?:what(?:'s| is)?\s+in\s+(?:it|there|that)|is\s+(?:it|that|this|there)\b|does\s+(?:it|that)\b|do\s+(?:it|they)\s+(?:have|show)|any\s+\w+\s+in\s+(?:it|there)|how\s+(?:many|long)|what\s+(?:exactly|kind)|show\s+(?:your\s+)?face)\b/i;
 /** What an item is about, in the fan's own concepts ("a video", "her feet", "full nudity"…): for his taste (selling.js). */
 const conceptsOf = (it) => CONCEPTS.filter(([, , test]) => { try { return test(it); } catch { return false; } }).map(([label]) => label);
 
-module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money, seenText, matchRequest, CONCEPTS, conceptsOf };
+module.exports = { NUDITY, NUDITY_LABEL, STARTER, levelOf, contentText, checkOffer, what, lowest, money, seenText, matchRequest, CONCEPTS, conceptsOf, ASKS_ABOUT_PPV };

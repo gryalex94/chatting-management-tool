@@ -47,7 +47,7 @@ const straight = (s) => String(s || '').replace(/[‘’ʼ`]/g, '\'').replace(/[
  * stop / handover mean no AI writes a reply; review means Claude decides first.
  */
 // politics, religion, war, public figures (fix 5): never an opinion
-const POLITICS = /\b(?:putin|trump|zelensky|zelenskyy|biden|obama|kamala|harris|kim jong|xi jinping|macron|erdogan|netanyahu|musk|israel|palestin\w*|gaza|hamas|ukraine|russia|nato|the war|election|vote for|democrat\w*|republican\w*|liberal\w*|conservative\w*|left.?wing|right.?wing|woke|nazi\w*|hitler|communis\w*|socialis\w*|fascis\w*|religion|religious|god|jesus|christ|allah|muslim\w*|islam\w*|christian\w*|catholic\w*|jew\w*|bible|quran|koran|abortion|immigra\w*|migrants?|feminis\w*|lgbt\w*|trans rights|gun control|second amendment)\b/i;
+const POLITICS = /\b(?:putin|trump|zelensky|zelenskyy|biden|obama|kamala harris|kim jong|xi jinping|macron|erdogan|netanyahu|elon musk|israel|palestin\w*|gaza|hamas|ukraine|russia|nato|the war|election|vote for|democrats?|republicans?|liberals|conservatives|left.?wing|right.?wing|woke|nazis?|hitler|communis\w*|socialis\w*|fascis\w*|religion|religious|believe in god|god is|jesus christ|allah|muslims?|islam\w*|christians?|catholics?|jews|jewish|the bible|quran|koran|abortion|immigrants?|immigration|migrants?|feminis\w*|lgbt\w*|trans rights|gun control|second amendment)\b/i;
 function screenFan(texts) {
   const all = straight(texts.map(t => String(t || '')).join('\n'));
   if (has(MINOR_WORDS, all)) {
@@ -107,9 +107,11 @@ const GREETS = /^\s*(?:he+y+|hi+|hello+)\b/i;
 // How sexual a reply is, roughly (0 friendly … 3 explicit), to hold it to his level.
 // Only suggestive and explicit are held in code; pet names like "babe" are just warmth.
 const EXPLICIT = /\b(?:cock|dick|pussy|cum(?:ming)?|fuck\w*|tits|clit|blowjob|deepthroat|orgasm|naked|nude|horny|strok(?:e|es|ing)\s+(?:it|yourself|your)|jerk\w*\s+(?:it|off)|touch(?:ing)?\s+yourself)\b|🍆|💦/i;
-const SUGGESTIVE = /\b(?:naughty|wet|hard for|strip\w*|undress\w*|lingerie|what i'?m wearing|in bed with|kinky|spicy|turn(?:s|ed)? (?:me|you) on|sexy|dirty)\b|😈|🥵|🍑|👅/i;
+const SUGGESTIVE = /\b(?:naughty|wet|hard for|strip\w*|undress\w*|lingerie|what i'?m wearing|in bed with|kinky|spicy|turn(?:s|ed)? (?:me|you) on|sexy|dirty|what (?:would|will|do|can) (?:you|u) do to me|do to me|want (?:you|u) so bad|(?:i'?m|i am|im|getting|rock|already) hard(?! at\b| work)\b|punish me|spank\w*|moan\w*|ride me|on top of me)\b|😈|🥵|🍑|👅/i;
 const FLIRTY = /\b(?:cutie|handsome|gorgeous|tease|teasing|flirt\w*|kiss\w*|crush)\b|😘|😏|😉|😍/i;
 const replyLevel = (t) => (EXPLICIT.test(t) ? 3 : SUGGESTIVE.test(t) ? 2 : FLIRTY.test(t) ? 1 : 0);
+// unmistakable sexual intent in his own words (deep dive): at least suggestive, whatever the planner read
+const SEXUAL_INTENT = /\b(?:(?:i'?m|i am|im) (?:so |really |very |already |getting |rock )?hard(?! at\b| work)|hard for (?:you|u)|want (?:you|u) so bad|what (?:would|will|do|can) (?:you|u) do to me|what (?:you|u) (?:would|will|could) do to me|do to me|turn(?:s|ed)? me on|(?:i'?m|i am|im) (?:so )?(?:horny|wet)|make me cum|jerk\w* off|strok\w* (?:it|my)|touch\w* myself|punish me|spank me|ride me|on top of me|in bed with (?:you|u)|fuck (?:me|you|u)\b|suck (?:my|me)|my (?:cock|dick)\b(?! rating| review| pic)|your (?:pussy|tits|ass|boobs)\b)\b/i;
 
 // Asking for money outside a PPV: never, selling or not.
 const ASKS_MONEY = /\b(?:send|leave|give|drop)\s+(?:me\s+)?(?:a\s+|some\s+)?tips?\b|\bpay\s+me\b|\b(?:cash\s?app|venmo|paypal|zelle)\b/i;
@@ -266,4 +268,4 @@ function personaProblems(text) {
     : [];
 }
 
-module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, STORY_MOVE, personaProblems, replyLevel, MAX_MESSAGES };
+module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, STORY_MOVE, personaProblems, replyLevel, SEXUAL_INTENT, MAX_MESSAGES };

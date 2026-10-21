@@ -31,7 +31,7 @@ const CONFIRMS = {
 // he can't pay (a price objection, "too expensive", is handled by the plan instead: one cheaper piece, A5)
 const BROKE = /\b(?:no\s+money|broke|can'?t\s+afford|not\s+(?:buying|paying)|payday|next\s+week\s+maybe|skint)\b/i;
 const FREE = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|one|something)|something\s+free|anything\s+free)\b/i;
-const WANTS_TO_BUY = /\b(?:what\s+(?:do\s+you|have\s+you|you)\s+(?:got|have|sell)|(?:send|show)\s+me\s+(?:something|more|what)|i'?ll\s+(?:buy|take|get)\s+it|how\s+much|price|unlock|wanna\s+see\s+(?:more|something)|got\s+(?:anything|something)\s+(?:for\s+me|new|hot|naughty))\b/i;
+const WANTS_TO_BUY = /\b(?:what\s+(?:else\s+)?(?:do\s+you|have\s+you|you|u)\s+(?:got|have|sell)|what\s+else(?:\s+(?:you|u))?\s+(?:got|have)|(?:anything|something)\s+(?:else|more|new)\s+(?:for\s+me|to\s+(?:see|show|buy))|(?:send|show)\s+me\s+(?:something|more|what)|i'?ll\s+(?:buy|take|get)\s+it|how\s+much|price|unlock|wanna\s+see\s+(?:it|them|you|more|something)|(?:can|could)\s+i\s+see|let\s+me\s+see|i\s+want\s+to\s+see|got\s+(?:anything|something)(?:\s+\w+)?\s+(?:for\s+me|new|hot|naughty|good|nice|spicy|fun))\b/i;
 // Her mood of the day (A7): picked from the date, so every fan gets the same Yuna that day.
 const MOODS_OF_DAY = [
   'a bit sleepy and cosy', 'hyper and giggly', 'a lazy, slow mood', 'upbeat, a busy day', 'soft and cuddly', 'playful and a bit cheeky',
@@ -239,7 +239,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     // selling (A1–A7, E5): the cadence, a pause after a big spend, the first-sale path, what was done once
     cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
     pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
-    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false,
+    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false, hot: false,
     taste_text: taste?.text || '', tw,
   };
 }
@@ -272,7 +272,7 @@ function resumeSession(s) {
     pause_lifted: s.pause_lifted === true,
     first_sale: { asked: s.first_sale?.asked === true, held: Math.max(0, Math.round(Number(s.first_sale?.held) || 0)) },
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
-    dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true,
+    dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true, hot: s.hot === true,
     credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,
     taste_text: clean(s.taste_text).slice(0, 300),
     tw: s.tw && Sl.TW_APPROACH[s.tw.kind] ? { kind: s.tw.kind, text: Sl.TW_APPROACH[s.tw.kind], said: s.tw.said === true, why: clean(s.tw.why).slice(0, 120) } : null,
@@ -308,11 +308,17 @@ function nextTurn(session, { read: readIn = 'chatty', said = '', suspicious = fa
   if (!s.no_sell && (NO_SELL.has(read) || suspicious) && !(read === 'annoyed' && !suspicious && Sl.priceObjection(said))) s.no_sell = `he was ${suspicious && !NO_SELL.has(read) ? 'suspicious' : read} earlier in this conversation: no selling for the rest of it (B3)`;
   const change = (aim, why) => { if (s.aim !== aim) { s.changes.push({ aim, why }); s.aim = aim; s.aim_text = AIMS[aim]; s.why = why; } };
   if (FREE.test(said)) { /* a free ask changes nothing: the plan handles it (no freebies) */ }
-  else if (BROKE.test(said) && !timeWaster && s.aim !== 'short') change('rapport', 'he says he can\'t spend now: no pushing');
+  else if (BROKE.test(said) && !timeWaster && s.aim !== 'short') {
+    change('rapport', 'he says he can\'t spend now: no pushing');
+    // nothing offered for the rest of the conversation, horny or not (deep dive); asking himself turns it back on
+    if (!s.no_sell) s.no_sell = 'he said he can\'t spend now: nothing offered for the rest of this conversation unless he asks himself';
+  }
   else if (WANTS_TO_BUY.test(said) && !['short', 'get_to_know', 'first_sale'].includes(s.aim)) {
     change('sell', 'he asks what she has or wants to buy');
     // he asks himself: answering him isn't pushing, so the no-selling rule (B3) doesn't hold him back
     if (s.no_sell) { s.changes.push({ aim: 'sell', why: 'he asked himself, so selling is back on' }); s.no_sell = ''; }
+    // and a sad or annoyed mood that stuck is behind him (deep dive): comforting a man who asks what she has misses him
+    if (s.mood && !HEAVY.has(read)) { s.changes.push({ aim: 'sell', why: `he asks what she has: the ${s.mood} mood is behind him` }); s.mood = null; s.lighter = 0; mood = read; }
   }
   return { session: s, mood };
 }
