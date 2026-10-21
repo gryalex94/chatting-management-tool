@@ -164,12 +164,12 @@ const has = (it, ...words) => {
   const s = it.seen || {};
   const hay = [it.title, said(it.description), ...(it.tags || []), it.focus, it.outfit, it.setting, it.action, ...(s.acts || []), ...(s.objects || []), ...(s.setting || []), ...(s.body || []), ...(s.categories || [])]
     .join(' ').toLowerCase();
-  return words.some(w => hay.includes(w));
+  return words.some(w => (w instanceof RegExp ? w.test(hay) : hay.includes(w)));
 };
 // what an item is about (not every body part that happens to be in a full-body shot)
 const about = (it, ...words) => {
   const hay = [it.title, said(it.description), ...(it.tags || []), it.focus].join(' ').toLowerCase();
-  return words.some(w => hay.includes(w));
+  return words.some(w => (w instanceof RegExp ? w.test(hay) : hay.includes(w)));
 };
 const withMan = (it) => (it.seen?.people || []).some(p => /\b(?:male|man|men|boy)\b/.test(p)) || /\b(?:male partner|a man|with a man|nude man|partner)\b/i.test(it.description || '');
 // he is asking for content, not just mentioning a word (fix 7): "any feet pics?", "show me", "do you have"
@@ -183,7 +183,8 @@ const CONCEPTS = [
   ['lace', /\blace\b/i, it => about(it, 'lace')],
   ['lingerie', /\b(?:lingerie|bra|panties|thong|bodysuit|underwear)\b/i, it => about(it, 'lingerie', 'bra', 'panties', 'thong', 'bodysuit', 'underwear')],
   ['her feet', /\b(?:feet|foot|toes|soles)\b/i, it => about(it, 'feet', 'foot', 'toes', 'soles')],
-  ['her ass', /\b(?:ass|butt|booty|behind)\b/i, it => has(it, 'ass', 'buttock', 'booty', 'back shot', 'from behind', 'her behind')],
+  // from her own words for the piece, whole words only (deep dive): the platform's body tags put "ass" on every full-body shot, even a dressed one
+  ['her ass', /\b(?:ass|butt|booty|behind)\b/i, it => about(it, /\bass(?:es)?\b|\bbutt(?:ocks?)?\b|\bbooty\b|\bback ?shots?\b|\bfrom behind\b|\bher behind\b/)],
   // breasts shown (topless or more), or a set that is about them ("cleavage"); a covered lingerie set that mentions them isn't "tits" (deep dive)
   ['her breasts', /\b(?:tits|boobs|breasts|titties|nipples)\b/i, it => (['topless', 'nude', 'explicit'].includes(it.nudity) && has(it, 'boobs', 'breast', 'nipple', 'tits')) || about(it, 'boobs', 'breasts', 'tits', 'cleavage', 'topless')],
   ['anal', /\b(?:anal|ass ?fuck)\b/i, it => has(it, 'anal')],
