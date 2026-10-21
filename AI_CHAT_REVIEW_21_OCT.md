@@ -103,3 +103,5 @@ My recommendation: fix the rules in section 2 first (they are model-independent 
 8. The first-sale path pausing on hostility and dryness.
 9. Claude's fixes kept out of selling moments.
 10. A blind test on talk moments with Mistral, Haiku 5.5 and Sonnet 5.5, judged by you.
+11. Subscriptions out of "spent": the map, Practice and the writer should see PPV and tip money only, with the subscription shown separately ("subscribed today, nothing bought yet").
+12. A first-reply goal for a brand-new subscriber: welcome him, glad he found her, one question about what brought him here; no "how about you", and her moment of the day waits for the next reply.
