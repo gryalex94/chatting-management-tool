@@ -17,10 +17,74 @@ const { eventFits, WANTS_TO_BUY } = require('./session');
 const { seenText } = require('./notes');
 const { ASKS_ABOUT_PPV } = require('./content');
 const Sl = require('./selling');
+const G = require('./gauges');
 
 const clean = (s) => String(s ?? '').trim();
 const DAY = 86400_000;
 const LEVEL_WORD = ['friendly', 'flirty', 'suggestive', 'explicit'];
+// the stance the reader suggests (step 2), as the writer reads it
+const STANCE_TEXT = {
+  steady: 'steady and warm', curious: 'curious: you want to know more before anything else', playful: 'playful: tease it, don\'t take it too seriously',
+  match: 'match him: he set the tone, go with it', deflect: 'deflect lightly: don\'t take the bait, move it somewhere better', comfort: 'gentle: he needs care more than fun', firm: 'firm but kind: a clear boundary, no lecture',
+};
+// the beats of a reply (engine v2, step 4): what it does, in order, like a person's message (one to three things)
+const BEATS = {
+  welcome_new: ['welcome him, glad he found you', 'react to what he wrote', 'one question: what brought him here or what he is into'],
+  curious: ['react to what he just said', 'one real question about it'],
+  share: ['react to what he said', 'a small real thing of yours that fits'],
+  chat: ['react to what he said with real interest'],
+  get_to_know: ['react to what he said', 'one easy question about him'],
+  flirt: ['react to what he said', 'a playful compliment or a light tease'],
+  sexy_vibe: ['react, in a suggestive vibe', 'hint and tease; ask for nothing'],
+  tease: ['say yes playfully', 'tease: hint, don\'t describe yet'],
+  lead_story: ['the next story move: what you do now', 'tease him into the next'],
+  direct_ask: ['one playful line', 'the one question: what he would like to see of you, or whether he is alone and wants to see something'],
+  first_offer: ['say yes, tease what you have', 'attach the piece, with a teasing caption'],
+  offer: ['say yes, tease what you have', 'attach the piece, in your own words'],
+  steer_to_sale: ['react to what he said', 'steer lightly toward what you have'],
+  readiness_check: ['tease what you have', 'the one question: is he alone, is he ready'],
+  comfort: ['acknowledge what he said, warmly', 'one caring question, or just be there'],
+  reassure: ['take it lightly', 'reassure him it is really you, in your style'],
+  calm: ['stay calm and warm', 'move on to something easier'],
+  ease_off: ['ease off: back to normal, friendly talk'],
+  after_buy: ['react to his buy', 'keep the mood going; tease the next step if he is warm'],
+  goodbye: ['say goodbye warmly', 'a hook for next time'],
+  dry_ask: ['one real question, or a concrete topic of yours'],
+  dry_bye: ['a short, warm sign-off'],
+  wind_down: ['react to what he said', 'wrap up warmly: you have to go soon'],
+  answer_ppv: ['answer what he asked about the PPV, truthfully', 'tease it'],
+  point_to_ppv: ['point him to the PPV waiting for him, playfully'],
+  cheaper: ['take the objection lightly', 'one cheaper piece, attached'],
+  why_not: ['no pressure', 'one easy question: why he passed'],
+  welcome_back: ['show you are glad he is back', 'pick up, call back, or a fresh opener'],
+  follow_up: ['one short, light message to get him talking again'],
+  honest_no: ['say plainly you don\'t have that exactly', 'ask what exactly he\'d want, or offer the closest'],
+  custom_content: ['curious and open about what he wants', 'promise nothing'],
+  no_freebies: ['friendly but short', 'nothing for free'],
+  roleplay: ['play your part in the scene, one step on', 'keep him in it'],
+};
+// a second beat from the runner-up move, when it fits with the first (never two questions, never a tease with comfort)
+const RUNNER_BEAT = { share: 'a small real thing of yours that fits', flirt: 'a light flirt', tease: 'a tease, hinting', curious: 'one question about what he said', get_to_know: 'one easy question about him', react: null, offer: null, steer: null, readiness_check: null, comfort: null, reassure: null };
+function beatsFor(p) {
+  const base = [...(BEATS[p.goal] || ['react to what he said'])];
+  if (p.goal === 'curious' && p.reading?.curious) base[1] = `one real question about it: "${p.reading.curious}"`;
+  const asksAlready = /question/.test(base.join(' '));
+  const best = p.scores?.find(x => x.allowed) || null;
+  const runner = p.scores?.filter(x => x.allowed && x.move !== best?.move)[0] || null;
+  if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
+    && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
+  if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  return base.slice(0, 3);
+}
+// how alike two short texts are (the questions she already asked): shared words over the longer one
+const overlap = (a, b) => {
+  const w = (t) => new Set(String(t || '').toLowerCase().match(/[\p{L}\p{N}']{3,}/gu) || []);
+  const x = w(a), y = w(b);
+  if (!x.size || !y.size) return 0;
+  let k = 0;
+  for (const t of x) if (y.has(t)) k += 1;
+  return k / Math.max(x.size, y.size);
+};
 
 // Spender tiers as in the 35k analysis (spent on PPVs and tips in 90 days), halved
 // for small pages (under $2,000 a month): Q17, Q17b.
@@ -73,7 +137,7 @@ function fanProfile({ money = null, type = null, chat = [], ids = [], mood = '',
   if (override.tier && TIER_LABEL[override.tier]) tier = override.tier;
   const bars = `whale $${TIER_BARS.whale * k}+, spender $${TIER_BARS.spender * k}+ in 90 days${small ? ' (halved: a small page)' : ''}`;
   // doubt is a moment, not a state (fix 2): his latest message(s), or the planner's read of them
-  const suspicious = mood === 'suspicious' || SUSPICIOUS.test(latest.join(' '));
+  const suspicious = SUSPICIOUS.test(latest.join(' ')) || (mood === 'suspicious' && /\b(?:bot|real|fake|scam\w*|ai|catfish\w*|robot|human|chatgpt)\b/i.test(latest.join(' ')));
   // how close they are (Q16): a mix of signals, each with its points (memory.js); what if: as you set it
   const close = closenessOf({ chat, card, tier, bond, now });
   if (override.closeness && CLOSENESS.includes(override.closeness)) Object.assign(close, { level: override.closeness, tone: TONE[override.closeness], what_if: true });
@@ -125,7 +189,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -152,9 +216,35 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   p.budget = { used: profile.budget.used, limit };
   const noSteer = ['rapport', 'win_back', 'get_to_know', 'read', 'first_sale'].includes(aim);
   p.first_sale = stage || null;
+  // the reading (step 2): what he is doing, what is new, what it could mean, what she'd want to ask (not twice)
+  const askedBefore = (q) => (session?.asked_about || []).some(a => overlap(a, q) >= 0.6);
+  // politics, religion, a public figure (fix 5): the non-answer is the answer, nothing to be curious about
+  p.reading = reading ? { doing: reading.doing, new: politics ? '' : reading.new, readings: politics ? [] : reading.readings.filter(r => r.sure < 0.85), curious: reading.curious && !politics && !askedBefore(reading.curious) ? reading.curious : '', stance: politics ? 'deflect' : reading.stance } : null;
   const goal = (g, text, why, rules = []) => { p.goal = g; p.goal_text = text; p.why = why; p.rules.push(...rules); };
   const leaving = !followUp && (GOODBYE.test(said) || ids.includes('leaving_soon'));
   const back = !followUp && away >= 2 * DAY_MS && herReplies === 0;
+
+  // the cadence, a pause after a big spend, one attempt a day (E5, A7, A4): unless he asks or gets sexual.
+  // What would hold a PPV back if the reply's goal were `g` (the soft slot asks about an offer before choosing it)
+  const holdFor = (g) => {
+    let hold = '';
+    const inStory = !!(sexting?.on && sexting.next) || !!rp?.on;   // her sexting set, or a roleplay he paid for: the cadence doesn't hold her
+    const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
+    const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
+    // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
+    if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(g)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
+    else if (g === 'after_buy') {
+      if (!warmNow) hold = 'he\'s cooling off after the buy: no second offer (A4)';
+      else if (attempts.here >= 2) hold = 'one more at most after a buy, and it was made (A4)';
+      else if (session?.pause && !veryHorny && !asks) hold = session.pause.why;
+    } else if (!['offer', 'first_offer', 'cheaper', 'lead_story'].includes(g) || !asks) {
+      if (session?.pause && !asks && !veryHorny) hold = session.pause.why;
+      else if (aim === 'read' && session?.cadence && !asks && !horny && !inStory) hold = session.cadence.every === 'tw' ? `a time waster, the approach this time: ${session.tw?.text || 'short and sweet'}; nothing offered unless he asks or gets sexual (D2)` : `no planned attempt today (${session.cadence.text} with him; the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}): a PPV only if he asks or gets sexual (E5)`;
+      else if (aim === 'rapport' && !asks && !horny && !inStory) hold = `a rapport day: nothing offered unless he asks or starts it${session?.why ? ` (${session.why})` : ''}`;
+      else if ((attempts.here >= 1 || attempts.today >= 1) && !asks && !inStory && g !== 'cheaper') hold = `one selling attempt a day${attempts.here ? ', and it was made this conversation' : ', and one went out today'}: the next tomorrow, unless he asks (A7)`;
+    }
+    return hold;
+  };
 
   // 1. the goal of this reply
   if (followUp && aim === 'short') goal('follow_up', 'He went quiet, and he\'s a time waster at the bottom: no chasing; if you must write, one dry, friendly line', 'he hasn\'t answered, and he gets no follow-ups (Q19b)', ['Q6e-2', 'Q19b']);
@@ -223,6 +313,31 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   else if (profile.new_sub) goal('get_to_know', 'Get to know him: welcome him, react to what he says', 'a new subscriber', ['Q21']);
   else goal('chat', 'Keep him talking: real interest in what he said, a small story of hers, or a new topic', 'small talk', ['Q5', 'Q5b']);
 
+  // the soft slot (engine v2, step 3): where the ladder only says "talk" (chat, get to know, flirt, tease,
+  // steer, the readiness check), the meters score every move her reply could make and the best one wins.
+  // The hard rules above and the holds below stay as they are: the meters never override them.
+  p.gauges = gauges || null; p.gauge_changes = gaugeChanges || []; p.scores = null;
+  if (gauges && G.SOFT_GOALS.has(p.goal) && !followUp) {
+    const stageNow = stage && ['vibe', 'flirt', 'sexy'].includes(stage.stage) ? stage.stage : null;
+    const sellOk = sell && !noOffer && !holdFor('offer');
+    const allowed = {
+      ask: !voice?.noQuestion, flirt: level.max >= 1 || ['flirty', 'intimate', 'girlfriend'].includes(profile.closeness) || ['flirt', 'sexy'].includes(stageNow),
+      tease: level.max >= 2 || stageNow === 'sexy', sell: sellOk, steer: sell && !noOffer && !holdFor('steer_to_sale'), check: sellOk && aim === 'sell' && !session?.asked_ready && !profile.time_waster,
+    };
+    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, rand });
+    p.scores = ranked.map(x => ({ move: x.move, score: x.score, allowed: x.allowed, why: x.why }));
+    // the ladder's goal is the incumbent: another move has to beat it clearly (or the incumbent isn't allowed)
+    const best = ranked.find(x => x.allowed);
+    const incumbent = ranked.find(x => x.goal === p.goal) || null;
+    if (best && best.goal !== p.goal && (!incumbent?.allowed || best.score >= incumbent.score + 8)) {
+      const soft = best.goal === 'tease' && level.his < 2;   // he is only flirty: she turns the heat up a notch, he didn't "get sexual"
+      const name = soft && stageNow === 'sexy' ? 'sexy_vibe' : best.goal;
+      const text = best.goal === 'curious' && p.reading?.curious ? `React to what he just said, then one real question about it ("${p.reading.curious}"); nothing sold with it`
+        : soft ? (stageNow ? stage.text : 'Turn the heat up a notch: suggestive, teasing, hinting; nothing asked for, nothing sold')
+        : stageNow && ['flirt', 'tease', 'get_to_know'].includes(best.goal) ? `${stage.text}. ${best.text}` : best.text;
+      goal(name, text, `the meters: ${best.why} (${G.gaugeText(gauges)})`, ['M1', ...(stageNow ? ['A1'] : [])]);
+    }
+  }
   // a service offered and not paid yet: nothing is delivered before his tip (D2)
   p.tip_first = svc?.state === 'offered' && p.goal !== 'service_offer' ? `You've named $${svc.price} for ${svc.label.toLowerCase()} and he hasn't tipped yet: don't deliver any of it; if he brings it up, remind him lightly that the tip comes first.` : '';
   // 2. selling: may a PPV go with this reply?
@@ -237,25 +352,9 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     why_not: 'he didn\'t take the last one: find out why first; the next attempt comes next conversation (B5)', readiness_check: 'the check comes first, the offer after it (E5)',
     flirt: 'the first-sale path: the flirting stage, nothing sold yet (A1)', sexy_vibe: 'the first-sale path: the sexy vibe, no PPV yet (A1)', direct_ask: 'the first-sale path: the ask first, the offer with his answer (A1)',
     get_to_know: stage ? 'the first-sale path: stay with his vibe first (A1)' : null,
-    welcome_new: 'his very first message: welcome him, nothing sold (fix 12)', dry_ask: 'he\'s gone dry: one real question, nothing sold (fix 1)', dry_bye: 'a sign-off, nothing sold (fix 1)', no_reply: 'no reply at all (fix 1)',
+    welcome_new: 'his very first message: welcome him, nothing sold (fix 12)', curious: 'she asks first: nothing sold with a question like this (R2)', share: 'she shares something of hers: nothing sold in the same breath (M1)', dry_ask: 'he\'s gone dry: one real question, nothing sold (fix 1)', dry_bye: 'a sign-off, nothing sold (fix 1)', no_reply: 'no reply at all (fix 1)',
   }[p.goal];
-  // the cadence, a pause after a big spend, one attempt a day (E5, A7, A4): unless he asks or gets sexual
-  let hold = '';
-  const inStory = !!(sexting?.on && sexting.next) || !!rp?.on;   // her sexting set, or a roleplay he paid for: the cadence doesn't hold her
-  const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
-  const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
-  // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
-  if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(p.goal)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
-  else if (p.goal === 'after_buy') {
-    if (!warmNow) hold = 'he\'s cooling off after the buy: no second offer (A4)';
-    else if (attempts.here >= 2) hold = 'one more at most after a buy, and it was made (A4)';
-    else if (session?.pause && !veryHorny && !asks) hold = session.pause.why;
-  } else if (!['offer', 'first_offer', 'cheaper', 'lead_story'].includes(p.goal) || !asks) {
-    if (session?.pause && !asks && !veryHorny) hold = session.pause.why;
-    else if (aim === 'read' && session?.cadence && !asks && !horny && !inStory) hold = session.cadence.every === 'tw' ? `a time waster, the approach this time: ${session.tw?.text || 'short and sweet'}; nothing offered unless he asks or gets sexual (D2)` : `no planned attempt today (${session.cadence.text} with him; the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}): a PPV only if he asks or gets sexual (E5)`;
-    else if (aim === 'rapport' && !asks && !horny && !inStory) hold = `a rapport day: nothing offered unless he asks or starts it${session?.why ? ` (${session.why})` : ''}`;
-    else if ((attempts.here >= 1 || attempts.today >= 1) && !asks && !inStory && p.goal !== 'cheaper') hold = `one selling attempt a day${attempts.here ? ', and it was made this conversation' : ', and one went out today'}: the next tomorrow, unless he asks (A7)`;
-  }
+  let hold = holdFor(p.goal);
   // a steer with nothing to steer to (deep dive): when the warm-up, a pause or the cadence blocks the PPV, the reply winds down instead
   if (p.goal === 'steer_to_sale' && (hold || noOffer)) goal('wind_down', 'His free talk is used up and nothing can be offered right now: keep it short and warm, she has to go soon; no promise of anything', `${profile.budget.used} of ${limit} free messages used, and ${hold || noOffer}`, ['Q28', 'Q29']);
   // a time waster: short replies (Q19); one at the bottom: shorter still (Q19b); the approach this time (D2)
@@ -322,14 +421,14 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     lead_story: 'she leads the story instead', tease: 'he said what he wants: play along', offer: 'he asked: say yes', point_to_ppv: 'no question, just point him to it',
     service_deliver: 'she delivers, no question', refuse: 'a light no, then on to something else', request_refused: 'a light no, then on to something else',
     goodbye: ['keep_ppv', 'mid_sexting'].includes(p.bye) ? null : 'he\'s leaving: no question to hold him',
-    dry_bye: 'a sign-off: no question (fix 1)',
+    dry_bye: 'a sign-off: no question (fix 1)', share: 'she shares, no question (M1)',
   }[p.goal];
   // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
-  const answerable = DIRECT_Q.test(said) && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
+  const answerable = DIRECT_Q.test(said) && !politics && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
   p.answer_first = answerable ? `He asked you something ("${said.slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
-    : ['direct_ask', 'readiness_check', 'why_not'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)' }[p.goal] }
+    : ['direct_ask', 'readiness_check', 'why_not', 'curious'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)', curious: 'the one question: what she wants to know (R2)' }[p.goal] }
     : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal } : { allowed: true, why: 'one at most (Q5)' };
 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
@@ -397,6 +496,9 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // his taste (A3): what he bought and how he took it, and what he says he's into
   p.taste = taste && (taste.sent.length || taste.dislikes.length || taste.only.length) ? taste.text : '';
 
+  // the beats (step 4): what this reply does, in order; and what is still open about him from earlier readings
+  p.beats = beatsFor(p);
+  p.open = (session?.open || []).filter(o => !(p.reading?.readings || []).some(r => overlap(r.what, o.what) >= 0.5)).slice(0, 3);
   // 7. the story move, when they sext
   p.story = sexting?.on && sexting.moves?.moves?.length ? { move: sexting.moves.moves[0], why: `the next move for ${sexting.moves.where}` } : null;
   p.rules = [...new Set(p.rules)];
@@ -406,6 +508,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
 /** The plan as the writer reads it. */
 function planText(p) {
   const lines = [`Goal: ${p.goal_text}.`];
+  if (p.beats?.length) lines.push(`This reply, in order: ${p.beats.map((b, i) => `${i + 1}) ${b}`).join('; ')}. Nothing more than that: a person does one or two things in a message, not everything at once.`);
   if (p.aim_text) lines.push(`Today's plan for him: ${p.aim_text}.`);
   if (p.request?.kind === 'refuse') lines.push('Never explain the rules or lecture him: one light line ("that\'s not my thing, babe") and move on to something you do.');
   if (p.answer_first) lines.push(`${p.answer_first}.`);
@@ -413,6 +516,11 @@ function planText(p) {
   if (p.tip_note) lines.push(p.tip_note);
   if (p.honest) lines.push(p.honest);
   if (p.hour_note) lines.push(p.hour_note);
+  if (p.reading?.new) lines.push(`What's new in his message: ${p.reading.new}. Pick up on it; don't skate past it.`);
+  if (p.reading?.readings?.length) lines.push(`You're not sure what he means: ${p.reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}% sure)`).join('; ')}. Don't assume; ask lightly or tease around it.`);
+  if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
+  if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
+  if (p.open?.length) lines.push(`Still open about him from earlier: ${p.open.map(o => `${o.what} (${Math.round(o.sure * 100)}% sure)`).join('; ')}. Keep it in mind; don't assume either way.`);
   if (p.touch) lines.push(`Also, in passing: ${p.touch.text}.`);
   if (p.media?.failed) lines.push(`His ${p.media.video ? 'video' : 'photo'} wouldn't load for you: say so playfully and ask what it is; don't pretend you saw it.`);
   else if (p.media) lines.push(`He sent ${p.media.text}. React to one specific thing you see in it (${p.media.details.slice(0, 3).map(d => `"${d}"`).join(', ') || 'a real detail'}), so he knows you looked${p.media.sexual === 'none' ? '; a question about it is fine if you ask one' : ''}.`);

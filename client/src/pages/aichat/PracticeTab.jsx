@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, Coins, FolderOpen, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, Star, Trash2, UserRoundPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -18,6 +18,8 @@ import DecisionMap from './DecisionMap';
 import ClaudeScore from './ClaudeScore';
 
 const MADE_UP = 'made-up';
+// the meters of a conversation (engine v2): what each gauge means in two words
+const METERS = [['heat', 'His heat'], ['mood', 'His mood'], ['rapport', 'Rapport'], ['readiness', 'Ready to pay'], ['doubt', 'Doubt'], ['engagement', 'Engagement'], ['surprise', 'Surprise']];
 const clean = (s) => String(s ?? '').trim();
 const STATUS = {
   ok: { label: 'Passed the checks', tone: 'border-good/40 text-good' },
@@ -615,6 +617,17 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='font-medium'>This conversation: {session.aim.replace(/_/g, ' ')}</span>
           <span className='text-muted-foreground'>{session.aim_text}. Because {session.why}.</span>
           {session.no_sell && <span className='text-warn'>{session.no_sell}.</span>}
+          {session.gauges && (
+            <div className='mt-1 grid grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-0.5' aria-label='The meters'>
+              {METERS.map(([k, label]) => (
+                <Fragment key={k}>
+                  <span className='text-[11px] text-muted-foreground'>{label}</span>
+                  <span className='h-1.5 overflow-hidden rounded bg-muted'><span className={cn('block h-1.5 rounded', k === 'doubt' ? 'bg-warn' : 'bg-primary')} style={{ width: `${session.gauges[k]}%` }} /></span>
+                  <span className='text-[11px] tabular-nums text-muted-foreground'>{session.gauges[k]}</span>
+                </Fragment>
+              ))}
+            </div>
+          )}
           {session.hot && <span className='text-muted-foreground'>Sexting flow on: his short replies keep it going until he cools it, changes the subject, or goes dry.</span>}
           {session.cadence && <span className='text-muted-foreground'>Sell attempts: {session.cadence.text}; {session.cadence.due ? 'one is due today' : `the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}`}.</span>}
           {session.pause && <span className='text-warn'>After his big spend: {session.pause.why}.</span>}

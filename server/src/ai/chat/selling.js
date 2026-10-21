@@ -103,12 +103,12 @@ function firstSaleStage({ herHere = 0, direct = false, hisLevel = 0, since = 0, 
   if (offered) return { stage: 'done', text: 'The first offer is out: nothing more this conversation unless he buys it', why: 'the probe offer was made (A1)' };
   if (direct) return { stage: 'offer', text: 'He said exactly what he wants: say yes and offer it now, at the probe price', why: 'a direct fan skips the stages (A1)' };
   if (asked) return { stage: 'offer', text: 'He answered what he wants: the probe offer now, matched to his answer', why: 'the direct ask is done (A1)' };
-  if (hisLevel >= 2) {
+  let stage = 'vibe';
+  for (const [k, from] of STAGES) if (herHere >= from) stage = k;
+  if (hisLevel >= 2 && stage !== 'ask') {
     if (since >= 3) return { stage: 'ask', text: STAGE_TEXT.ask, why: `he got sexual himself and they've had ${since} of her replies in that vibe: time to ask (A1)` };
     return { stage: 'sexy', text: STAGE_TEXT.sexy, why: `he got sexual himself: the sexy vibe, the direct ask after about 3 of her replies (${since} so far) (A1)` };
   }
-  let stage = 'vibe';
-  for (const [k, from] of STAGES) if (herHere >= from) stage = k;
   const next = STAGES[STAGES.findIndex(([k]) => k === stage) + 1];
   return { stage, text: STAGE_TEXT[stage], why: `her message ${herHere + 1} of this conversation${next ? `; ${next[0] === 'ask' ? 'the direct ask' : `the ${next[0]} stage`} from her message ${next[1] + 1}` : ''} (A1)` };
 }

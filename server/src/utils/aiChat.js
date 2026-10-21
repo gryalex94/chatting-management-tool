@@ -34,9 +34,12 @@ const Mem = require('../ai/chat/memory');
 const S = require('../ai/chat/session');
 const Sl = require('../ai/chat/selling');
 const Sc = require('../ai/chat/schedule');
+const G = require('../ai/chat/gauges');
 
 // Picks which Playbook situations fit a moment: small, quick and cheap.
 const PICKER = 'mistralai/ministral-8b-2512';
+// the reader (engine v2, step 2): Claude reads the human side of the moment; the picker is the fallback
+const READER = process.env.AI_CHAT_READER || 'claude-haiku-5-5';
 
 const NOT_READY = 'Run database change 036 (AI chat) in Supabase first';
 const LONG_CHAT = 100;                 // over this many messages, the writer reads the last 40 and the story so far
@@ -1038,7 +1041,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const askedHere = sell && first.new_sub && !taste.bought && !match?.full?.length ? C.matchRequest(hisHere, content) : null;
   const direct = first.new_sub && !taste.bought && (asksNow || (herHere <= 2 && !!askedHere?.full?.length));
   // a time waster's attempt fits his short free talk (E5): the warm-up floor shrinks to 3 of her messages
-  const { plan, level, library, phase, sales } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: asksNow ? (first.new_sub ? 1 : 0) : first.time_waster ? Math.min(session.warm_up, 3) : session.warm_up, herHere });
+  const { plan, level, library, phase, sales, reading, reader } = await briefing({ orgId, creatorId, fanUuid, persona, chat: win.messages, money, extraIds: type?.situation ? [type.situation] : [], selling: sell, override: whatIf, notes: checkable.map(f => f.text), warmUp: asksNow ? (first.new_sub ? 1 : 0) : first.time_waster ? Math.min(session.warm_up, 3) : session.warm_up, herHere });
   if (attempts.here > 0 && !level.warm) level.warm = true;              // a PPV already went this conversation: the warm-up is behind them
   // a sad or annoyed mood sticks (B4); no selling for the rest of a conversation he was sad, annoyed or suspicious in (B3)
   // "very actively horny" (A7) is judged from his own words in code, not the planner's read of the moment
@@ -1054,6 +1057,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match });
   };
   const saidNow = latest.join(' ');
+  if (reading && !reading.odd && ODD_LINE.test(saidNow)) reading.odd = true;   // the reader missed it: by rule, an odd line
   if (level.his >= 2 && NOT_SEXUAL.test(saidNow) && replyLevel(saidNow) === 0) { level.his = 0; relevel(); }
   if (level.his < 2 && SEXUAL_INTENT.test(saidNow)) { level.his = 2; relevel(); }   // his own words are unmistakable: at least suggestive
   // the planner's read of his level is checked against his own words (deep dive): a short message with nothing sexual
@@ -1073,7 +1077,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // her replies (turns), not her messages: a reply of two messages is still one exchange (deep dive)
   const herTurns = herReplies(convo.slice(talk.start)).length;
   const progress = Math.max(0, herTurns - (session.first_sale?.held || 0));
-  const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: level.his, since: level.since, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
+  // her replies since he first got sexual, by the checked level (the reader's read counts, not only the word list)
+  // (an odd line, about other men or a provocation, isn't him getting sexual with her: the path keeps its count)
+  if (level.his >= 2 && session.hot_at == null && !reading?.odd) session = { ...session, hot_at: herTurns };
+  const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0);
+  const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: reading?.odd ? Math.min(level.his, 1) : level.his, since: sinceHot, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
   if (stage?.stage === 'offer' && !level.warm) level.warm = true;       // the path says: offer now
   // paid requests, refusals and unusual asks (services.js, D1–D9), and what they change in the session
   const services = Sv.servicesOf(persona.settings);
@@ -1149,12 +1157,20 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const hook = Mem.hookFor({ card, now, timeZone });
   const clash = plan.contradicts ? checkable[plan.contradicts - 1] : null;
   const hisBefore = here.slice(0, Math.max(0, here.length - latest.length)).filter(m => m.from_fan).map(m => m.text).join(' ');
+  // the meters (engine v2, step 3): moved by the numbers and the reading, kept in the session
+  const gauged = G.updateGauges(session.gauges || G.startGauges({ profile: first }), {
+    level, reading, profile: first, session, dry, asks: asksNow, tip: latestTip > 0, nWords, question: /\?/.test(saidNow), media: latestSeen.length > 0, cools,
+    suspicious: first.suspicious, broke: S.BROKE.test(saidNow), objection: Sl.priceObjection(saidNow), bought: waiting?.p?.status === 'bought' && !waiting.herAfter,
+    notBought: waiting?.p?.status === 'not_bought' && !waiting.herAfter, followUp: !!followUp, leaving: Plan.GOODBYE.test(saidNow),
+  });
+  session = { ...session, gauges: gauged.gauges };
   const replyPlan = Plan.planReply({
     level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
-    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere,
+    content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
+    gauges: gauged.gauges, gaugeChanges: gauged.changes,
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
@@ -1168,6 +1184,18 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     if (replyPlan.touch?.kind === 'still_thinking' && session.pending) session.pending.again = false;
     if (replyPlan.honest && session.tw) session.tw = { ...session.tw, said: true };
     if (replyPlan.goal === 'dry_ask') session.dry_asked = true;
+    if (replyPlan.reading?.curious && replyPlan.ask.allowed) session.asked_about = [...(session.asked_about || []), replyPlan.reading.curious].slice(-10);
+    // what is still open about him (step 4): readings that aren't settled stay for a few turns; a sure one closes its question
+    if (reading) {
+      const alike = (a, b) => { const w = (t) => new Set(String(t).toLowerCase().match(/[\p{L}\p{N}']{3,}/gu) || []); const x = w(a), y = w(b); let k = 0; for (const t of x) if (y.has(t)) k += 1; return x.size && y.size ? k / Math.max(x.size, y.size) : 0; };
+      let open = (session.open || []).filter(o => herTurns - o.turn <= 6);
+      for (const r of reading.readings) {
+        const i = open.findIndex(o => alike(o.what, r.what) >= 0.5);
+        if (r.sure >= 0.85) { if (i >= 0) open.splice(i, 1); continue; }
+        if (i >= 0) open[i] = { what: r.what, sure: r.sure, turn: herTurns }; else if (r.sure >= 0.3) open.push({ what: r.what, sure: r.sure, turn: herTurns });
+      }
+      session.open = open.slice(-4);
+    }
     if (replyPlan.goal === 'dry_bye') session.dry_bye = true;
     if (held && latest.length && session.aim === 'first_sale') session.first_sale = { ...session.first_sale, held: (session.first_sale?.held || 0) + 1 };
     if (replyPlan.goal === 'point_to_ppv') session.pointed = true;
@@ -1208,7 +1236,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     T.safetyStep(latest.length ? screen : null),
     T.himStep({ real: !!fanUuid, fan, type, money, card, story, long, profile, bond, state, now, timeZone }),
     T.sessionStep({ session, state, herHere, stage, attempts }),
-    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp: firstMsg || followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen }),
+    T.gaugesStep({ gauges: gauged.gauges, changes: gauged.changes, scores: replyPlan.scores }),
+    T.momentStep({ level, situations, herCount: herHere, warmUp: session.warm_up, phase, waiting, followUp: firstMsg || followUp, away: talk.away, herHere: herReplies(here).length, clash: clash?.text || null, media: latestSeen, reading: replyPlan.reading || reading, reader }),
     T.planStep({ level, heat: persona.profile?.heat, voice, sell, noOffer, notes: momentNotes, storyOn: !!sexting?.on, plan: replyPlan }),
     T.storyStep(sexting),
     T.briefingStep({ library, sales, situations, contentCount: content.length, selling: sell, chatCount: win.messages.length, long }),
@@ -1677,6 +1706,8 @@ async function saveServices(orgId, creatorId, { services = {}, session_total: to
 const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'lead_story', 'after_buy', 'cheaper', 'sexy_vibe', 'direct_ask', 'readiness_check', 'service_offer', 'service_deliver', 'roleplay', 'point_to_ppv', 'answer_ppv']);
 // foreign swearing, slang and politicians read as sexual by the planner (fix 3)
 const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu)\b/i;
+// an odd line for a man chatting her up (engine v2): about other men's bodies or men as what he's into, not about her
+const ODD_LINE = /\b(?:dicks|cocks|penises|balls)\b(?![^.!?]*\b(?:your|ur|you|u)\b)|\b(?:i'?m|i am|im) (?:into|attracted to) (?:guys|men|boys|dudes)\b|\b(?:guys|men|boys|dudes) are (?:hot|sexy)\b|\bi love (?:hard |big )?(?:dicks|cocks)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
 // his one-word replies in a row at the end of a conversation (fix 1): "ok", "k", "lol", "yes"…
@@ -2158,7 +2189,7 @@ const WHO_HE_IS = new Set(['new_sub', 'spender', 'returns', 'long_time_follower'
 // `warmUp` = her messages before a PPV may go (the session's floor, by closeness: B3), `herHere` =
 // her messages in this conversation (default: the whole window, as the blind test still counts).
 async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extraIds = [], selling = false, override = null, notes = [], warmUp = WARM_UP, herHere = null }) {
-  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling, notes);
+  const plan = await pickSituations(orgId, creatorId, fanUuid, chat, money, selling, notes, persona?.settings?.reader || READER);
   // what if (Practice): his mood or level as you set it, instead of the planner's read
   if (override?.mood && strategy.MOODS.includes(override.mood)) plan.mood.mood = override.mood;
   if (Number.isInteger(override?.his) && override.his >= 0 && override.his <= 3) plan.mood.his = override.his;
@@ -2194,7 +2225,7 @@ async function briefing({ orgId, creatorId, fanUuid, persona, chat, money, extra
     else if (warm && his >= 2 && !pulled_back) phase = 'offer';
   }
   const sales = phase ? await sellingExamples(orgId, { phase, ids: plan.ids, his, max, mood, said }) : [];
-  return { plan, level: { ...level, warm }, library, phase, sales };
+  return { plan, level: { ...level, warm }, library, phase, sales, reading: plan.reading || null, reader: plan.reader || null };
 }
 
 /**
@@ -2269,15 +2300,27 @@ async function libraryExamples(orgId, { ids = [], his = 0, max = 0, mood = null,
 // Which Playbook situations fit this moment (none if the picker fails: the reply
 // still has the game plan).
 // `notes` = his notes (texts): the planner also says if his latest message contradicts one.
-async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = false, notes = []) {
+async function pickSituations(orgId, creatorId, fanUuid, chat, money, selling = false, notes = [], reader = READER) {
+  // the reader: Claude reads what he is doing, what is new, what it could mean, what she would want to ask
+  if (/^claude-/.test(reader) && process.env.ANTHROPIC_API_KEY) {
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const res = await or.chat({ model: reader, maxTokens: 900, messages: strategy.readPrompt({ chat, money, selling, notes }) });
+        await logUsage(orgId, 'plan', res.model, res.usage, { creatorId, fanUuid });
+        const j = P.parseJsonObject(res.text);
+        if (j && typeof j === 'object') return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), contradicts: strategy.readContradiction(j, notes), reading: strategy.readReading(j), reader: res.model, cost: res.usage.cost || 0 };
+        console.error(`[ai-chat] reader: no JSON in the answer (${res.finish}, ${String(res.text).length} chars)${attempt ? '; the picker reads this one' : '; once more'}:`, String(res.text).slice(0, 300).replace(/\s+/g, ' '));
+      }
+    } catch (e) { console.error('[ai-chat] reader:', e.message); }
+  }
   try {
     const res = await or.chat({ model: PICKER, maxTokens: 160, temperature: 0, fallbacks: or.backupsFor(PICKER), messages: strategy.pickPrompt({ chat, money, selling, notes }) });
     await logUsage(orgId, 'plan', res.model, res.usage, { creatorId, fanUuid });
     const j = P.parseJsonObject(res.text);
-    return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), contradicts: strategy.readContradiction(j, notes), cost: res.usage.cost || 0 };
+    return { ids: strategy.readPick(j, { selling }), mood: strategy.readMood(j), contradicts: strategy.readContradiction(j, notes), reading: null, reader: res.model, cost: res.usage.cost || 0 };
   } catch (e) {
     console.error('[ai-chat] situations:', e.message);
-    return { ids: [], mood: strategy.readMood(null), contradicts: 0, cost: 0 };
+    return { ids: [], mood: strategy.readMood(null), contradicts: 0, reading: null, reader: null, cost: 0 };
   }
 }
 
@@ -2357,6 +2400,13 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
       // an offer that doesn't offer (deep dive): on a planned sell day the piece has to be attached, not just talked about
       if (sell && ['offer', 'first_offer', 'steer_to_sale'].includes(base.plan?.goal) && base.plan?.sell?.allowed && !draft.ppv && !noPpv) now.style.push('The plan is to offer now: attach one of the pieces it picked (the "ppv" field), don\'t only talk about it.');
+      // a curious reply (step 2) asks the one real question it was planned around
+      if (base.plan?.goal === 'curious' && draft.messages.length) {
+        const planned = wordsOf(base.plan.reading?.curious || '');
+        const asked = draft.messages.filter(m => /\?/.test(String(m))).map(m => wordsOf(m));
+        const onIt = asked.some(w => !planned.size || [...w].some(x => planned.has(x)));
+        if (!asked.length || !onIt) now.style.push(`This reply is about the one thing you wanted to know${base.plan.reading?.curious ? ` ("${base.plan.reading.curious}")` : ''}: ask that, one real question in your own words, not a rhetorical one.`);
+      }
       // the direct ask (A1) must ask: a reply without a question doesn't do its job
       if (base.plan?.goal === 'direct_ask' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('This reply has to ask him what he\'d like to see of you (or whether he\'s alone and wants to see something): one real question.');
       // he asked something (fix 4): a reply that is only questions didn't answer him

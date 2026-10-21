@@ -15,6 +15,7 @@
 const { replyLevel } = require('./safety');
 const { PAUSE, awayText } = require('./memory');
 const Sl = require('./selling');
+const G = require('./gauges');
 
 const DAY = 86400_000;
 const clean = (s) => String(s ?? '').trim();
@@ -25,7 +26,7 @@ const NO_SELL = new Set(['sad', 'annoyed', 'suspicious']); // no selling for the
 const LIGHT = new Set(['chatty', 'joking', 'curious', 'flirty', 'horny', 'romantic', 'caring']);
 // a heavy read sticks only when his own words back it (fix 3): the planner misreads jokes and politics
 const CONFIRMS = {
-  sad: /\b(?:sad|depress\w*|lonely|alone|cry\w*|tears|died|passed away|funeral|lost my|miss (?:him|her|them|my)|broke up|breakup|divorc\w*|dumped|heartbroken|hurt\w*|stress\w*|anxious|anxiety|panic|tired of|exhausted|burn\w* out|hate my (?:life|job)|rough (?:day|week|night|time)|bad day|not (?:doing )?(?:well|great|good|ok|okay)|sick|hospital|surgery|fired|laid off|lost my job|can'?t sleep|insomnia|worthless|nobody|no one cares|fuck my life|fml)\b/i,
+  sad: /\b(?:sad|depress\w*|lonely|so alone|feel(?:ing)? alone|all alone|alone again|cry\w*|tears|died|passed away|funeral|lost my|miss (?:him|her|them|my)|broke up|breakup|divorc\w*|dumped|heartbroken|hurt\w*|stress\w*|anxious|anxiety|panic|tired of|exhausted|burn\w* out|hate my (?:life|job)|rough (?:day|week|night|time)|bad day|not (?:doing )?(?:well|great|good|ok|okay)|sick|hospital|surgery|fired|laid off|lost my job|can'?t sleep|insomnia|worthless|nobody|no one cares|fuck my life|fml)\b/i,
   annoyed: /\b(?:wtf|annoy\w*|boring|bored|bullshit|bs|shut up|fuck off|fuck you|screw you|dumb|stupid|dummy|idiot|moron|leave me|stop (?:it|that|texting|messaging)|not funny|seriously|whatever|ugh|pathetic|lame|scam\w*|waste of|bot|fake|liar|lying|pointless|forget it)\b/i,
 };
 // he can't pay (a price objection, "too expensive", is handled by the plan instead: one cheaper piece, A5)
@@ -239,7 +240,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     // selling (A1–A7, E5): the cadence, a pause after a big spend, the first-sale path, what was done once
     cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
     pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
-    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false, hot: false,
+    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false, hot: false, hot_at: null, asked_about: [], gauges: null, open: [],
     taste_text: taste?.text || '', tw,
   };
 }
@@ -273,6 +274,9 @@ function resumeSession(s) {
     first_sale: { asked: s.first_sale?.asked === true, held: Math.max(0, Math.round(Number(s.first_sale?.held) || 0)) },
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
     dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true, hot: s.hot === true,
+    asked_about: (Array.isArray(s.asked_about) ? s.asked_about : []).map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-10),
+    gauges: G.readGauges(s.gauges), hot_at: Number.isInteger(s.hot_at) ? s.hot_at : null,
+    open: (Array.isArray(s.open) ? s.open : []).map(o => ({ what: clean(o?.what).slice(0, 120), sure: Math.max(0, Math.min(1, Number(o?.sure) || 0)), turn: Number.isInteger(o?.turn) ? o.turn : 0 })).filter(o => o.what).slice(-4),
     credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,
     taste_text: clean(s.taste_text).slice(0, 300),
     tw: s.tw && Sl.TW_APPROACH[s.tw.kind] ? { kind: s.tw.kind, text: Sl.TW_APPROACH[s.tw.kind], said: s.tw.said === true, why: clean(s.tw.why).slice(0, 120) } : null,
@@ -323,4 +327,4 @@ function nextTurn(session, { read: readIn = 'chatty', said = '', suspicious = fa
   return { session: s, mood };
 }
 
-module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, herMood, pickEvent, eventFits, rotationOf, WARM_UP, AIMS, EVENTS, WANTS_TO_BUY };
+module.exports = { conversationsOf, hoursOf, fanStateOf, madeUpState, startSession, resumeSession, nextTurn, herMood, pickEvent, eventFits, rotationOf, WARM_UP, AIMS, EVENTS, WANTS_TO_BUY, BROKE };

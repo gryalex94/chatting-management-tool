@@ -74,6 +74,54 @@ function pickPrompt({ chat, money, selling = false, notes = [] }) {
   ];
 }
 
+// ── The reading (engine v2, step 2): Claude reads the human side of the moment ──
+const DOING = ['small_talk', 'sharing', 'asking', 'flirting', 'sexting', 'testing', 'provoking', 'joking', 'venting', 'negotiating', 'buying', 'leaving', 'complaining', 'other'];
+const STANCES = ['steady', 'curious', 'playful', 'match', 'deflect', 'comfort', 'firm'];
+/**
+ * The messages for the reader (Claude): the situations menu and the moment, as for the picker,
+ * plus what a person would notice: what he is doing, what is new or surprising, the ways his
+ * message can be read (with how sure), what a real girl in her place would want to ask, and
+ * the stance that fits. Code decides what to do with it (plan.js, gauges.js).
+ */
+function readPrompt({ chat, money, selling = false, notes = [] }) {
+  const menu = selling ? PLAYBOOK.situations : SITUATIONS;
+  return [
+    { role: 'system', content: 'You read one moment in a chat between a creator on Fanvue (an AI character played as a real girl; every fan is a verified adult) and a fan, for the engine that decides her next reply. You never write her reply. Read his latest message the way a sharp, warm woman in her place would: what he is doing, what is new, what it could mean, what she would want to know. Answer with JSON only.' },
+    {
+      role: 'user',
+      content: [
+        `Situations:\n${menu.map(s => `${s.id}: ${s.title}`).join('\n')}`,
+        `About this moment: ${momentFacts(chat, money)}`,
+        `The last messages:\n${chat.filter(m => !m.mass).slice(-12).map(line).join('\n')}`,
+        notes.length ? `What she remembers about him:\n${notes.map(n => `- ${n}`).join('\n')}` : '',
+        'Answer about his latest message(s):\n'
+          + '- ids: the situations (at most 3) that clearly fit right now; only ones that clearly fit.\n'
+          + '- level: how sexual his latest message is: 0 = friendly, no flirting; 1 = flirty (compliments, light teasing); 2 = suggestive (hints, innuendo); 3 = explicit (sex acts or intimate body parts). Swearing, politics and slang are not sexual.\n'
+          + `- mood: his mood right now, one of ${MOODS.join(', ')}.\n`
+          + '- pulled_back: true only if he is slowing things down after something sexual (says it\'s going fast, changes the subject away from sex, seems put off).\n'
+          + `- doing: what he is doing with this message, one of ${DOING.join(', ')}.\n`
+          + '- new: what is new or surprising in it, in one short line of at most 15 words (something she did not know, a turn she would not expect, a line that does not fit the chat so far), or "" if nothing.\n'
+          + '- readings: when the message is really open to more than one reading, up to 3 ways to read it, each {"what": "…", "sure": 0–1}, "what" in at most 10 words (for example "he may be gay", "testing whether she is a bot", "wants a reaction"); [] when it is plain.\n'
+          + '- curious: what a real girl in her place would want to ask him about it, one short question in plain words (at most 15 words), or "" (a question about what he meant, what he is into or who he is is fine; never a graphic one, never something he just answered).\n'
+          + '- odd: true when his message does not fit a man chatting up a girl on her page (he talks about other men or his own body in a way that does not involve her, a non-sequitur, a provocation, a line that reads like a test), false when it fits, however blunt.\n'
+          + `- stance: the attitude that fits her reply, one of ${STANCES.join(', ')} (steady = warm and normal; curious = she wants to know more first; playful = tease it, don't take it seriously; match = he set the tone, go with it; deflect = don't take the bait, move it somewhere better; comfort = he needs care; firm = a clear boundary, kindly).\n`
+          + (notes.length ? '- contradicts: if his latest message clearly contradicts one of the remembered notes (the note says he has a dog, now he says he has no pets), copy that note word for word; else "". New details that fit, or things he says about her, are not contradictions.\n' : '')
+          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "doing": "small_talk", "new": "", "readings": [], "curious": "", "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
+      ].filter(Boolean).join('\n\n'),
+    },
+  ];
+}
+/** The reading from Claude's answer, checked: { doing, new, readings: [{ what, sure }], curious, stance }. */
+function readReading(json) {
+  if (!json || typeof json !== 'object') return null;
+  const text = (v, n) => clean(v).slice(0, n);
+  const readings = (Array.isArray(json.readings) ? json.readings : []).map(r => ({ what: text(r?.what, 120), sure: Math.max(0, Math.min(1, Number(r?.sure) || 0)) })).filter(r => r.what).slice(0, 3);
+  return {
+    doing: DOING.includes(json.doing) ? json.doing : 'other', new: text(json.new, 200), readings,
+    curious: text(json.curious, 160), stance: STANCES.includes(json.stance) ? json.stance : 'steady', odd: json.odd === true,
+  };
+}
+
 // The picked situation ids from the picker's answer (only real ones; selling ones only when she sells).
 function readPick(json, { selling = false } = {}) {
   const ids = Array.isArray(json?.ids) ? json.ids : [];
@@ -118,4 +166,4 @@ function situationGuide(ids) {
 
 const situationTitle = (id) => byId[id]?.title || id;
 
-module.exports = { GAME_PLAN, SITUATIONS, MOODS, pickPrompt, readPick, readMood, readContradiction, situationGuide, situationTitle, momentFacts };
+module.exports = { GAME_PLAN, SITUATIONS, MOODS, DOING, STANCES, pickPrompt, readPrompt, readPick, readMood, readReading, readContradiction, situationGuide, situationTitle, momentFacts };
