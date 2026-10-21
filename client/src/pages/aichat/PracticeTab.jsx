@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Coins, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, UserRoundPlus, X } from 'lucide-react';
+import { Check, Coins, FolderOpen, Hourglass, Loader2, Lock, Maximize2, MessageSquareReply, Paperclip, RotateCcw, Route, Search, Send, ShieldAlert, Star, Trash2, UserRoundPlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -36,7 +36,7 @@ const MapLink = ({ onClick, active }) => (
 );
 
 // One chat bubble: him on the left, her on the right (with a link to its decision map).
-function Bubble({ fromFan, children, meta, tone, onMap, mapActive }) {
+function Bubble({ fromFan, children, meta, tone, onMap, mapActive, onStar = null, starred = false }) {
   return (
     <div className={cn('flex flex-col gap-0.5', fromFan ? 'items-start' : 'items-end')}>
       <div className={cn('max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
@@ -44,7 +44,17 @@ function Bubble({ fromFan, children, meta, tone, onMap, mapActive }) {
         {children}
       </div>
       {meta && <span className={cn('max-w-[85%] whitespace-pre-line px-1 text-[11px] text-muted-foreground', !fromFan && 'text-right')}>{meta}</span>}
-      {onMap && <MapLink onClick={onMap} active={mapActive} />}
+      {(onMap || onStar) && (
+        <span className='flex items-center gap-2'>
+          {onMap && <MapLink onClick={onMap} active={mapActive} />}
+          {onStar && (
+            <button type='button' onClick={onStar} disabled={starred} aria-pressed={starred} title={starred ? 'In her example library' : 'A reply you like: it joins her example library'}
+              className={cn('inline-flex items-center gap-1 rounded px-1 text-[11px]', starred ? 'text-warn' : 'text-link hover:underline')}>
+              <Star className={cn('size-3', starred && 'fill-current')} aria-hidden />{starred ? 'Starred' : 'Star it'}
+            </button>
+          )}
+        </span>
+      )}
     </div>
   );
 }
@@ -258,6 +268,12 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const [looking, setLooking] = useState(false);       // a photo or video of his being looked at
   const [tip, setTip] = useState('');                   // a tip he sends (the practice room plays him)
   const mapPanel = useRef(null);
+  // the practice chat is saved as it goes (database change 050): reopened later, replayed after changes, its replies starred
+  const [runId, setRunId] = useState(null);
+  const runIdRef = useRef(null);
+  const [runs, setRuns] = useState(null);
+  const [runsOpen, setRunsOpen] = useState(false);
+  const [opening, setOpening] = useState(false);
 
   useEffect(() => {
     api.get(`/api/ai-chat/pages/${page.creator_id}/content`).then(r => setContentCount(r.data.items.filter(it => it.active).length)).catch(() => setContentCount(0));
@@ -266,6 +282,8 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     api.get(`/api/ai-chat/pages/${page.creator_id}/fans`).then(r => setFans(r.data.fans))
       .catch(e => { setFans([]); toast.error(errMsg(e, 'Could not load the fans')); });
   }, [page.creator_id]);
+  const loadRuns = useCallback(() => api.get(`/api/ai-chat/pages/${page.creator_id}/practice-runs`).then(r => setRuns(r.data.runs)).catch(() => setRuns([])), [page.creator_id]);
+  useEffect(() => { if (open) loadRuns(); }, [open, loadRuns]);
   useEffect(() => {
     if (fanId === MADE_UP) return undefined;
     let live = true;
@@ -297,8 +315,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
   const pick = (id) => {
     if (busy) return;
     setFanId(id); setTest([]); setRounds([]); setMapId(null); setLearned([]); setSession(null); setDetail(id === MADE_UP ? null : undefined);
+    runIdRef.current = null; setRunId(null);
   };
-  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); setLearned([]); setSession(null); } };
+  const startOver = () => { if (!busy) { setTest([]); setRounds([]); setMapId(null); setLearned([]); setSession(null); runIdRef.current = null; setRunId(null); } };
   // what he did after her last reply (as you played him): logged with the next request, for the outcomes report
   const outcomeOf = (quiet) => {
     const last = rounds[rounds.length - 1];
@@ -455,6 +474,72 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     addAboutMe(result);
     setRounds(rs => rs.map(r => (r === round ? { ...r, kept: result.model } : r)));
   };
+  // saved as it goes (1.5 s after the last change): the messages, every reply with its decision map, the session,
+  // and what you did as him after each reply (the PPV's fate, or whether he wrote on)
+  const saveRun = useCallback(async () => {
+    if (!rounds.length) return null;
+    const happenedAfter = (round) => {
+      const status = test.find(m => m.roundId === round.id && m.ppv)?.ppv?.status;
+      if (['bought', 'not_bought', 'ignored'].includes(status)) return status;
+      const i = test.findIndex(m => m.roundId === round.id);
+      return i >= 0 && test.slice(i + 1).some(m => m.from === 'fan') ? 'replied' : null;
+    };
+    const typeLabel = !real && madeUp.type !== 'none' ? fanTypes.find(t => t.id === madeUp.type)?.label : null;
+    const body = {
+      id: runIdRef.current, fan_uuid: real ? fanId : null, made_up: real ? null : madeUp,
+      title: `${real ? fanName(detail?.fan) || 'a real fan' : clean(madeUp.name) || 'a made-up fan'}${typeLabel ? ` (${typeLabel.toLowerCase()})` : ''} · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+      messages: test, turns: rounds.map(r => ({ ...r, whatIfs: [], outcome: happenedAfter(r) })), session, settings: { models, selling: sells, learned },
+    };
+    try {
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/practice-runs`, body);
+      if (!runIdRef.current) { runIdRef.current = data.run.id; setRunId(data.run.id); }
+      setRuns(rs => (rs ? [data.run, ...rs.filter(x => x.id !== data.run.id)] : rs));
+      return data.run.id;
+    } catch (e) { console.error('practice save:', errMsg(e, 'failed')); return null; }
+  }, [rounds, test, session, models, sells, learned, real, fanId, madeUp, detail, fanTypes, page.creator_id]);
+  useEffect(() => {
+    if (!rounds.length) return undefined;
+    const t = setTimeout(() => { saveRun(); }, 1500);
+    return () => clearTimeout(t);
+  }, [saveRun, rounds.length]);
+  // a kept reply you like: starred into her example library, where it counts more than the analysed chats
+  const star = async (roundId) => {
+    const id = runIdRef.current || await saveRun();
+    if (!id) { toast.error('Could not save the conversation first'); return; }
+    try {
+      const { data } = await api.post(`/api/ai-chat/pages/${page.creator_id}/practice-runs/${id}/star`, { turn_id: roundId });
+      setRounds(rs => rs.map(r => (r.id === roundId ? { ...r, starred: true } : r)));
+      setRuns(rs => (rs ? rs.map(x => (x.id === data.run.id ? { ...x, starred: data.run.starred } : x)) : rs));
+      toast.success('Starred: it joins her example library');
+    } catch (e) { toast.error(errMsg(e, 'Could not star the reply')); }
+  };
+  // a saved conversation, reopened where it was left (its decision maps included)
+  const openRun = async (r) => {
+    if (busy || opening) return;
+    setOpening(true);
+    try {
+      const { data } = await api.get(`/api/ai-chat/pages/${page.creator_id}/practice-runs/${r.id}`);
+      const run = data.run;
+      runIdRef.current = run.id; setRunId(run.id);
+      setFanId(run.fan_uuid || MADE_UP); setDetail(run.fan_uuid ? undefined : null);
+      setMadeUp(run.made_up ? { name: run.made_up.name || '', notes: run.made_up.notes || '', type: run.made_up.type || 'none' } : { name: '', notes: '', type: 'none' });
+      setTest(run.messages || []); setRounds(run.turns || []); setSession(run.session || null); setLearned(run.settings?.learned || []);
+      const ms = (run.settings?.models || []).filter(m => writers.some(w => w.id === m)).slice(0, 3);
+      if (ms.length) setModels(ms);
+      if (typeof run.settings?.selling === 'boolean') setSelling(run.settings.selling);
+      setMapId(run.turns?.length ? run.turns[run.turns.length - 1].id : null);
+      setRunsOpen(false);
+    } catch (e) { toast.error(errMsg(e, 'Could not open the conversation')); }
+    finally { setOpening(false); }
+  };
+  const removeRun = async (r) => {
+    if (!window.confirm(`Delete "${r.title}"? Its starred replies stay in her example library.`)) return;
+    try {
+      const { data } = await api.delete(`/api/ai-chat/pages/${page.creator_id}/practice-runs/${r.id}`);
+      setRuns(data.runs);
+      if (runIdRef.current === r.id) { runIdRef.current = null; setRunId(null); }
+    } catch (e) { toast.error(errMsg(e, 'Could not delete it')); }
+  };
   // keep the newest message in view while her messages arrive one by one
   const toBottom = useCallback(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight; }, []);
   const toggleModel = (id) => setModels(m => (m.includes(id) ? (m.length > 1 ? m.filter(x => x !== id) : m) : m.length < 3 ? [...m, id] : m));
@@ -558,6 +643,26 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
           <span className='text-[11px] text-muted-foreground'>Used for the rest of this practice chat only; never saved to his memory.</span>
         </div>
       )}
+      <div className='flex flex-col gap-1.5'>
+        <button type='button' onClick={() => setRunsOpen(o => !o)} aria-expanded={runsOpen}
+          className='flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground'>
+          <FolderOpen className='size-3.5' aria-hidden />Saved conversations{runs ? ` (${runs.length})` : ''}
+        </button>
+        {runId && <span className='text-[11px] text-muted-foreground'>This one is saved as you go, with every decision map. Star a reply you like under it: it joins her example library.</span>}
+        {runsOpen && (
+          <div className='flex flex-col gap-1'>
+            {!runs ? <Skeleton className='h-10 w-full' /> : !runs.length ? <p className='text-xs text-muted-foreground'>Nothing saved yet: a conversation is saved once she has replied.</p> : runs.slice(0, 30).map(r => (
+              <div key={r.id} className={cn('flex items-center gap-1 rounded-md border px-2 py-1', runId === r.id && 'border-primary bg-primary/5')}>
+                <button type='button' onClick={() => openRun(r)} disabled={busy || opening} className='flex min-w-0 flex-1 flex-col text-left'>
+                  <span className='truncate text-xs font-medium'>{r.title}</span>
+                  <span className='text-[11px] text-muted-foreground'>{r.turn_count} repl{r.turn_count === 1 ? 'y' : 'ies'} · {shortDay(r.updated_at)}{r.starred ? ` · ${r.starred} starred` : ''}</span>
+                </button>
+                <button type='button' onClick={() => removeRun(r)} className='rounded p-1 text-muted-foreground hover:text-bad' aria-label={`Delete ${r.title}`}><Trash2 className='size-3.5' aria-hidden /></button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
   // the real fans to pick from
@@ -627,7 +732,8 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
       {test.map((m, i) => (
         <div key={`t${i}`} className='flex flex-col gap-2'>
           <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}
-            onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}>
+            onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}
+            onStar={m.roundId && m.from === 'her' ? () => star(m.roundId) : null} starred={!!m.roundId && !!rounds.find(r => r.id === m.roundId)?.starred}>
             {m.text}
             {m.tip && <span className={cn('flex items-center gap-1 text-xs text-good', m.text && 'mt-1')}><Coins className='size-3' aria-hidden />Tipped ${m.tip}</span>}
             {m.media && (
@@ -708,7 +814,7 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         <header className='flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5'>
           <div className='flex min-w-0 flex-wrap items-baseline gap-x-3'>
             <h2 id='practice-title' className='text-lg font-semibold'>Practice</h2>
-            <span className='truncate text-sm text-muted-foreground'>{page.name} · with {fanLabel} · nothing is sent to Fanvue</span>
+            <span className='truncate text-sm text-muted-foreground'>{page.name} · with {fanLabel} · nothing is sent to Fanvue{runId ? ' · saved' : ''}</span>
           </div>
           <div className='flex items-center gap-2'>
             {open && <ClaudeScore creatorId={page.creator_id} version={rounds.length} />}

@@ -1277,6 +1277,111 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   };
 }
 
+// ── Practice conversations (database change 050): saved, reopened, starred, replayed ──
+const RUNS_MISSING = 'Run database change 050 (saved practice conversations) in Supabase first';
+const runsFail = (error, status = 409) => new AiChatError(/ai_practice_runs|creator_id/.test(error.message) ? RUNS_MISSING : error.message, status);
+const RUN_FIELDS = 'id, title, fan_uuid, made_up, message_count, turn_count, starred, created_at, updated_at';
+const FAN_ID = /^[\w-]{1,100}$/;
+const PLAYBOOK_ALL = require('../ai/chat/playbook.json').situations;
+/** Save a practice chat as it goes (`raw.id` = update). `raw` = { id, fan_uuid, made_up, title, messages, turns, session, settings }. */
+async function savePracticeRun(orgId, creatorId, userId, raw = {}) {
+  await pageAccount(orgId, creatorId);
+  const text = (v, n) => clean(v).slice(0, n);
+  const messages = (Array.isArray(raw.messages) ? raw.messages : []).slice(-200).map(m => ({
+    from: m?.from === 'fan' ? 'fan' : 'her', text: text(m?.text, 2000),
+    ...(m?.ppv && typeof m.ppv === 'object' ? { ppv: m.ppv } : {}), ...(m?.scene && typeof m.scene === 'object' ? { scene: m.scene } : {}),
+    ...(m?.media && typeof m.media === 'object' ? { media: m.media } : {}), ...(Number(m?.tip) > 0 ? { tip: Math.round(Number(m.tip)) } : {}),
+    ...(m?.roundId ? { roundId: text(m.roundId, 40) } : {}), ...(m?.label ? { label: text(m.label, 60) } : {}), ...(m?.note ? { note: text(m.note, 400) } : {}),
+  }));
+  const turns = (Array.isArray(raw.turns) ? raw.turns : []).filter(t => t && typeof t === 'object').slice(-100);
+  // the record stays under 3 MB: the oldest decision maps go first
+  let size = JSON.stringify(turns).length;
+  for (let i = 0; i < turns.length - 5 && size > 3_000_000; i += 1) {
+    turns[i] = { ...turns[i], used: turns[i].used ? { ...turns[i].used, trace: [] } : turns[i].used, results: (turns[i].results || []).map(r => ({ ...r, trace: [] })), whatIfs: [] };
+    size = JSON.stringify(turns).length;
+  }
+  const madeUp = raw.made_up && typeof raw.made_up === 'object' ? { name: text(raw.made_up.name, 60), type: text(raw.made_up.type, 30) || null, notes: text(raw.made_up.notes, 1000) } : null;
+  const fanUuid = raw.fan_uuid && FAN_ID.test(String(raw.fan_uuid)) ? String(raw.fan_uuid) : null;
+  const row = {
+    fan_uuid: fanUuid, made_up: fanUuid ? null : madeUp,
+    title: text(raw.title, 120) || `${madeUp?.name || 'A fan'} · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+    messages, turns, session: raw.session && typeof raw.session === 'object' ? raw.session : null,
+    settings: {
+      models: (Array.isArray(raw.settings?.models) ? raw.settings.models : []).map(String).slice(0, 3), selling: raw.settings?.selling !== false,
+      learned: (Array.isArray(raw.settings?.learned) ? raw.settings.learned : []).map(x => text(x, 200)).filter(Boolean).slice(-20),
+    },
+    message_count: messages.length, turn_count: turns.length, updated_at: new Date().toISOString(),
+  };
+  const id = Number(raw.id);
+  if (Number.isInteger(id) && id > 0) {
+    const { data, error } = await supabaseAdmin.from('ai_practice_runs').update(row).eq('id', id).eq('organisation_id', orgId).eq('creator_id', creatorId).select(RUN_FIELDS).maybeSingle();
+    if (error) throw runsFail(error);
+    if (data) return { run: data };
+  }
+  const { data, error } = await supabaseAdmin.from('ai_practice_runs').insert({ organisation_id: orgId, creator_id: creatorId, created_by: userId ? String(userId) : null, ...row }).select(RUN_FIELDS).single();
+  if (error) throw runsFail(error);
+  return { run: data };
+}
+/** The saved practice chats, newest first (without their messages). */
+async function listPracticeRuns(orgId, creatorId) {
+  await pageAccount(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_practice_runs').select(RUN_FIELDS).eq('organisation_id', orgId).eq('creator_id', creatorId).order('updated_at', { ascending: false }).limit(100);
+  if (error) throw runsFail(error);
+  return { runs: data || [] };
+}
+/** One saved practice chat, with its messages, every reply's decision map and the session. */
+async function getPracticeRun(orgId, creatorId, id) {
+  await pageAccount(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_practice_runs').select('*').eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId).maybeSingle();
+  if (error) throw runsFail(error);
+  if (!data) throw new AiChatError('Conversation not found', 404);
+  return { run: data };
+}
+async function deletePracticeRun(orgId, creatorId, id) {
+  await pageAccount(orgId, creatorId);
+  const { error } = await supabaseAdmin.from('ai_practice_runs').delete().eq('id', Number(id)).eq('organisation_id', orgId).eq('creator_id', creatorId);
+  if (error) throw runsFail(error);
+  return listPracticeRuns(orgId, creatorId);
+}
+/**
+ * A reply the manager starred in Practice joins her example library (ai_examples, source
+ * 'practice'): the moment, his message and her reply, tagged like the analysed chats and
+ * weighted above them. A reply that sold its PPV becomes a selling example.
+ */
+async function starPracticeReply(orgId, creatorId, id, turnId) {
+  const { run } = await getPracticeRun(orgId, creatorId, id);
+  const turns = Array.isArray(run.turns) ? run.turns : [];
+  const i = turns.findIndex(t => t?.id === String(turnId));
+  if (i < 0) throw new AiChatError('Reply not found', 404);
+  const t = turns[i];
+  if (t.starred) return { run: { id: run.id, starred: run.starred }, turn: t };
+  const result = (t.results || []).find(r => r.model === t.kept) || (t.results || []).find(r => ['ok', 'check'].includes(r.status) && r.replies?.length);
+  if (!result?.replies?.length) throw new AiChatError('This reply has nothing to star');
+  const messages = Array.isArray(run.messages) ? run.messages : [];
+  const prevAt = i > 0 ? Number(turns[i - 1].at) || 0 : 0;
+  const his = messages.slice(prevAt, Number(t.at) || 0).filter(m => m.from === 'fan').map(m => clean(m.text)).filter(Boolean).join(' ');
+  const her = result.replies.map(r => clean(r.creator_message)).filter(Boolean);
+  const kept = messages.find(m => m.roundId === t.id && m.ppv);
+  const bought = kept?.ppv?.status === 'bought';
+  const plan = t.used?.plan || {};
+  const titleToId = new Map([...strategy.SITUATIONS, ...PLAYBOOK_ALL].map(s => [s.title, s.id]));
+  const situation = (t.used?.situations || []).map(x => titleToId.get(x)).find(Boolean) || null;
+  const row = {
+    organisation_id: orgId, creator_id: creatorId, source: 'practice', dialogue: `practice:${run.id}`, phase: null, situation,
+    his_level: replyLevel(his), her_level: replyLevel(her.join(' ')), mood: t.used?.level?.mood || null,
+    moment: clean(plan.goal_text || plan.goal || 'a practice moment').slice(0, 300), him: his.slice(0, 1000) || '(a photo, a tip, or nothing)', reply: her,
+    kind: result.ppv && bought ? 'offer' : 'chat', outcome: result.ppv && bought ? (kept.ppv.speed === 'fast' ? 'bought_fast' : 'bought') : null,
+    offer_what: result.ppv ? clean(result.ppv.title).slice(0, 200) : null, price: result.ppv ? Number(result.ppv.price) || null : null,
+  };
+  const { error } = await supabaseAdmin.from('ai_examples').insert(row);
+  if (error) throw runsFail(error);
+  libraryCache.delete(orgId);
+  turns[i] = { ...t, starred: true };
+  const { data, error: e2 } = await supabaseAdmin.from('ai_practice_runs').update({ turns, starred: (run.starred || 0) + 1 }).eq('id', run.id).select(RUN_FIELDS).single();
+  if (e2) throw runsFail(e2);
+  return { run: data, turn: turns[i] };
+}
+
 // ── Your marks from Practice (database change 044) ─────────────────────────────
 // A wrong call or bad wording, marked on a reply's decision map, with what was wrong
 // and what she should have done. Kept in memory for a short while per page.
@@ -2115,7 +2220,7 @@ async function sellingExamples(orgId, { phase, ids = [], his = 0, max = 0, mood 
   const only = P_.situations ? rows.filter(r => P_.situations.includes(r.situation)) : [];
   rows = only.length >= 6 ? only : rows.filter(r => Math.abs(r.his_level - his) <= 1);
   const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
-  const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + Math.random() * 1.5;
+  const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + (r.source === 'practice' ? 3 : 0) + Math.random() * 1.5;   // her own starred replies count more
   const best = (outcomes, n) => rows.filter(r => outcomes.includes(r.outcome)).map(r => [score(r), r]).sort((a, b) => b[0] - a[0]).slice(0, n).map(([, r]) => r);
   return [...best(P_.good, 2), ...best(P_.bad, 1)].map(r => ({ moment: r.moment, him: r.him, reply: r.reply, outcome: r.outcome, offer_what: r.offer_what }));
 }
@@ -2128,10 +2233,10 @@ async function libraryRows(orgId) {
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
   let rows = [];
   try {
-    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, phase, situation, setting, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
+    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, source, kind, outcome, offer_what, dialogue, phase, situation, setting, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
   } catch {
     // before database change 043 (no setting column), or 040 (no library at all)
-    try { rows = await all(() => supabaseAdmin.from('ai_examples').select('id, kind, outcome, offer_what, dialogue, phase, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id')); } catch { rows = []; }
+    try { rows = await all(() => supabaseAdmin.from('ai_examples').select('id, source, kind, outcome, offer_what, dialogue, phase, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id')); } catch { rows = []; }
   }
   libraryCache.set(orgId, { at: Date.now(), rows });
   return rows;
@@ -2150,7 +2255,7 @@ async function libraryExamples(orgId, { ids = [], his = 0, max = 0, mood = null,
   const rows = (await libraryRows(orgId)).filter(r => (r.kind || 'chat') === 'chat' && r.her_level <= max && Math.abs(r.his_level - his) <= 1);
   // the same words as his message (what he talks about) count most, then the situation, his level and mood
   const overlap = (r) => { let k = 0; for (const w of wordsOf(`${r.him} ${r.moment}`)) if (his_.has(w)) k += 1; return Math.min(4, 2 * k); };
-  const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + Math.random() * 1.5;
+  const score = (r) => overlap(r) + (want.has(r.situation) ? 3 : 0) + (r.his_level === his ? 2 : 0) + (r.mood === mood ? 1 : 0) + (r.source === 'practice' ? 3 : 0) + Math.random() * 1.5;   // her own starred replies count more
   const out = [], seen = new Set();
   for (const [, r] of rows.map(r => [score(r), r]).sort((a, b) => b[0] - a[0])) {
     if (seen.has(r.dialogue)) continue;
@@ -2348,6 +2453,7 @@ module.exports = {
   AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
   saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia, getServices, saveServices, listRequests, decideRequest,
+  savePracticeRun, listPracticeRuns, getPracticeRun, deletePracticeRun, starPracticeReply,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts, sourced, madeUpNotes, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
   _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },

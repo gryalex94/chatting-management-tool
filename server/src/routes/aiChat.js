@@ -181,6 +181,29 @@ router.patch('/pages/:creatorId/feedback/:id', async (req, res) => {
   } catch (e) { fail(res, e, 'change your note'); }
 });
 
+// ── Practice conversations (database change 050): saved as they go, reopened, starred ──
+// GET    /pages/:creatorId/practice-runs            — the saved practice chats, newest first
+// POST   /pages/:creatorId/practice-runs            — save one as it goes ({ id } = update); returns { run }
+// GET    /pages/:creatorId/practice-runs/:id        — one, with its messages and decision maps
+// DELETE /pages/:creatorId/practice-runs/:id
+// POST   /pages/:creatorId/practice-runs/:id/star   { turn_id } — a reply joins her example library
+const runId = (req, res, next) => (/^\d+$/.test(String(req.params.id)) ? next() : res.status(404).json({ error: 'Conversation not found' }));
+router.get('/pages/:creatorId/practice-runs', async (req, res) => {
+  try { res.json(await A.listPracticeRuns(org(req), req.params.creatorId)); } catch (e) { fail(res, e, 'load the saved conversations'); }
+});
+router.post('/pages/:creatorId/practice-runs', async (req, res) => {
+  try { res.json(await A.savePracticeRun(org(req), req.params.creatorId, req.user?.id, req.body || {})); } catch (e) { fail(res, e, 'save the conversation'); }
+});
+router.get('/pages/:creatorId/practice-runs/:id', runId, async (req, res) => {
+  try { res.json(await A.getPracticeRun(org(req), req.params.creatorId, req.params.id)); } catch (e) { fail(res, e, 'load the conversation'); }
+});
+router.delete('/pages/:creatorId/practice-runs/:id', runId, async (req, res) => {
+  try { res.json(await A.deletePracticeRun(org(req), req.params.creatorId, req.params.id)); } catch (e) { fail(res, e, 'delete the conversation'); }
+});
+router.post('/pages/:creatorId/practice-runs/:id/star', runId, async (req, res) => {
+  try { res.json(await A.starPracticeReply(org(req), req.params.creatorId, req.params.id, req.body?.turn_id)); } catch (e) { fail(res, e, 'star the reply'); }
+});
+
 // ── Her content: what she can sell, described precisely (database change 041) ──
 // GET  /api/ai-chat/pages/:creatorId/content          — the list, each item with how spicy it is
 // POST /api/ai-chat/pages/:creatorId/content          — add or change an item (body: the item; id = change)

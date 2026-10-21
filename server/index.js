@@ -16,7 +16,7 @@ app.set('trust proxy', 1);
 app.use(helmet());
 app.use(morgan('dev'));
 // File uploads go through multer (multipart), so JSON bodies never need to be large.
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));   // a saved practice conversation carries its decision maps
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // CORS - allow frontend to talk to backend
