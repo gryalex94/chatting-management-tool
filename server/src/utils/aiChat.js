@@ -1412,7 +1412,40 @@ async function weeklyReport(orgId, creatorId) {
   delta('He bought', thisW.bought, lastW.bought, '%');
   for (const w of thisW.weak) { const b = lastW.weak.find(x => x.point === w.point); changes.push(`${w.label}: weak ${w.count} time${w.count === 1 ? '' : 's'}${b ? ` (${w.count - b.count > 0 ? '+' : ''}${w.count - b.count} vs last week)` : ' (not among the weakest last week)'}`); }
   if (thisW.cost || lastW.cost) changes.push(`Cost: $${thisW.cost} this week, $${lastW.cost} last week`);
-  return { today, from: thisMon, last_from: lastMon, this_week: thisW, last_week: lastW, changes };
+  return { today, from: thisMon, last_from: lastMon, this_week: thisW, last_week: lastW, changes, claude_vs_proven: await claudeVsProven(orgId, creatorId) };
+}
+
+/**
+ * Where Claude's taste disagrees with the 35k library (decided in the adjustment round):
+ * in the blind test, the moments where the chatter's answer was proven (he bought within a
+ * day) and Claude still preferred an AI answer. Returns { proven, agreed, disagreed: [...] }.
+ */
+async function claudeVsProven(orgId, creatorId) {
+  let rows = [];
+  try {
+    rows = await all(() => supabaseAdmin.from('ai_duels').select('id, fan_said, options, claude_vote, claude_reason, outcome').eq('organisation_id', orgId).eq('creator_id', creatorId).eq('proven', true).not('claude_vote', 'is', null).order('id', { ascending: false }));
+  } catch { return null; }
+  const letters = ['A', 'B', 'C'];
+  let agreed = 0;
+  const disagreed = [];
+  for (const d of rows) {
+    const opts = Array.isArray(d.options) ? d.options : [];
+    const chatterAt = opts.findIndex(o => o?.source === 'chatter');
+    if (chatterAt < 0) continue;
+    if (d.claude_vote === letters[chatterAt]) { agreed += 1; continue; }
+    const picked = opts[letters.indexOf(d.claude_vote)];
+    if (disagreed.length < 8) {
+      disagreed.push({
+        he: (Array.isArray(d.fan_said) ? d.fan_said : [d.fan_said]).map(x => clean(typeof x === 'string' ? x : x?.text)).filter(Boolean).join(' / ').slice(0, 200),
+        proven: (opts[chatterAt].text || []).map(clean).join(' / ').slice(0, 200),
+        claude_picked: picked ? (picked.text || []).map(clean).join(' / ').slice(0, 200) : `${d.claude_vote} (not an answer)`,
+        why: clean(d.claude_reason).slice(0, 200),
+        bought: !!d.outcome?.bought,
+      });
+    }
+  }
+  const n = agreed + disagreed.length + Math.max(0, rows.length - agreed - disagreed.length);
+  return { proven: rows.length, agreed, disagreed_n: rows.length - agreed, disagreed, share: rows.length ? Math.round((100 * agreed) / rows.length) : null, n };
 }
 
 /** Your marks, newest first (switched-off ones too). */

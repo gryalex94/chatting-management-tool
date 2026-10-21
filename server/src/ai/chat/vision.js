@@ -86,6 +86,7 @@ async function describeFile(file, mediaKind, { dir } = {}) {
       if (!shots.length) return { failed: true, error: 'No frame could be read from the video' };
     } else {
       try { shots = [await smallImage(file, work)]; } catch { shots = [file]; }   // no ffmpeg: the file as it is
+      if (!fs.existsSync(shots[0])) shots = [file];                               // ffmpeg wrote nothing (an odd format): the file as it is
     }
     const content = [{ type: 'text', text: ask(mediaKind, shots.length, seconds) }, ...shots.map(f => ({ type: 'image_url', image_url: { url: dataUrl(f) } }))];
     const res = await or.chat({ model: DESCRIBER, fallbacks: BACKUPS, maxTokens: 900, temperature: 0.2, messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content }] });

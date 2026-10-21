@@ -94,6 +94,19 @@ function WeeklyReport({ creatorId, version }) {
         <span className='font-medium'>What changed since last week</span>
         {report.changes.length ? report.changes.map((c, i) => <span key={i} className='text-muted-foreground'>{c}</span>) : <span className='text-muted-foreground'>Nothing to compare yet.</span>}
       </div>
+      {report.claude_vs_proven && report.claude_vs_proven.proven > 0 && (
+        <div className='flex flex-col gap-1 text-xs'>
+          <span className='font-medium'>Claude against the proven answers (the blind test)</span>
+          <span className='text-muted-foreground'>In {report.claude_vs_proven.proven} moments the chatter&apos;s answer was proven (he bought within a day). Claude picked it in {report.claude_vs_proven.agreed} ({report.claude_vs_proven.share}%) and preferred an AI answer in {report.claude_vs_proven.disagreed_n}. So Claude&apos;s taste is not the last word on what sells: trust the real outcomes.</span>
+          {report.claude_vs_proven.disagreed.map((d, i) => (
+            <div key={i} className='flex flex-col gap-0.5 border-l-2 border-warn/40 ps-2'>
+              <span className='text-muted-foreground'>He: {d.he || '(quiet)'}</span>
+              <span>Proven (he bought): {d.proven}</span>
+              <span className='text-muted-foreground'>Claude picked: {d.claude_picked}{d.why ? ` — ${d.why}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

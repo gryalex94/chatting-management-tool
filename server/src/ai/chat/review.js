@@ -161,7 +161,7 @@ const COACH_SCHEMA = {
 async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [], diary = [] }) {
   const line = (m) => `${m.from_fan ? 'Him' : m.mass ? 'Her (mass message)' : 'Her'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m)}${mediaNote(m) ? ` [${mediaNote(m)}]` : ''}`;
   const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.heat && `how spicy: ${profile.heat}`].filter(Boolean).join('; ');
-  const him = fan ? `${fan.tier_label}${fan.new_sub ? ', new subscriber' : ''}${fan.time_waster ? ', time waster' : ''}${fan.suspicious ? ', suspicious' : ''}; closeness: ${fan.closeness}; free talk ${fan.budget.used} of ${fan.budget.limit}` : 'unknown';
+  const him = fan ? `${fan.name ? `he goes by ${fan.name}; ` : ''}${fan.tier_label}${fan.new_sub ? ', new subscriber' : ''}${fan.time_waster ? ', time waster' : ''}${fan.suspicious ? ', suspicious' : ''}; closeness: ${fan.closeness}; free talk ${fan.budget.used} of ${fan.budget.limit}` : 'unknown';
   const r = await ask(
     'You coach the chat replies of an AI character on Fanvue, a subscription site for verified adults; flirting and sex talk between adults are allowed. You judge one reply against the agency\'s rules, the plan made for it and the manager\'s notes. You never rewrite it. Be specific and short.',
     `The creator: ${who || 'unknown'}\n\nWho he is: ${him}\n`
