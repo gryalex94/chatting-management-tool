@@ -51,7 +51,8 @@ async function claudeChat({ model, messages, maxTokens = 600, timeoutMs = 90_000
   const text = (c) => (typeof c === 'string' ? c : (c || []).filter(x => x.type === 'text').map(x => x.text).join('\n'));
   const system = messages.filter(m => m.role === 'system').map(m => text(m.content)).join('\n\n');
   const rest = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: text(m.content) }));
-  const res = await client.messages.create({ model, max_tokens: maxTokens, system, messages: rest, output_config: { effort: 'low' } }, { timeout: timeoutMs });
+  // no thinking on these structured calls: with thinking on, its tokens ate the output budget and the JSON came back cut off
+  const res = await client.messages.create({ model, max_tokens: maxTokens, system, messages: rest, thinking: { type: 'disabled' }, output_config: { effort: 'low' } }, { timeout: timeoutMs });
   const input = res.usage?.input_tokens || 0, output = res.usage?.output_tokens || 0;
   const price = CLAUDE_PRICE[model] || [2, 10];
   const cost = (input * price[0] + output * price[1]) / 1e6;
