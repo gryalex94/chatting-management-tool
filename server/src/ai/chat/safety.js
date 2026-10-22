@@ -242,6 +242,7 @@ function voiceProblems(list, { recent = [], his = '', noQuestion = '', length = 
     else if (window.slice(-10).some(r => DECLARED.test(r))) out.push('It says how she feels about him again; she said so recently. This time show it by understanding what he said.');
   }
   if (COMPLIMENT.test(all) && window.slice(-10).some(r => COMPLIMENT.test(r))) out.push('It compliments him again; she did that recently. React to what he said instead.');
+  else if (COMPLIMENT.test(all) && closeness === 'new' && window.length < 3) out.push('It compliments him in her first replies to a man she barely knows ("you\'re cute"): too early; be warm and curious instead.');
   if (list.some(m => wordsOf(m).length > 15)) out.push('One message is over 15 words: cut it, or split it into two short ones.');
   // his length, mirrored (the plan: Q4)
   const n = wordsOf(all).length;

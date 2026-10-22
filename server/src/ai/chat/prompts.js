@@ -485,13 +485,14 @@ const emojisIn = (t) => String(t).match(EMOJI) || [];
  * Her messages tidied in code. `recent` = her last replies (newest last), each one
  * reply as one text; `names` = his name(s), left out when she used one lately.
  */
-function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = true, recent = [], names = [] } = {}) {
+function tidyMessages(list, { emojis = 'rarely', maxLevel = 3, dropOpener = true, recent = [], names = [], closeness = null } = {}) {
   let seen = Math.random() < (EMOJI_CHANCE[emojis] ?? EMOJI_CHANCE.rarely) ? 0 : 1;   // 1 = none this time
   const used = new Set(recent.slice(-3).map(firstWord).filter(w => ['oh', 'hehe', 'haha', 'm', 'hm', 'aw', 'well', 'so', 'ok', 'lol'].includes(w)));
   // never the same emoji as in her last replies
   const lately = new Set(recent.slice(-3).flatMap(emojisIn).map(e => e.replace(/️/g, '')));
   const namesLately = names.filter(n => recent.slice(-3).some(r => new RegExp(`\\b${escRe(n)}\\b`, 'i').test(r)));
-  const petLately = recent.slice(-2).some(r => PET_RE.test(r));
+  // a pet name at most once in five replies, and none in her first three replies to a fan she barely knows (humans: about one in ten)
+  const petLately = recent.slice(-4).some(r => PET_RE.test(r)) || (closeness === 'new' && recent.length < 3);
   return list.map((m, i) => {
     let t = String(m);
     if (i === 0 && dropOpener && HABIT_OPENER.test(t)) t = dropFirst(t, HABIT_OPENER);

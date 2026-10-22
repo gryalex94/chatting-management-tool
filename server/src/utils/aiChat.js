@@ -928,7 +928,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (fanUuid) {
     const [person, mem, loaded] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid)]);
     chat = loaded.chat; money = loaded.money;
-    fan = { name: fanName(person) };
+    fan = { name: fanName(person), registered_at: person?.registered_at || null };
     card = mem?.facts || [];
     story = mem?.story || '';
     bond = mem?.bond || null;
@@ -1178,6 +1178,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
     content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
     gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited,
+    subDays: fanUuid ? (fan.registered_at ? Math.floor((now.getTime() - Date.parse(fan.registered_at)) / 86400_000) : null) : (type?.id === 'new_sub' ? 0 : null),
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
@@ -1720,6 +1721,16 @@ const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'l
 const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu)\b/i;
 // an odd line for a man chatting her up (engine v2): about other men's bodies or men as what he's into, not about her
 const ODD_LINE = /\b(?:dicks|cocks|penises|balls)\b(?![^.!?]*\b(?:your|ur|you|u)\b)|\b(?:i'?m|i am|im) (?:into|attracted to) (?:guys|men|boys|dudes)\b|\b(?:guys|men|boys|dudes) are (?:hot|sexy)\b|\bi love (?:hard |big )?(?:dicks|cocks)\b/i;
+// a brand-new fan has no history with her: these imply one
+const HISTORY_GUESS = /\b(?:finally|took (?:you|u) long enough|about time|where have (?:you|u) been|long time no see|been a while|stranger|decided to (?:say hi|show up|talk)|took (?:you|u|your time))\b/i;
+// brushing off what he gave her
+const BRUSH_OFF = /\b(?:i get that a lot|everyone says that|heard that (?:one )?before|you'?re not the first|that'?s what they all say|if i had a dollar|(?:hope|try to) (?:i )?live up to|live up to the hype|not the first time i'?ve heard)\b/i;
+// a small real thing of hers: first person plus a piece of her life
+const SHARES = /\b(?:my (?:day|morning|night|weekend|friend|sister|brother|mum|mom|dad|flatmate|roommate|boss|coffee|gym|dog|cat|date|ex|week|shift|coach|neighbou?r)|(?:i|i'?ve|i'?m) (?:just|was|went|had|spent|tried|made|got|finished|cooked|watched|woke|slept|started|been|booked|ended up|nearly|almost|spilled|burnt|lost|found)\b|last (?:night|week|weekend|date|time i)|this morning|earlier today)\b/i;
+// a line that trails off after a question was cut
+const DANGLING = /\b(?:but i'?m curious|i'?m curious though|so tell me|tell me|but|and|so|wondering|i wonder)\s*[.…]*$/i;
+// an excuse for her own line after he pushed back
+const EXCUSE = /\b(?:i just (?:thought|figured|assumed|meant)|i (?:thought|figured|assumed) (?:you|u)|i was just (?:saying|asking)|sorry,? i)\b/i;
 // he hands her the lead ("I'm all yours", "what are you going to do with me"): a concrete move now, and a new subscriber's direct ask may come
 const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m yours|do (?:whatever|what|anything) you want (?:with|to) me|take the lead|(?:you'?re|you are|ur) in charge|what (?:are you going|would you like|do you want) to do (?:with|to) me|what would you do (?:with|to) me|use me|have your way|show me what you'?ve got|i'?m (?:in your hands|at your mercy))\b/i;
 // a reply that only promises instead of doing something: "I've got ideas", "you'll see"
@@ -2388,7 +2399,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // turned into statements or left out; long messages split into bubbles like a person's
       const prep = (d) => {
         if (noPpv) d.ppv = null;
-        d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
+        d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [], closeness: voice?.closeness || null });
         if (voice) d.messages = P.dropSentences(d.messages, { his: voice.his, noOffer: d.ppv ? '' : noPpv || base.noOffer || '' });
         const n = voice ? questionsIn(d.messages, voice.his) : 0;
         if (voice && ((voice.noQuestion && n) || n > 1)) {
@@ -2453,6 +2464,18 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // the sexting set's look (fix: the story must match the photos): an outfit the next step's photos contradict is rewritten here
       const look = base.sexting?.look;
       if (look?.outfit) { const clash = P.outfitClash(draft.messages.join(' '), look.outfit); if (clash) now.style.push(`It says you have "${clash}" on, but the photos you send next show ${look.outfit}: describe what you really have on.`); }
+      // a brand-new fan: nothing about waiting or history ("finally decided to say hi?")
+      if (base.plan?.new_today && HISTORY_GUESS.test(draft.messages.join(' '))) now.style.push('He subscribed today and this is his first chat with you: nothing about waiting, "finally" or taking his time; welcome him as someone who just arrived.');
+      // a welcome has to welcome, and ask the one question
+      if (base.plan?.goal === 'welcome_new' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('His first message: welcome him and ask the one question (what brought him here, or what he is into).');
+      // what he gave her (a compliment, an admission) is received, not brushed off
+      if (BRUSH_OFF.test(draft.messages.join(' '))) now.style.push('Don\'t brush off what he gave you ("I get that a lot", "hope I live up to it"): receive it warmly and specifically.');
+      // a pushback on her own line gets a light repair, not an excuse
+      if (base.plan?.repair && EXCUSE.test(draft.messages.join(' '))) now.style.push('He pushed back on your line: don\'t explain or excuse it ("I just thought…", "I assumed…"); own it lightly in one line and move on.');
+      // a dangling lead-in ("But I'm curious", "so tell me") left when a question was cut: finish the thought or drop it
+      if (draft.messages.some(m => DANGLING.test(String(m).trim()))) now.style.push('A line trails off ("but I\'m curious", "so tell me"): finish the thought as a statement, or drop that line.');
+      // a planned small thing of hers has to be there: a one-line quip isn't it
+      if (base.plan?.beats?.some(b => /thing of yours/.test(b)) && !SHARES.test(draft.messages.join(' '))) now.style.push('The plan had a small real thing of yours in this reply (your day, a friend, your flatmate, something you did): add one line of it; a quip about him isn\'t it.');
       // he handed her the lead: a reply that only promises ("I've got ideas") is stalling
       if (base.plan?.invited && PROMISE_ONLY.test(draft.messages.join(' '))) now.style.push('He handed you the lead: do something concrete now (a playful command, what you do first); "I have ideas" and "you\'ll see" are stalling.');
       // a curious reply (step 2) asks the one real question it was planned around
@@ -2460,7 +2483,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         const planned = wordsOf(base.plan.reading?.curious || '');
         const asked = draft.messages.filter(m => /\?/.test(String(m))).map(m => wordsOf(m));
         const onIt = asked.some(w => !planned.size || [...w].some(x => planned.has(x)));
-        if (!asked.length || !onIt) now.style.push(`This reply is about the one thing you wanted to know${base.plan.reading?.curious ? ` ("${base.plan.reading.curious}")` : ''}: ask that, one real question in your own words, not a rhetorical one.`);
+        if (!asked.length || !onIt) now.style.push(`This reply has to ask the one thing you wanted to know${base.plan.reading?.curious ? `, close to these words: "${base.plan.reading.curious}"` : ''}. End with that question; not a rhetorical one, not a different one.`);
       }
       // the direct ask (A1) must ask: a reply without a question doesn't do its job
       if (base.plan?.goal === 'direct_ask' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('This reply has to ask him what he\'d like to see of you (or whether he\'s alone and wants to see something): one real question.');
@@ -2592,6 +2615,11 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = 
     if (d.messages.length > 3) { score -= 20; why.push('too many messages'); }
     if (d.messages.some(m => words(m) > 15)) { score -= 10; why.push('a long message'); }
     if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
+    const beats = (plan?.beats || []).join(' ');
+    if (/thing of yours/.test(beats)) { if (SHARES.test(text)) { score += 14; why.push('carries the small thing of hers'); } else { score -= 10; } }
+    if (plan?.goal === 'curious' && plan.reading?.curious) { const w = wordsOf(plan.reading.curious); const q = d.messages.filter(m => /\?/.test(m)).join(' '); if (q && [...wordsOf(q)].some(x => w.has(x))) { score += 14; why.push('asks the planned question'); } }
+    if (plan?.complimented && BRUSH_OFF.test(text)) { score -= 25; why.push('brushes him off'); }
+    if (plan?.new_today && HISTORY_GUESS.test(text)) { score -= 25; why.push('implies a history'); }
     if (TALK_GOALS.has(plan?.goal) && flatLine(d.messages)) { score -= 15; why.push('a flat line, nothing for him to answer'); }
     if (plan?.dead_words?.length && d.messages.some(m => /\?/.test(m) && Plan.topicWords(m).some(w => plan.dead_words.includes(w)))) { score -= 25; why.push('asks about a topic that ran out'); }
     return { d, score, why: why.join(', ') || `${n} words, fits the target` };

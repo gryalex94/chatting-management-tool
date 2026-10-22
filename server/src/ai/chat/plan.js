@@ -73,7 +73,9 @@ function beatsFor(p) {
   const runner = p.scores?.filter(x => x.allowed && x.move !== best?.move)[0] || null;
   if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
-  if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
+  else if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  if (p.complimented && !/compliment/.test(base.join(' '))) base.splice(p.repair || p.answer_first ? 1 : 0, 0, 'receive his compliment warmly: thank him in your way, playful and specific; no deflecting, no "I get that a lot"');
   // the floor of the question band: she has asked little lately, and this reply has room for one follow-up
   if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
   return base.slice(0, 3);
@@ -103,6 +105,10 @@ const BUDGET = { whale: 20, new: 15, spender: 15, small: 10, none: 8, tw: 5 };
 const SUSPICIOUS = /\b(?:(?:are|r)\s+(?:you|u)\s+(?:even\s+)?(?:an?\s+)?(?:real(?!\s+(?:man|woman|one|deal|friend|leader|king|guy|girl|chad|boss))|bot|robot|fake|ai|human|a\s+scam|scamming|chat\s*bot|chatgpt)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|an\s+ai|fake|a\s+scam)|scam\w*|catfish\w*|chat\s*bot|chatgpt|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
 // he asked her something directly (fix 4): a question mark, or a question word up front
 const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/i;
+// he pushes back on something she just said ("why finally? I just subscribed"): she owns it lightly, no excuse
+const PUSHBACK = /^(?:why|what do you mean|what\'?s that supposed to mean|excuse me|wow|huh|lol what)\b|\b(?:i just subscribed|who said|that'?s (?:rude|a bit much|not fair)|where did that come from|what are you talking about)\b/i;
+// he pays her a compliment, or tells her what drew him: it gets received, never brushed off
+const COMPLIMENT = /\b(?:you'?re|you are|ur|you look|looking) (?:so |really |very |honestly )?(?:hot|gorgeous|beautiful|pretty|cute|sexy|stunning|amazing|perfect|fine|lovely)\b|\byour (?:looks|smile|eyes|body|pics|photos|face|lips|legs|voice)\b|\bcouldn'?t resist\b|\b(?:love|like) (?:tall|how you|your|the way you)\b|\bi like you\b|\bcaught my eye\b/i;
 const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|ones?|something|sample)|(?:something|anything)\s+free|send\s+(?:me\s+)?(?:a\s+)?(?:free|preview)|no\s+money|broke)\b/i;
 // he's leaving (Q8)
 const GOODBYE = /\b(?:good\s*night|good\s*bye|g'?night|nighty?\s*night|gn|nite|gotta\s+(?:go|run|sleep)|got\s+to\s+go|have\s+to\s+(?:go|leave|run)|need\s+to\s+(?:go|sleep|leave)|i'?m\s+(?:off|out|going\s+to\s+(?:bed|sleep))|heading\s+(?:to\s+bed|out|off)|off\s+to\s+(?:bed|sleep|work)|going\s+to\s+(?:bed|sleep)|talk\s+(?:to\s+(?:you|u)\s+)?(?:later|tomorrow|tmrw|soon)|ttyl|bye+|see\s+(?:you|ya|u)\s+(?:later|tomorrow|soon))\b/i;
@@ -194,7 +200,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -361,6 +367,16 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   p.questions = questions || null;
   p.read_failed = !!readFailed;
   p.invited = !!invited && !['goodbye', 'no_reply', 'dry_bye', 'refuse', 'comfort', 'reassure', 'calm'].includes(p.goal);
+  // he subscribed today (a made-up new subscriber, or a real one who registered today): nothing about waiting or "finally"
+  p.new_today = subDays === 0 || (subDays == null && !!profile.new_sub && !lastConv);
+  p.sub_days = subDays;
+  const talkGoal = ['chat', 'curious', 'share', 'get_to_know', 'flirt', 'sexy_vibe', 'tease', 'welcome_new', 'steer_to_sale', 'wind_down'].includes(p.goal);
+  // he pushes back on something she said: a light repair, not an excuse (and not a plain answer to "why?")
+  const pushedBack = talkGoal && herReplies > 0 && (PUSHBACK.test(said) || (p.reading?.readings || []).some(r => /\b(?:dig|push(?:es|ing)? back|took it (?:wrong|badly|personally)|offended|calling (?:her|it) out|correct(?:s|ing) her|didn'?t like (?:her|the))\b/i.test(r.what) && r.sure >= 0.5));
+  p.repair = pushedBack;
+  if (p.new_today && p.reading?.curious) p.reading.curious = p.reading.curious.replace(/\b(?:finally|at last|eventually)\b\s*/gi, '').replace(/\s{2,}/g, ' ').trim();
+  // he complimented her or told her what drew him: she receives it warmly (that isn't flirting, so the vibe stage allows it)
+  p.complimented = talkGoal && !pushedBack && COMPLIMENT.test(said);
   p.promised = (p.reading && reading?.promised?.length ? reading.promised : []).slice(0, 2);
   // a service offered and not paid yet: nothing is delivered before his tip (D2)
   p.tip_first = svc?.state === 'offered' && p.goal !== 'service_offer' ? `You've named $${svc.price} for ${svc.label.toLowerCase()} and he hasn't tipped yet: don't deliver any of it; if he brings it up, remind him lightly that the tip comes first.` : '';
@@ -451,7 +467,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   }[p.goal];
   // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
   const hisQuestion = reading?.asked?.length ? reading.asked[0] : '';
-  const answerable = (DIRECT_Q.test(said) || !!hisQuestion) && !politics && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
+  const answerable = (DIRECT_Q.test(said) || !!hisQuestion) && !politics && !p.repair && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
   p.answer_first = answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
@@ -550,6 +566,10 @@ function planText(p) {
   if (p.reading?.thread === 'dead') lines.push('The topic you two were on has run out (he has nothing more to give it): let it go now. React briefly, then bring up something new: something easy about him (where he\'s from, what he does, what he\'s into), or a small real thing of yours. No more questions about the old topic.');
   if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
+  if (p.new_today && ['welcome_new', 'chat', 'curious', 'share', 'get_to_know'].includes(p.goal)) lines.push('He subscribed today and this is his first conversation with you: nothing about waiting, taking his time or "finally"; you have no history together.');
+  else if (p.sub_days >= 2 && p.goal === 'welcome_new') lines.push(`He subscribed ${p.sub_days} days ago and writes only now: a light "finally" is fine.`);
+  if (p.repair) lines.push('He pushed back on something you said: own it lightly in one line ("ha, fair, I was teasing"), no excuse and no explaining, then move on warmly.');
+  if (p.complimented) lines.push('He gave you a compliment (or told you what drew him): receive it, warm and specific, in your way; never brush it off ("I get that a lot", "hope I live up to it").');
   if (p.invited) lines.push('He handed you the lead ("I\'m yours", "what are you going to do with me"): make a concrete first move now, a playful command or what you do first, in one or two short lines; never a promise of ideas or "you\'ll see".');
   if (p.hard) lines.push('He is sharing something hard: show you understood exactly what he said (his own words, the feeling named), nothing about your own day or a similar story of yours, no advice he didn\'t ask for; warmth through understanding, not through saying how much you care.');
   if (p.promised?.length) lines.push(`You told him earlier: ${p.promised.map(x => `"${x}"`).join(', ')}. Don't leave it hanging: keep it (content only ever as a PPV), or say honestly where it stands.`);
