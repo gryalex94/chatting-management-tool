@@ -908,6 +908,7 @@ async function pageMonthly(accountId) {
  * decide but don't write (no writer is called).
  */
 async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [], session: sentSession = null, outcome = null }) {
+  libraryRows(orgId).catch(() => {});                       // the example library loads while the reader reads
   const { account } = await pageAccount(orgId, creatorId);
   // what he did after her previous reply (Practice: as you played him): the outcomes log (B7)
   if (outcome && typeof outcome === 'object' && clean(outcome.happened) && !whatIf && !planOnly) {
@@ -2342,18 +2343,29 @@ async function sellingExamples(orgId, { phase, ids = [], his = 0, max = 0, mood 
 }
 
 // The example library (ai_examples, database change 040): real moments from the
-// agency's good chats. Kept in memory for a few minutes per organisation.
+// agency's good chats. Kept in memory for six hours per organisation (a starred reply
+// clears it at once); loaded with all its pages at the same time, and started as soon as a
+// reply begins (reply() above), so it is ready by the time the reader has finished.
 const libraryCache = new Map();
+const LIBRARY_TTL = 6 * 3600_000;
+const LIBRARY_FIELDS = 'id, source, kind, outcome, offer_what, dialogue, phase, situation, setting, his_level, her_level, mood, moment, him, reply';
+async function loadLibrary(orgId, fields) {
+  const { count, error } = await supabaseAdmin.from('ai_examples').select('id', { count: 'exact', head: true }).eq('organisation_id', orgId);
+  check(error);
+  const pages = Array.from({ length: Math.ceil((count || 0) / 1000) }, (_, i) => i * 1000);
+  const got = await Promise.all(pages.map(async (off) => {
+    const { data, error: e } = await supabaseAdmin.from('ai_examples').select(fields).eq('organisation_id', orgId).order('id').range(off, off + 999);
+    check(e);
+    return data || [];
+  }));
+  return got.flat();
+}
 async function libraryRows(orgId) {
   const hit = libraryCache.get(orgId);
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.rows;
-  let rows = [];
-  try {
-    rows = await all(() => supabaseAdmin.from('ai_examples').select('id, source, kind, outcome, offer_what, dialogue, phase, situation, setting, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id'));
-  } catch {
+  if (hit && Date.now() - hit.at < LIBRARY_TTL) return hit.rows;     // the rows, or the load still on its way
+  const rows = loadLibrary(orgId, LIBRARY_FIELDS)
     // before database change 043 (no setting column), or 040 (no library at all)
-    try { rows = await all(() => supabaseAdmin.from('ai_examples').select('id, source, kind, outcome, offer_what, dialogue, phase, situation, his_level, her_level, mood, moment, him, reply').eq('organisation_id', orgId).order('id')); } catch { rows = []; }
-  }
+    .catch(() => loadLibrary(orgId, LIBRARY_FIELDS.replace(' setting,', '')).catch(() => []));
   libraryCache.set(orgId, { at: Date.now(), rows });
   return rows;
 }
