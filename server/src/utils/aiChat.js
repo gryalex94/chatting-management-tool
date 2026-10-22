@@ -1138,7 +1138,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // why no PPV can go out right now (then she mustn't promise one either)
   let noOffer = !sell ? '' : readFailed ? 'the read of his message failed (no planner answered): nothing sold on a blind read.' : !level.warm ? `you are still in the warm-up (${herHere} of ${session.warm_up} of your messages this conversation), so get to know him first.`
     : waiting?.open ? `your PPV "${waiting.p.title}" is still unopened: point him to that one instead.` : session.no_sell ? `${session.no_sell}.` : '';
-  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes, closeness: first.closeness, lately: herReplies(convo).slice(-15) };
+  // he is sharing something hard: a check-in question stays possible whatever the question rules say
+  const hard = ['venting', 'complaining'].includes(reading?.doing) || reading?.stance === 'comfort' || (session.gauges?.mood ?? 100) < 40;
+  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start, hard }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes, closeness: first.closeness, lately: herReplies(convo).slice(-15) };
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
   // a new subscriber sexts after his first buy, not before (A1): the probe comes first
@@ -2052,11 +2054,14 @@ function hisNames(chat, fan = {}) {
 // When her reply shouldn't ask him anything: he said yes or chose, he said what he
 // wants, or she has asked a lot lately. '' = one question is fine.
 const SAID_YES = /^\W*(?:yes+|yeah+|yep|ya+s*|sure|ok(?:ay)?|of course|absolutely|definitely|why not|both|all of (?:it|them)|all at once|go (?:on|ahead)|do it|please|let'?s go|i do|i am|i'?m in|keep going|more)\b/i;
-const WANTS = /\b(?:i\s+(?:want|wanna|need|would\s+love)|i'?d\s+love|wanna|let'?s|show\s+me|send\s+me|give\s+me|surprise\s+me|make\s+me|tell\s+me|keep\s+going|i'?m\s+(?:about\s+to|so\s+close|close\s+to))\b/i;
-function noQuestionWhy({ recent = [], recent10 = null, latest = [] }) {
+// (not a request to talk, vent, confess or for advice: "I need to talk about something" still gets her check-in question)
+const WANTS = /\b(?:i\s+(?:want|wanna|need|would\s+love)|i'?d\s+love|wanna|let'?s|show\s+me|send\s+me|give\s+me|surprise\s+me|make\s+me|tell\s+me|keep\s+going|i'?m\s+(?:about\s+to|so\s+close|close\s+to))\b(?!\s+(?:to\s+)?(?:talk|tell|ask|vent|share|say|chat|open\s+up|get\s+(?:something|this|it)\s+off|be\s+honest|confess|explain|advice|help|someone|a\s+friend|your\s+(?:opinion|advice|thoughts|honest))\b)/i;
+// `hard` = he is sharing something hard: one check-in question is always allowed.
+function noQuestionWhy({ recent = [], recent10 = null, latest = [], hard = false }) {
   const said = latest.join(' ');
   const lastAsked = recent.length > 0 && recent[recent.length - 1].includes('?');
   if (lastAsked && SAID_YES.test(said) && said.split(/\s+/).length <= 8) return 'he just answered your question: do what he chose or said yes to, don\'t ask again.';
+  if (hard) return '';
   if (WANTS.test(said)) return 'he told you what he wants: say yes, react or lead.';
   if (recent.slice(-2).length === 2 && recent.slice(-2).every(r => r.includes('?'))) return 'you asked him something in your last two replies; this time react, tease or tell him something instead.';
   const ten = (recent10 || recent).slice(-10);
@@ -2071,12 +2076,12 @@ function noQuestionWhy({ recent = [], recent10 = null, latest = [] }) {
  * conversation starts (the question rule looks at this conversation only: what
  * she asked months ago doesn't count).
  */
-function voiceFor({ chat, fan = {}, latest = [], followUp = false, from = 0 }) {
+function voiceFor({ chat, fan = {}, latest = [], followUp = false, from = 0, hard = false }) {
   const recent = herReplies(chat).slice(-6);
   return {
     recent, names: hisNames(chat, fan),
     his: chat.filter(m => m.from_fan).slice(-6).map(m => clean(m.text)).join('\n'),
-    noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), recent10: herReplies(chat).slice(-10), latest }),
+    noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), recent10: herReplies(chat).slice(-10), latest, hard }),
     openers: recent.slice(-4).map(r => r.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '')).filter(Boolean),
   };
 }
