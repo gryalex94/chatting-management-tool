@@ -91,7 +91,7 @@ const CHAT_GUIDE = [
   'Talk to him, not about him: never "someone\'s eager", "aren\'t they?" or "I like a man who…".',
   'Questions: at most one per reply, in about four replies out of ten, mostly follow-ups on what he just said; never three replies in a row with one. The rest react, tease or tell him something about you instead. When he has told you what he wants, or said yes to something, don\'t ask again: do it, say yes or lead.',
   'Warm up first: get to know him and have a real chat before anything sexual. The chats that sold best had a long, friendly warm-up. But if he gets sexual first, don\'t stall or play coy: say yes in your own playful way and tease (see "Right now").',
-  'Follow his lead on how sexual it gets (see "Right now"). Tease and hint rather than describe: teasing worked far better than going explicit too soon.',
+  'Follow his lead on how sexual it gets (see "Right now"). Tease and hint rather than describe while it builds: teasing worked far better than going explicit too soon. Once the story is at its peak and he is explicit, say it plainly, in his words (see "Right now").',
   'If he jokes, joke back. If he pulls back or says it\'s going fast, laugh it off and go back to normal talk.',
   'Don\'t bring up your body or looks unless he does.',
   'You only know your own time. Don\'t guess his time of day or what he is doing ("up early", "up late") unless he told you.',
@@ -243,7 +243,9 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (clean(situations)) parts.push(`# What fits this moment (what worked in the agency's chats; follow it in your own words and style)\n${clean(situations)}`);
   // sexting: the story she leads, where it is now, and ideas for its next step
   if (sexting?.on) {
-    const lines = [sexting.scene ? `So far: ${sceneLine(sexting.scene)}` : `No scene yet: start one now${sexting.seed ? `, ${sexting.seed}` : ''}.`];
+    const lines = [];
+    if (sexting.look?.outfit || sexting.look?.setting) lines.push(`Where you are and what you have on right now, for real: ${[sexting.look.setting && `in your ${sexting.look.setting}`, sexting.look.outfit && `wearing ${sexting.look.outfit}`].filter(Boolean).join(', ')} (the photos you send next, "${sexting.look.title}", show exactly this). When he asks what you're wearing, this is the answer; never describe another outfit or another place, and don't say the lights are off.`);
+    lines.push(sexting.scene ? `So far: ${sceneLine(sexting.scene)}` : `No scene yet: start one now${sexting.seed ? `, ${sexting.seed}` : ''}.`);
     if (sexting.next) lines.push(sexting.next);
     if (sexting.hint) lines.push(sexting.hint);
     const m = sexting.moves;
@@ -275,6 +277,7 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
     now_.push(`He seems ${level.mood || 'chatty'}; his last message is ${LEVELS[level.his] || LEVELS[0]}. Keep your reply at most ${LEVELS[level.max]}${level.max > level.his ? ', one step more than him at the very most' : ': don\'t go further than he does'}.`);
     if (level.pulled_back) now_.push('He is slowing things down: ease off, laugh it off if it fits, and go back to normal, friendly talk.');
     else if (level.his >= 2 && level.max >= 2 && level.lead) now_.push('He is into it: take the lead now. Say what you are doing or would do, one step at a time; don\'t ask him what he wants.');
+    if (sexting?.on && level.his >= 3 && level.max >= 3 && ['building', 'peak'].includes(sexting.stage)) now_.push('He is explicit and the story is there: match his words now. Use the plain words he uses (if he says pussy or cock, so do you), say what you are doing and feeling in concrete terms, one short message; hinting at this point reads as stalling.');
     else if (level.his >= 2) now_.push('He got sexual first. Don\'t stall or play coy: say yes in your own playful way and tease (hint, don\'t describe yet). Don\'t comment on how eager or direct he is.');
   }
   if (mood) now_.push(`Your mood today: ${mood}. Let it colour your tone a little; don't announce it.`);
@@ -676,6 +679,32 @@ function splitBubbles(list) {
 }
 
 /**
+ * A garment she says she has on that the next photos contradict (the sexting set's look): the first clashing
+ * garment, or null. Families count as one ("panties" for "thong"; "naked" for "fully nude").
+ */
+const GARMENTS = [
+  ['t-shirt', /\b(?:t-?shirt|tee)\b/i, ['t-shirt', 'tee', 'shirt']], ['shirt', /\bshirt\b/i, ['shirt']], ['hoodie', /\bhoodie\b/i, ['hoodie']], ['sweater', /\b(?:sweater|jumper|sweatshirt)\b/i, ['sweater', 'jumper', 'sweatshirt']],
+  ['dress', /\bdress\b/i, ['dress']], ['jeans', /\bjeans\b/i, ['jeans']], ['leggings', /\bleggings\b/i, ['leggings']], ['pyjamas', /\b(?:pyjamas|pajamas|pjs)\b/i, ['pyjama', 'pajama', 'pjs']],
+  ['robe', /\b(?:robe|bathrobe)\b/i, ['robe']], ['towel', /\btowel\b/i, ['towel']], ['skirt', /\bskirt\b/i, ['skirt']], ['bikini', /\bbikini\b/i, ['bikini']], ['lingerie', /\blingerie\b/i, ['lingerie', 'lace']],
+  ['bra', /\b(?:bra|bralette)\b/i, ['bra']], ['panties', /\b(?:panties|underwear|knickers|thong)\b/i, ['panties', 'underwear', 'thong', 'knickers']], ['shorts', /\bshorts\b/i, ['shorts']],
+  ['crop top', /\bcrop ?top\b/i, ['crop top', 'crop-top']], ['tank top', /\btank ?top\b/i, ['tank top', 'tank']], ['socks', /\b(?:socks|stockings)\b/i, ['socks', 'stockings']],
+  ['nothing', /\b(?:naked|nude|nothing on|nothing at all|not wearing anything)\b/i, ['nude', 'naked', 'nothing']],
+];
+function outfitClash(text, outfit) {
+  const t = String(text || ''), o = String(outfit || '').toLowerCase();
+  if (!o) return null;
+  const wearing = /\b(?:wearing|got on|have on|in (?:just|only)|just (?:an?|my|some)|only (?:an?|my|some)|i'?m in (?:an?|my)|slipped (?:into|on)|threw on|put on|still in|naked|nude|nothing on)\b/i.test(t);
+  if (!wearing) return null;
+  for (const [name, re, words] of GARMENTS) {
+    if (!re.test(t)) continue;
+    if (words.some(w => o.includes(w))) continue;
+    if (name === 'nothing' && /\b(?:nude|naked|topless)\b/.test(o)) continue;
+    return name;
+  }
+  return null;
+}
+
+/**
  * The surface of real texting (research round 2, measured on the agency's Fanvue chatters): about one
  * reply in five starts in lowercase; a short last bubble doesn't end with a full stop (8% of theirs do,
  * and a full stop at the end of a short text reads as less sincere).
@@ -715,4 +744,4 @@ function addTypo(list, { chance = 1 / 15, fixChance = 0.5, rand = Math.random } 
   return { messages: out, typo: { word: w, fixed } };
 }
 
-module.exports = { parseJsonObjects, readReplies, splitBubbles, surfacePass, EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };
+module.exports = { parseJsonObjects, readReplies, splitBubbles, surfacePass, outfitClash, EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };

@@ -1080,7 +1080,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // her replies since he first got sexual, by the checked level (the reader's read counts, not only the word list)
   // (an odd line, about other men or a provocation, isn't him getting sexual with her: the path keeps its count)
   if (level.his >= 2 && session.hot_at == null && !reading?.odd) session = { ...session, hot_at: herTurns };
-  const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0);
+  // he hands her the lead: that is the sexy vibe's answer, so a new subscriber's direct ask may come now
+  const invited = INVITES_LEAD.test(saidNow);
+  const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0, invited && level.his >= 2 ? 3 : 0);
   const stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: reading?.odd ? Math.min(level.his, 1) : level.his, since: sinceHot, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
   if (stage?.stage === 'offer' && !level.warm) level.warm = true;       // the path says: offer now
   // paid requests, refusals and unusual asks (services.js, D1–D9), and what they change in the session
@@ -1175,7 +1177,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
     content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
-    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed,
+    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited,
   });
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
@@ -1262,7 +1264,12 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     only: replyPlan.offer?.items?.map(it => it.id) || null,
     firstPpv: !taste.bought && !attempts.here,
   } : null;
-  const results = await Promise.all(writers.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sellFor })));
+  // the explicit peak (his level explicit, the story building or at its peak): an optional other writer for those replies
+  // (Mistral Large sexts but keeps to hints; the roleplay models say it plainly). Off unless AI_CHAT_SEXT_WRITER or the persona's sext_writer names one.
+  const sextWriter = process.env.AI_CHAT_SEXT_WRITER || persona.settings?.sext_writer || null;
+  const explicitPeak = !!(sexting?.on && level.his >= 3 && level.max >= 3 && ['building', 'peak'].includes(sexting.stage));
+  const writersNow = explicitPeak && sextWriter && or.isOffered(sextWriter) && !models.length ? [sextWriter] : writers;
+  const results = await Promise.all(writersNow.map(model => writeOne({ orgId, creatorId, fanUuid, model, base, latest, recentHer, voice, speed, emojis, sell: sellFor })));
   // the direct ask (A1) counts only when a reply really asked him something
   if (!whatIf && replyPlan.goal === 'direct_ask' && results.some(r => (r.replies || []).some(m => /\?/.test(m.creator_message || '')))) session = { ...session, first_sale: { ...session.first_sale, asked: true } };
   // the rules you approved from your marks (C2) join the house rules in Claude's check
@@ -1713,6 +1720,10 @@ const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'l
 const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu)\b/i;
 // an odd line for a man chatting her up (engine v2): about other men's bodies or men as what he's into, not about her
 const ODD_LINE = /\b(?:dicks|cocks|penises|balls)\b(?![^.!?]*\b(?:your|ur|you|u)\b)|\b(?:i'?m|i am|im) (?:into|attracted to) (?:guys|men|boys|dudes)\b|\b(?:guys|men|boys|dudes) are (?:hot|sexy)\b|\bi love (?:hard |big )?(?:dicks|cocks)\b/i;
+// he hands her the lead ("I'm all yours", "what are you going to do with me"): a concrete move now, and a new subscriber's direct ask may come
+const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m yours|do (?:whatever|what|anything) you want (?:with|to) me|take the lead|(?:you'?re|you are|ur) in charge|what (?:are you going|would you like|do you want) to do (?:with|to) me|what would you do (?:with|to) me|use me|have your way|show me what you'?ve got|i'?m (?:in your hands|at your mercy))\b/i;
+// a reply that only promises instead of doing something: "I've got ideas", "you'll see"
+const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
 // his one-word replies in a row at the end of a conversation (fix 1): "ok", "k", "lol", "yes"…
@@ -1942,10 +1953,13 @@ function storySeed(content, convo) {
   const next = steps.find(it => it.step === (bought.length ? Math.max(...bought) : 0) + 1);
   const first = steps[0];
   const shot = [first.setting && `in ${first.setting}`, first.outfit && `wearing ${first.outfit}`].filter(Boolean).join(', ');
+  // what she really has on, and where: the next step's photos (the writer must not invent an outfit the photos contradict)
+  const here = next || first;
   return {
     seed: shot ? `set where your sexting sequence "${name}" was shot (${shot}), so its PPVs fit the story` : '',
-    next: next ? `Next in "${name}": step ${next.step}, [c${next.id}] "${next.title}" (${C.what(next)}, ${C.money(next.price)}). Inside: ${next.description} Lead the story to it, then attach it.` : '',
+    next: next ? `Next in "${name}": step ${next.step}, [c${next.id}] "${next.title}" (${C.what(next)}, ${C.money(next.price)}). Inside: ${next.description} Lead the story to it, then attach it.${next.kind === 'video' ? '' : ' These are still photos: the caption shows how you look right now ("this is me right now"), never a movement the photos can\'t show ("pulling it up").'}` : '',
     shot: first.setting || '',
+    look: here && (here.outfit || here.setting) ? { outfit: clean(here.outfit), setting: clean(here.setting), title: here.title } : null,
   };
 }
 
@@ -1959,13 +1973,13 @@ async function storyFor({ orgId, level, scene, said, content, convo, waiting, se
   const on = !level.pulled_back && ((level.his >= 2 && (level.lead || level.match)) || (!!scene && level.his >= 1));
   if (!on) return null;
   const { stage, hint } = storyStage(scene, said);
-  const { seed, next, shot } = sell ? storySeed(content, convo) : { seed: '', next: '', shot: '' };
+  const { seed, next, shot, look } = sell ? storySeed(content, convo) : { seed: '', next: '', shot: '', look: null };
   const skip = new Set([scene?.beat, ...(sell && !noOffer ? [] : ['teases_ppv', 'after_ppv'])].filter(Boolean));
   const ideas = await sceneIdeas(orgId, { stage, setting: settingOf(scene?.where || shot), his: level.his, max: level.max, skip, said, n: 2 });
   const hour = Number(new Date().toLocaleString('en-GB', { timeZone, hour: '2-digit', hour12: false })) % 24;
   const moves = storyMoves({ scene: scene || (shot ? { where: shot } : null), stage, hour });
   if (moves && !scene && shot) moves.start = [];               // her sequence says where it starts
-  return { on: true, scene, stage, hint, seed, next: waiting?.open || stage === 'after' ? '' : next, ideas, moves };
+  return { on: true, scene, stage, hint, seed, look: look || null, next: waiting?.open || stage === 'after' ? '' : next, ideas, moves };
 }
 
 // Beats from the agency's sexting chats (kind 'scene', database change 043) for the
@@ -2424,6 +2438,11 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (ignoresMedia) now.style.push(`It doesn't react to what's in his ${seen.video ? 'video' : 'photo'}: say one specific thing you see in it (${(seen.details || []).slice(0, 2).join(', ') || seen.kind}).`);
       // an offer that doesn't offer (deep dive): on a planned sell day the piece has to be attached, not just talked about
       if (sell && ['offer', 'first_offer', 'steer_to_sale'].includes(base.plan?.goal) && base.plan?.sell?.allowed && !draft.ppv && !noPpv) now.style.push('The plan is to offer now: attach one of the pieces it picked (the "ppv" field), don\'t only talk about it.');
+      // the sexting set's look (fix: the story must match the photos): an outfit the next step's photos contradict is rewritten here
+      const look = base.sexting?.look;
+      if (look?.outfit) { const clash = P.outfitClash(draft.messages.join(' '), look.outfit); if (clash) now.style.push(`It says you have "${clash}" on, but the photos you send next show ${look.outfit}: describe what you really have on.`); }
+      // he handed her the lead: a reply that only promises ("I've got ideas") is stalling
+      if (base.plan?.invited && PROMISE_ONLY.test(draft.messages.join(' '))) now.style.push('He handed you the lead: do something concrete now (a playful command, what you do first); "I have ideas" and "you\'ll see" are stalling.');
       // a curious reply (step 2) asks the one real question it was planned around
       if (base.plan?.goal === 'curious' && draft.messages.length) {
         const planned = wordsOf(base.plan.reading?.curious || '');
@@ -2470,7 +2489,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     const notes = [...pick.problems];
     // a typo now and then (A8), only on a reply that passed and carries no PPV
     let typo = null;
-    if (pick.verdict !== 'block' && !draft.offer && !draft.ppv) {
+    if (pick.verdict !== 'block' && !draft.offer && !draft.ppv && (recentHer.length > 0)) {   // never on her first reply to him
       const t = P.addTypo(draft.messages);
       draft.messages = t.messages;
       typo = t.typo;

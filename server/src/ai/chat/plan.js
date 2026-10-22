@@ -191,7 +191,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, rand = Math.random }) {
+function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -345,6 +345,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   p.hard = p.goal === 'comfort' || ['venting', 'complaining'].includes(p.reading?.doing) || (gauges ? gauges.mood < 40 : mood === 'sad');
   p.questions = questions || null;
   p.read_failed = !!readFailed;
+  p.invited = !!invited && !['goodbye', 'no_reply', 'dry_bye', 'refuse', 'comfort', 'reassure', 'calm'].includes(p.goal);
   p.promised = (p.reading && reading?.promised?.length ? reading.promised : []).slice(0, 2);
   // a service offered and not paid yet: nothing is delivered before his tip (D2)
   p.tip_first = svc?.state === 'offered' && p.goal !== 'service_offer' ? `You've named $${svc.price} for ${svc.label.toLowerCase()} and he hasn't tipped yet: don't deliver any of it; if he brings it up, remind him lightly that the tip comes first.` : '';
@@ -385,6 +386,8 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
     }
     else if (match?.full.length) p.offer = { items: match.full.slice(0, 3), why: `he asked for ${match.wants.join(' + ')}` };
     else if (sexting?.next && (gap == null || gap >= 2)) p.offer = { next: sexting.next, why: `the next step of her set${gap != null ? ` (${gap} of her messages since the last PPV)` : ''}` };
+    // her set is in play but the next step isn't due yet: the story goes on, nothing else is attached (a random pick would break the sequence)
+    else if (sexting?.next) p.sell = { allowed: false, why: `her sexting set goes step by step: the next step after a couple of story messages (${gap ?? 0} since the last PPV)` };
     else if (['offer', 'steer_to_sale', 'after_buy', 'cheaper', 'tease', 'chat', 'welcome_back'].includes(p.goal) || aim === 'sell') {
       const declined = p.goal === 'cheaper' && waiting?.p?.item ? content.find(it => `c${it.id}` === String(waiting.p.item)) : null;
       const pick = Sl.pickFor({ content, taste, offered, level, stepUp: p.goal === 'after_buy', cheaperThan: p.goal === 'cheaper' ? Number(waiting?.p?.price) || null : null, maxBand: declined ? Sl.bandOf(declined) : null, rand });
@@ -530,6 +533,7 @@ function planText(p) {
   if (p.reading?.readings?.length) lines.push(`You're not sure what he means: ${p.reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}% sure)`).join('; ')}. Don't assume; ask lightly or tease around it.`);
   if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
+  if (p.invited) lines.push('He handed you the lead ("I\'m yours", "what are you going to do with me"): make a concrete first move now, a playful command or what you do first, in one or two short lines; never a promise of ideas or "you\'ll see".');
   if (p.hard) lines.push('He is sharing something hard: show you understood exactly what he said (his own words, the feeling named), nothing about your own day or a similar story of yours, no advice he didn\'t ask for; warmth through understanding, not through saying how much you care.');
   if (p.promised?.length) lines.push(`You told him earlier: ${p.promised.map(x => `"${x}"`).join(', ')}. Don't leave it hanging: keep it (content only ever as a PPV), or say honestly where it stands.`);
   if (p.read_failed) lines.push('His message couldn\'t be read properly this time: answer what he literally wrote, simply and safely; nothing sold, nothing assumed about his mood.');
