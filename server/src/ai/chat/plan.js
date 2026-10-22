@@ -64,7 +64,7 @@ const BEATS = {
   roleplay: ['play your part in the scene, one step on', 'keep him in it'],
 };
 // a second beat from the runner-up move, when it fits with the first (never two questions, never a tease with comfort)
-const RUNNER_BEAT = { share: 'a small real thing of yours that fits', flirt: 'a light flirt', tease: 'a tease, hinting', curious: 'one question about what he said', get_to_know: 'one easy question about him', react: null, offer: null, steer: null, readiness_check: null, comfort: null, reassure: null };
+const RUNNER_BEAT = { share: 'a small real thing of yours that connects to what he just said, not your day out of nowhere', flirt: 'a light flirt', tease: 'a tease, hinting', curious: 'one question about what he said', get_to_know: 'one easy question about him', react: null, offer: null, steer: null, readiness_check: null, comfort: null, reassure: null };
 function beatsFor(p) {
   const base = [...(BEATS[p.goal] || ['react to what he said'])];
   if (p.goal === 'curious' && p.reading?.curious) base[1] = `one real question about it: "${p.reading.curious}"`;
@@ -237,7 +237,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // a dead topic gets no more questions (a fresh one about him is fine)
   // (dead only on his little answers: a man who writes a real message, or hands her the lead, is opening something, not ending it)
   const joke = reading?.answers === 'joke';
-  const dead = reading?.thread === 'dead' && !invited && words(said) <= 6;
+  const dead = reading?.thread === 'dead' && !invited && words(said) <= 6 && !/\?/.test(said) && !reading.asked?.length;   // a question from him is never a dead end
   const topic = new Set([...(session?.asked_about || []).slice(-2), said].flatMap(topicWords));
   const freshAsk = (q) => !dead || !topicWords(q).some(w => topic.has(w));
   p.dead_words = dead ? [...topic] : [];                     // the writer's question is checked against them (aiChat.writeOne)

@@ -47,6 +47,18 @@ The second research round measured the agency's own chatters (67,070 small-talk 
 
 Not followed: dropping the reply delays. They were never a warmth trick here; they keep her from looking like an auto-responder and pace the day. Bubble gaps stay short and even.
 
+## Round 3 (22 Oct): reading him right, keeping her meaning
+
+From an outside review (Codex, with offline probes) and the Abeba practice chat (run 8, the "rooibos tea" reply). The full plan with every case is `AI_CHAT_FIX_PLAN_22_OCT.md`. One standing rule came out of it: code may flag a draft and ask for a rewrite, but never rewrites her words into something that means something else.
+
+1. **The tidy step keeps her meaning.** "Someone is" becomes "you're" only in a tease about him ("someone's eager tonight"), never in a story ("my flatmate says someone is stealing her coffee"). Her own morning ("I went hiking this morning") is no longer deleted as a guess at his clock. A second bubble that hangs on her question ("If so, that is my favourite") stays after it.
+2. **The rules read him right.** Only a real challenge ("why finally? I just subscribed", "wow ok", "what do you mean?") gets the light repair; "why do you like painting?" gets a plain answer and "wow, that painting is beautiful" is praise. Concern and criticism are no longer received as compliments. "I need to talk about something" no longer blocks her check-in question, and a hard moment always keeps one.
+3. **The picker answers him.** When he asked something, a dodge ("good question") loses and a candidate that picks up his question wins. A share by meaning ("painting helps me switch my brain off") counts as one.
+4. **Meaning problems aren't "ok".** Invented history with a new fan, an unanswered question, a missed welcome and the like get a third draft; if they survive, the reply is marked "check" with a "still wrong" note. A question counts as asked only once a written reply asked it. With selling off, the first-sale path skips the direct ask and the offer. Claude's coach sees her personality.
+5. **The rooibos chain.** After his short answer to her question, a second question in a row is fine (three never are) and a story of hers scores lower than a follow-up. A share has to connect to what he said. A first bubble that only says his words back ("South Africa…") is rewritten. A talk reply after his short message has to leave him a door (a question, a word to him, a guess about him).
+
+Checked with `scripts/check-communication.js` (offline, every item), the simulation (zero flags), the replay (run 8's third reply now plans a follow-up question) and `scripts/written-moments.js` (four moments written by the real writer).
+
 ## What is still the AI's call, and the next lever
 
 Code decides every number (prices, cadence, stages, holds, budgets), checks the reading against his words, and scores the moves. Claude reads the human side (what he is doing, what is new, what it could mean). Mistral writes. The weakest link now is the writing: with a clear plan and clear beats, Mistral still sometimes stalls on a sexual line or asks a rhetorical question instead of the planned one; Claude's check catches it and the targeted rewrite fixes some. The next lever is yours to judge from the blind tests already run (Mistral against Haiku and against Sonnet on talk moments): a Claude writer for talk and curious moments, Mistral for selling and sexting, at about three cents a reply for Sonnet.
