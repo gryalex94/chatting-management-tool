@@ -93,17 +93,18 @@ Add `&& !DEPENDS.test(parts[1])` to the first swap and `&& !DEPENDS.test(out[1])
 
 **Now:** "Why do you like painting?" and "Wow, that painting is beautiful" both set `repair: true`, add the beat "own what you said lightly… I was teasing", and clear the answer-first beat. Only a real challenge ("Why finally? I just subscribed") should.
 
-**Change:** replace the regex with challenges only. A bare "why?" is *not* a pushback (it is a sincere question and goes to answer-first). The reader's own read of a dig (the second half of the `pushedBack` expression, readings about a dig with sureness ≥ 0.5) stays as it is.
+**Change:** replace the regex with offended challenges only. A bare "why?" is *not* a pushback (it is a sincere question and goes to answer-first). "What do you mean?", "huh?", "wait what", "lol what" are *confusion*, not offence: they go to item 16 (he didn't get her last line, she explains). The reader's own read of a dig (the second half of the `pushedBack` expression, readings about a dig with sureness ≥ 0.5) stays as it is.
 
 ```js
-const PUSHBACK = /^(?:why (?:finally|that|so (?:cold|rude|mean|formal|serious|dry)|would (?:you|u) (?:say|think|assume)|do (?:you|u) (?:say|think|assume|keep saying)|are (?:you|u) (?:being|acting|like that))\b|what do you mean\b|what'?s that supposed to mean\b|excuse me\b|wow\W*$|wow,? (?:ok(?:ay)?|rude|really|bold|that'?s (?:a bit|bold|rude|forward|presumptuous|not))\b|huh\W*$|lol what\W*$)|\b(?:i just subscribed|who said (?:anything|that|i)|that'?s (?:rude|a bit much|not fair|not what i)|where did that come from|what are you talking about|i never said|when did i)\b/i;
+const PUSHBACK = /^(?:why (?:finally|that|so (?:cold|rude|mean|formal|serious|dry)|would (?:you|u) (?:say|think|assume)|do (?:you|u) (?:say|think|assume|keep saying)|are (?:you|u) (?:being|acting|like that))\b|what'?s that supposed to mean\b|excuse me\b|wow\W*$|wow,? (?:ok(?:ay)?|rude|really|bold|that'?s (?:a bit|bold|rude|forward|presumptuous|not))\b)|\b(?:i just subscribed|who said (?:anything|that|i)|that'?s (?:rude|a bit much|not fair|not what i)|where did that come from|i never said|when did i)\b/i;
 ```
 
 **Must hold** (through `Plan.planReply` with a talk goal and `herReplies > 0`):
 - "Why finally? I just subscribed" → `repair: true`
 - "Why do you like painting?" → `repair: false`, `answer_first` non-empty, no "I was teasing" beat
 - "Wow, that painting is beautiful" → `repair: false`
-- "wow ok", "huh?", "What do you mean?", "Wow really? that's rude" → `repair: true`
+- "wow ok", "Wow really? that's rude", "What's that supposed to mean?" → `repair: true`
+- "What do you mean?", "huh?" → `repair: false` (item 16 takes them)
 - "wow, you're beautiful" → `repair: false`
 
 ### 5. Concern and criticism count as compliments
@@ -323,6 +324,87 @@ const DOOR = /\?|\b(?:you|your|yours|u|ya)\b|\b(?:tell me|go on|convince me|prov
 
 ---
 
+## Group E: the Mike chat (practice run 10)
+
+What happened (the saved decision maps, `ai_practice_runs` id 10): "Hey" → her welcome question; "Im arab" → the reader's curious question; "We like to explode every now and then" was read as a plain joke (doing `joking`, not odd), her two questions in a row blocked the third, the plan became react plus "a small real thing of yours", and the thing of hers the writer picked was her mood of the day ("a little moody, could use some cheering up"), glued onto his line: "Haha, I love that energy babe / I could use some of that right now actually". He asked "What do you mean?". That matched `PUSHBACK`, so the plan said "own it lightly, no excuse, no explaining" and switched the answer-first beat off, which is the opposite of what he needed. The reader's curious question mixed the speakers up ("What's got you needing some explosion today?", though it was she who "could use some"), the meters made curious the goal (surprise 54), the plan insisted on that question, Claude's question check rejected it as nonsense, the curious check demanded it anyway, the coach found the result weak, the fix asked it again in disguise ("what's got you feeling like that?"), and the session stored "feeling a little slow today" as a fact about her. "babe" also slipped past the pet-name cap in her third reply.
+
+### 16. "What do you mean?" means he didn't get her line: she explains
+
+**File:** `src/ai/chat/plan.js` (next to `PUSHBACK`, item 4), `src/ai/chat/gauges.js` (`scoreMoves`), `planText`.
+
+**Change:**
+
+```js
+// he didn't get her last line: not offended, confused. She says plainly what she meant; no question back
+const CONFUSED = /^(?:what do (?:you|u) mean|what\W*$|huh\W*$|wait,? what\W*$|lol what\W*$|what are you (?:talking about|on about)|i don'?t (?:get|understand) (?:it|that|you)|meaning\W*$|come again\W*$)/i;
+```
+
+- `p.clarify = talkGoal && herReplies > 0 && !pushedBack && (CONFUSED.test(said) || (p.reading?.readings || []).some(r => /\b(?:asks her to explain|didn'?t (?:get|understand) her|misread her line|what she meant)\b/i.test(r.what) && r.sure >= 0.4));`
+- when `p.clarify`: `p.reading.curious = ''` (a question back is not the move), `answerable` is true, and `p.answer_first` reads: `He didn't get your last line ("<her last reply, 120 chars>"): say plainly what you meant, light, in one line; don't repeat the joke, don't apologise, then on`. The beats start with that line.
+- `scoreMoves` gets `clarify: !!p.clarify`; the `curious` and `get_to_know` moves are not allowed when set (reason "he asked what you meant: explain first, no question back"); `react` and `share` stay.
+- `planText` gets a line for it, like the repair line.
+
+**Must hold:** "What do you mean?" after her reply → `repair: false`, `clarify: true`, the goal is not `curious`, `answer_first` names her last line. "What's that supposed to mean?" → still `repair: true`.
+
+### 17. A planned question that the question check rejects is dropped, not insisted on
+
+**File:** `src/utils/aiChat.js`, `writeOne`: the curious style check ("This reply has to ask the one thing you wanted to know…") and the question check that sets `now.badQuestion`.
+
+**Now:** the two checks contradict each other and the loop ends with the "could sound better" note, then the coach rewrites toward the bad question again.
+
+**Change:** keep a local flag `questionDropped` in `writeOne`. When the question check rejects a draft's question on a `curious` goal and the rejected question overlaps the planned one (`wordsOf` overlap with `base.plan.reading.curious`), set it. From then on in this `writeOne`: skip the curious style check, tell the writer in the retry text "the question you planned didn't fit this moment: no question this time, react and say what you meant", and the picker gets no "asks the planned question" bonus (pass the flag in). Record it in the step's style list once so the decision map says why.
+
+**Must hold:** with a question check that rejects the planned question, the second draft is accepted without a question and without the "has to ask the one thing" note.
+
+### 18. Her mood of the day is colour, not content
+
+**Files:** `src/ai/chat/prompts.js` (`replyPrompt`, line 283), `src/utils/aiChat.js` (`writeOne` style checks, and the `about_me` facts).
+
+**Now:** the writer turns "a little moody, could use some cheering up" into lines ("I could use some of that right now", "oh just feeling a little slow today"), in her first replies to a brand-new subscriber, and the line is then stored as a fact about her.
+
+**Change:**
+- the mood line is not given at all in her first three replies of a conversation to a new subscriber (`fan.new_sub && (voice?.recent || []).length < 3`), and its wording becomes: `Your mood today: ${mood}. It colours your tone only: never say it, hint at it, or make it the thing of yours you share.`
+- a style check in a talk goal:
+
+```js
+const MOOD_TALK = /\b(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off|blah|flat)|could use (?:some|a bit of) (?:that|cheering|energy|of that)|not (?:my|the best) day|in a (?:mood|funk)|bit of a (?:mood|funk|slump)|cheer me up)\b/i;
+```
+
+  When it matches and (`closeness === 'new'` or her replies in this conversation < 5): `'Your mood of the day is colour, not content: don't tell him you're slow or down; react to him instead.'` Add this phrase to `SERIOUS_STYLE` (item 8).
+- `draft.about_me` entries that match `MOOD_TALK` are dropped before they are saved or shown.
+
+**Must hold:** "I could use some of that right now actually" and "oh just feeling a little slow today" are flagged for a new subscriber; a close fan in a long chat is not affected.
+
+### 19. A pet name as the last word slips the cap
+
+**File:** `src/ai/chat/prompts.js`, `dropPet` (line 486).
+
+**Now:** the drop rules cover "hey babe", "babe, …", ", babe," and ", babe." but not "I love that energy babe" (no comma), so the cap for her first three replies did nothing.
+
+**Change:** add a rule for a pet name as the last word before end punctuation, an emoji or the end, when it is not preceded by a possessive or an article (so "you're my baby" and "a baby" stay):
+
+```js
+.replace(new RegExp(`(?<!\\b(?:my|your|his|her|a|the|that|this)\\s)\\s+(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '')
+```
+
+Keep the "fewer than two words left" guard.
+
+**Must hold:** "I love that energy babe" → "I love that energy"; "you're my baby" → unchanged; "hey babe" → "hey" (as before).
+
+### 20. The reader's question is hers to him, and a dark joke is a test
+
+**File:** `src/ai/chat/strategy.js`, `readPrompt`.
+
+**Change:** two lines in the prompt:
+- for `curious`: "a question SHE would ask HIM about his words or his life, in her voice; never about something she herself said; empty when he is asking her to explain herself".
+- for `odd` / `doing`: "an edgy or dark joke about himself or his people (violence, stereotypes, 'we like to explode') is him testing her reaction: `doing: testing`, `odd: true`, with a reading 'testing her' and one 'a real joke'".
+
+And in item 12's rule: an odd line also keeps the follow-up question open (the two-in-a-row block is skipped when `reading.odd`), because a real girl asks about an odd line even after two questions.
+
+**Must hold:** on "We like to explode every now and then" the reading has `odd: true` (check with one live reader call in the written moments); the plan allows a question and the curious move scores above react.
+
+---
+
 ## How to verify (in this order)
 
 1. **The probes.** Make `server/scripts/check-communication.js` from the Codex script (same stubs, the expectations below) and run it. Expected after the fixes, by probe id:
@@ -351,16 +433,18 @@ const DOOR = /\?|\b(?:you|your|yours|u|ya)\b|\b(?:tell me|go on|convince me|prov
    - after her "I like painting", he writes "Why do you like painting?": a real answer, no "I was teasing"
    - "I need to talk about something difficult": a check-in question survives
    - a new subscriber's "hello" with selling off, 14 friendly exchanges: never a direct ask
+   - new subscriber Mike: "Hey" → "Im arab" → "We like to explode every now and then" → "What do you mean?": the third reply asks about the odd line or calls the joke, never "I love that energy" plus her mood; the fourth explains her last line plainly with no question back; no "babe" in the first three replies; nothing about her mood is stored as a fact
 5. `graphify update .` from the repository root after the code changes (project rule), and `cd client && npx eslint src` only if the client was touched (it should not be).
 
 ## Commits
 
-Four commits on `main`, pushed after each, plain-language messages that say what changed and why, each ending with the line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`:
+Five commits on `main`, pushed after each, plain-language messages that say what changed and why, each ending with the line `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`:
 
 1. Group A (cleanup keeps meaning)
 2. Group B (pushback, compliment and wants rules read him right)
 3. Group C (the picker, the serious-problem status, the asked question, selling off, the coach)
 4. Group D (the question band after a short answer, the share, the echo, the door), with the probe script and the written-moments script
+5. Group E (he didn't get her line, the rejected planned question, the mood of the day, the pet name as last word, the reader's question and dark jokes)
 
 Update the "Round 2" section of `AI_CHAT_ENGINE_V2.md` with a short "Round 3 (22 Oct)" list of these items, and add the two new scripts to the check list in `AGENTS.md`.
 
