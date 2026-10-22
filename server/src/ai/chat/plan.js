@@ -74,6 +74,7 @@ function beatsFor(p) {
   if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
   if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
+  else if (p.clarify) base.unshift('say plainly what you meant by your last line, in one line; no question back');
   else if (p.answer_first) base.unshift('answer his question plainly, in one line');
   if (p.complimented && !/compliment/.test(base.join(' '))) base.splice(p.repair || p.answer_first ? 1 : 0, 0, 'receive his compliment warmly: thank him in your way, playful and specific; no deflecting, no "I get that a lot"');
   // the floor of the question band: she has asked little lately, and this reply has room for one follow-up
@@ -107,7 +108,9 @@ const SUSPICIOUS = /\b(?:(?:are|r)\s+(?:you|u)\s+(?:even\s+)?(?:an?\s+)?(?:real(
 const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/i;
 // he pushes back on something she just said ("why finally? I just subscribed"): she owns it lightly, no excuse
 // (challenges only: a sincere "why do you like painting?" is a question to answer, and "wow, that's beautiful" is praise)
-const PUSHBACK = /^(?:why (?:finally|that|so (?:cold|rude|mean|formal|serious|dry)|would (?:you|u) (?:say|think|assume)|do (?:you|u) (?:say|think|assume|keep saying)|are (?:you|u) (?:being|acting|like that))\b|what do you mean\b|what'?s that supposed to mean\b|excuse me\b|wow\W*$|wow,? (?:ok(?:ay)?|rude|really|bold|that'?s (?:a bit|bold|rude|forward|presumptuous|not))\b|huh\W*$|lol what\W*$)|\b(?:i just subscribed|who said (?:anything|that|i)|that'?s (?:rude|a bit much|not fair|not what i)|where did that come from|what are you talking about|i never said|when did i)\b/i;
+const PUSHBACK = /^(?:why (?:finally|that|so (?:cold|rude|mean|formal|serious|dry)|would (?:you|u) (?:say|think|assume)|do (?:you|u) (?:say|think|assume|keep saying)|are (?:you|u) (?:being|acting|like that))\b|what'?s that supposed to mean\b|excuse me\b|wow\W*$|wow,? (?:ok(?:ay)?|rude|really|bold|that'?s (?:a bit|bold|rude|forward|presumptuous|not))\b)|\b(?:i just subscribed|who said (?:anything|that|i)|that'?s (?:rude|a bit much|not fair|not what i)|where did that come from|i never said|when did i)\b/i;
+// he didn't get her last line: not offended, confused. She says plainly what she meant; no question back
+const CONFUSED = /^(?:what do (?:you|u) mean|what\W*$|huh\W*$|wait,? what\W*$|lol what\W*$|what are you (?:talking about|on about)|i don'?t (?:get|understand) (?:it|that|you)|meaning\W*$|come again\W*$)/i;
 // he pays her a compliment, or tells her what drew him: it gets received, never brushed off
 // (a positive frame only: "your eyes look tired, are you okay?" is concern, and a negated or critical line is never one)
 const NEGATED = /\b(?:don'?t|dont|do not|didn'?t|not|never|can'?t|cannot|hate|stop)\s+(?:really\s+|even\s+|that\s+)?(?:like|love|into|a fan of|care for|feeling)\b|\bnot (?:that|very|so|really|exactly|even) (?:hot|cute|pretty|sexy|beautiful|gorgeous|special|funny|my type)\b|\b(?:ugly|disgusting|gross|fake|photoshopped?|filtered)\b/i;
@@ -203,7 +206,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, rand = Math.random }) {
+function planReply({ herLast = '', level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -236,16 +239,22 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // a joke answer to her question is plain, not a riddle: nothing to puzzle over, no question about what he meant;
   // a dead topic gets no more questions (a fresh one about him is fine)
   // (dead only on his little answers: a man who writes a real message, or hands her the lead, is opening something, not ending it)
-  const joke = reading?.answers === 'joke';
+  const joke = reading?.answers === 'joke' && !reading?.odd && reading?.doing !== 'testing';   // a harmless joke; a dark one that tests her is odd
   const dead = reading?.thread === 'dead' && !invited && words(said) <= 6 && !/\?/.test(said) && !reading.asked?.length;   // a question from him is never a dead end
   const topic = new Set([...(session?.asked_about || []).slice(-2), said].flatMap(topicWords));
   const freshAsk = (q) => !dead || !topicWords(q).some(w => topic.has(w));
   p.dead_words = dead ? [...topic] : [];                     // the writer's question is checked against them (aiChat.writeOne)
   p.reading = reading ? {
     doing: reading.doing, new: politics || joke ? '' : reading.new, readings: politics || joke ? [] : reading.readings.filter(r => r.sure < 0.85),
-    curious: reading.curious && !politics && !joke && !askedBefore(reading.curious) && freshAsk(reading.curious) ? reading.curious : '',
+    // (an odd line with nothing she'd ask: a real girl asks lightly what he means)
+    curious: reading.curious && !politics && !joke && !askedBefore(reading.curious) && freshAsk(reading.curious) ? reading.curious : reading.odd && !politics && level.his < 2 ? 'What do you mean by that?' : '',
+    // (once he is sexual, a sexual line fits; it counts as odd only when he tests or provokes her)
+    odd: !!reading.odd && (level.his < 2 || ['testing', 'provoking'].includes(reading.doing)),
     stance: politics ? 'deflect' : joke ? 'playful' : reading.stance, answers: reading.answers || '', thread: dead ? 'dead' : 'alive',
   } : null;
+  // he didn't get her last line ("what do you mean?"): she explains it, no question back (the curious question goes)
+  const confusedNow = herReplies > 0 && !followUp && !PUSHBACK.test(said) && (CONFUSED.test(said.trim()) || (reading?.readings || []).some(r => /\b(?:asks her to explain|didn'?t (?:get|understand) her|misread her line|what she meant)\b/i.test(r.what) && r.sure >= 0.4));
+  if (confusedNow && p.reading) p.reading.curious = '';
   const goal = (g, text, why, rules = []) => { p.goal = g; p.goal_text = text; p.why = why; p.rules.push(...rules); };
   const leaving = !followUp && (GOODBYE.test(said) || ids.includes('leaving_soon'));
   const back = !followUp && away >= 2 * DAY_MS && herReplies === 0;
@@ -351,7 +360,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
       tease: level.max >= 2 || stageNow === 'sexy', sell: sellOk, steer: sell && !noOffer && !holdFor('steer_to_sale'), check: sellOk && aim === 'sell' && !session?.asked_ready && !profile.time_waster,
     };
     const hardNow = ['venting', 'complaining'].includes(p.reading?.doing) || gauges.mood < 40;
-    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, rand });
+    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, clarify: confusedNow, rand });
     p.scores = ranked.map(x => ({ move: x.move, score: x.score, allowed: x.allowed, why: x.why }));
     // the ladder's goal is the incumbent: another move has to beat it clearly (or the incumbent isn't allowed)
     const best = ranked.find(x => x.allowed);
@@ -377,6 +386,7 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // he pushes back on something she said: a light repair, not an excuse (and not a plain answer to "why?")
   const pushedBack = talkGoal && herReplies > 0 && (PUSHBACK.test(said) || (p.reading?.readings || []).some(r => /\b(?:dig|push(?:es|ing)? back|took it (?:wrong|badly|personally)|offended|calling (?:her|it) out|correct(?:s|ing) her|didn'?t like (?:her|the))\b/i.test(r.what) && r.sure >= 0.5));
   p.repair = pushedBack;
+  p.clarify = talkGoal && !pushedBack && confusedNow;
   if (p.new_today && p.reading?.curious) p.reading.curious = p.reading.curious.replace(/\b(?:finally|at last|eventually)\b\s*/gi, '').replace(/\s{2,}/g, ' ').trim();
   // he complimented her or told her what drew him: she receives it warmly (that isn't flirting, so the vibe stage allows it)
   p.complimented = talkGoal && !pushedBack && COMPLIMENT.test(said) && !NEGATED.test(said);
@@ -470,9 +480,11 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   }[p.goal];
   // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
   const hisQuestion = reading?.asked?.length ? reading.asked[0] : '';
-  const answerable = (DIRECT_Q.test(said) || !!hisQuestion) && !politics && !p.repair && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
-  p.answer_first = answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
+  const answerable = (p.clarify || DIRECT_Q.test(said) || !!hisQuestion) && !politics && !p.repair && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
+  p.answer_first = answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say plainly what you meant, light, in one line; don't repeat the joke, don't apologise, then on`
+    : answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
+    : p.clarify ? { allowed: false, why: 'he asked what you meant: explain it, no question back' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
     : ['direct_ask', 'readiness_check', 'why_not', 'curious'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)', curious: 'the one question: what she wants to know (R2)' }[p.goal] }
     : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal }
@@ -571,6 +583,7 @@ function planText(p) {
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
   if (p.new_today && ['welcome_new', 'chat', 'curious', 'share', 'get_to_know'].includes(p.goal)) lines.push('He subscribed today and this is his first conversation with you: nothing about waiting, taking his time or "finally"; you have no history together.');
   else if (p.sub_days >= 2 && p.goal === 'welcome_new') lines.push(`He subscribed ${p.sub_days} days ago and writes only now: a light "finally" is fine.`);
+  if (p.clarify) lines.push('He didn\'t get your last line: he is confused, not offended. Say plainly what you meant, light and short, without repeating the joke or apologising; no question back.');
   if (p.repair) lines.push('He pushed back on something you said: own it lightly in one line ("ha, fair, I was teasing"), no excuse and no explaining, then move on warmly.');
   if (p.complimented) lines.push('He gave you a compliment (or told you what drew him): receive it, warm and specific, in your way; never brush it off ("I get that a lot", "hope I live up to it").');
   if (p.invited) lines.push('He handed you the lead ("I\'m yours", "what are you going to do with me"): make a concrete first move now, a playful command or what you do first, in one or two short lines; never a promise of ideas or "you\'ll see".');

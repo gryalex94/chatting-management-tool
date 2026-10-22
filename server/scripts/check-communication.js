@@ -13,6 +13,8 @@ const Plan = req('./server/src/ai/chat/plan');
 let calls = [];
 const reviewCalls = [];
 let writerText = JSON.stringify({ messages: ['I love a good question, you know.'], learned: [], about_me: [], handover: '' });
+let writerQueue = [];                                     // when set, the writer answers these in turn (then writerText)
+let questionVerdict = { ok: true, problem: '' };          // Claude's question check, stubbed
 const reading = { ids: [], level: 0, mood: 'chatty', pulled_back: false, answers: 'straight', thread: 'alive', doing: 'small_talk', new: '', readings: [], curious: '', asked: [], promised: [], odd: false, stance: 'steady' };
 const records = {
   creators: { id: 'creator', organisation_id: 'org', name: 'Synthetic creator' },
@@ -25,11 +27,12 @@ class Query {
   range(n) { this.off = n; return this; } single() { this.one = true; return this; } maybeSingle() { this.one = true; return this; }
   then(resolve, reject) { const v = this.off ? [] : records[this.t] ?? []; return Promise.resolve({ data: this.one ? (Array.isArray(v) ? v[0] ?? null : v) : v, error: null }).then(resolve, reject); }
 }
-const or = { configured: () => true, isOffered: () => true, backupsFor: () => [], DEFAULT_WRITER: 'fixture/writer', writerLabel: x => x, WRITERS: [], chat: async (o) => { calls.push(o); return { text: o.model === 'fixture/writer' ? writerText : JSON.stringify(reading), model: o.model, usage: { cost: 0 }, finish: 'stop' }; } };
+const or = { configured: () => true, isOffered: () => true, backupsFor: () => [], DEFAULT_WRITER: 'fixture/writer', writerLabel: x => x, WRITERS: [], chat: async (o) => { calls.push(o); return { text: o.model === 'fixture/writer' ? (writerQueue.length ? writerQueue.shift() : writerText) : JSON.stringify(reading), model: o.model, usage: { cost: 0 }, finish: 'stop' }; } };
 const client = { messages: { create: async (o) => {
   reviewCalls.push(o);
   const props = o.output_config?.format?.schema?.properties || {};
   let a = { ok: true, problems: [], problem: '' };
+  if (props.problem && !props.problems) a = questionVerdict;
   if (props.overall) a = { overall: 'good', summary: 'Fixed offline fixture', answers_him: { verdict: 'good', note: '' }, understood: { verdict: 'good', note: '' }, fits_moment: { verdict: 'good', note: '' }, notes_facts: { verdict: 'n/a', note: '' }, selling: { verdict: 'n/a', note: '' }, lessons: { verdict: 'n/a', note: '' } };
   return { stop_reason: 'end_turn', usage: {}, content: [{ type: 'text', text: JSON.stringify(a) }] };
 } } };
@@ -43,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -63,6 +66,7 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   check('a guess at his clock still goes', same(P.dropSentences(['That sounds fun. What\'s keeping you up this early?'], { his: 'hey there' }), ['That sounds fun.']) && same(P.dropSentences(['Haha nice one. Up so late?'], { his: 'hey there' }), ['Haha nice one.']));
   const ordered = ['Did you mean the blue one?', 'If so, that is my favourite.'];
   check('question_reordering_breaks_dependency', same(P.splitBubbles(ordered), ordered));
+  check('a short reaction question stays first, a moved one keeps its full stop', same(P.splitBubbles(['This weekend? Probably just lazing around']), ['This weekend? Probably just lazing around']) && same(P.splitBubbles(['Proper carbonara, huh? teach me your ways']), ['Proper carbonara, huh? teach me your ways']) && same(P.splitBubbles(['What do you do on weekends? I mostly read']), ['I mostly read. What do you do on weekends?']));
   check('a plain question still goes last', same(P.splitBubbles(['What are you up to?', 'I\'m in bed with tea.']), ['I\'m in bed with tea.', 'What are you up to?']) && same(P.splitBubbles(['I had a lazy Sunday.', 'What about you?']), ['I had a lazy Sunday.', 'What about you?']));
 
   // Group B: the rules read him right
@@ -70,7 +74,8 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   const why = makePlan('Why do you like painting?');
   check('ordinary_question_becomes_repair', why.repair === false && !!why.answer_first && !why.beats.some(b => /teasing/.test(b)), { repair: why.repair, answer_first: why.answer_first, beats: why.beats });
   check('positive_reaction_becomes_repair', makePlan('Wow, that painting is beautiful').repair === false && makePlan('wow, you\'re beautiful').repair === false);
-  check('challenges are repaired', ['wow ok', 'huh?', 'What do you mean?', 'Wow really? that\'s rude'].every(t => makePlan(t).repair === true));
+  check('challenges are repaired', ['wow ok', 'Wow really? that\'s rude', 'What\'s that supposed to mean?'].every(t => makePlan(t).repair === true));
+  check('confusion is not offence', ['What do you mean?', 'huh?'].every(t => makePlan(t).repair === false));
   const notPraise = ['Your eyes look tired, are you okay?', 'I don\'t like your photos', 'you\'re not that cute lol'].map(t => makePlan(t).complimented);
   check('concern_and_negative_opinion_become_compliments', notPraise.every(x => x === false), { notPraise });
   const praise = ['I love your smile', 'your eyes are insane', 'you\'re so cute', 'beautiful smile', 'I like your photos'].map(t => makePlan(t).complimented);
@@ -109,6 +114,31 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   // Group D: after a short answer, the share, the echo, the door
   check('an echo-only bubble is caught', !!audit.echoOnly && audit.echoOnly('South Africa…', 'It\'s from South Africa') && !audit.echoOnly('Abeba… that\'s a beautiful name', 'My name is Abeba') && !audit.echoOnly('oh ok…', 'oh ok'));
   check('a reply without a door is caught', !!audit.DOOR && !audit.DOOR.test('I love how names travel makes me want to try some rooibos tea again') && audit.DOOR.test('oh so you\'re South African? 😍 never met one, convince me it\'s as beautiful as they say'));
+
+  // Group E: the Mike chat (practice run 10)
+  const mean = makePlan('What do you mean?', { herLast: 'Haha, I love that energy / I could use some of that right now actually', reading: { ...reading, curious: 'What do you need explosions for?' } });
+  check('he didn\'t get her line: she explains', mean.repair === false && mean.clarify === true && mean.goal !== 'curious' && /I could use some of that/.test(mean.answer_first) && !mean.reading?.curious && mean.ask.allowed === false, { ask: mean.ask, repair: mean.repair, clarify: mean.clarify, goal: mean.goal, answer_first: mean.answer_first });
+  Object.assign(reading, { doing: 'sharing', new: 'A new hobby', readings: [], curious: 'What kind of miniatures do you paint?', stance: 'curious' });
+  questionVerdict = { ok: false, problem: 'It does not fit the chat.' };
+  writerQueue = [JSON.stringify({ messages: ['Miniatures, nice. What kind of miniatures do you paint?'], learned: [], about_me: [], handover: '' }), JSON.stringify({ messages: ['Miniatures sound so calming, I love tiny details like that'], learned: [], about_me: [], handover: '' })];
+  const dropped = await A.reply('org', 'creator', { madeUp: { name: 'Synthetic fan', type: 'regular' }, test: [{ from: 'her', text: 'What do you enjoy doing?' }, { from: 'fan', text: 'I spend my weekends painting miniatures' }], selling: false });
+  const dr = dropped.results[0];
+  check('a rejected planned question is dropped, not insisted on', dropped.used.plan.goal === 'curious' && dr.drafts === 2 && !(dr.replies || []).some(m => /\?/.test(m.creator_message)) && !(dr.style || []).some(x => /has to ask the one thing/.test(x)), { goal: dropped.used.plan.goal, drafts: dr.drafts, replies: dr.replies, style: dr.style, status: dr.status });
+  questionVerdict = { ok: true, problem: '' }; writerQueue = [];
+  Object.assign(reading, { doing: 'small_talk', new: '', readings: [], curious: '', stance: 'steady' });
+  check('her mood of the day said out loud is caught', !!audit.MOOD_TALK && audit.MOOD_TALK.test('I could use some of that right now actually') && audit.MOOD_TALK.test('oh just feeling a little slow today') && !audit.MOOD_TALK.test('I love that energy'));
+  const pet = (t) => P.tidyMessages([t], { emojis: 'none', recent: ['a', 'b'], closeness: 'new' })[0];
+  check('a pet name as the last word is capped', pet('I love that energy babe') === 'I love that energy' && /my baby/.test(pet('you\'re my baby')) && pet('hey babe how are you') === 'hey how are you');
+  const readText = JSON.stringify(req('./server/src/ai/chat/strategy').readPrompt({ chat: [{ from_fan: true, text: 'hi' }], money: null }));
+  check('the reader\'s question is hers, a dark joke is a test', /SHE would ask HIM/.test(readText) && /we like to explode/.test(readText));
+
+  check('an echo question is no door', !!audit.withoutEchoes && !audit.DOOR.test(audit.withoutEchoes(['South Africa, huh? That sounds exciting.'], 'It\'s from South Africa')) && audit.DOOR.test(audit.withoutEchoes(['South Africa, huh? What city?'], 'It\'s from South Africa')));
+  questionVerdict = { ok: false, problem: 'It calls his nationality his name.' };
+  writerText = JSON.stringify({ messages: ['Nice to meet you, Arab. Whereabouts?'], learned: [], about_me: [], handover: '' });
+  const odd = await A.reply('org', 'creator', { madeUp: { name: 'Synthetic fan', type: 'regular' }, test: [{ from: 'her', text: 'What\'s your name?' }, { from: 'fan', text: 'Im arab' }], selling: false });
+  const od = odd.results[0];
+  check('a reply whose question makes no sense is not trimmed into "ok"', od.status === 'check' && (od.replies || []).some(m => /\?/.test(m.creator_message)), { status: od.status, drafts: od.drafts, replies: od.replies });
+  questionVerdict = { ok: true, problem: '' };
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);

@@ -19,7 +19,7 @@ const or = require('../integrations/openrouter');
 const fv = require('../integrations/fanvue');
 const V = require('../ai/chat/vision');
 const Sv = require('../ai/chat/services');
-const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE, SEXUAL_INTENT } = require('../ai/chat/safety');
+const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, isEcho, sentences, STORY_MOVE, SEXUAL_INTENT } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, questionCheck, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { RULES } = require('../ai/chat/rules');
@@ -1057,7 +1057,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     level.max = P.maxLevel({ his: level.his, heat: persona.profile?.heat, lead: level.lead, match: level.match });
   };
   const saidNow = latest.join(' ');
-  if (reading && !reading.odd && ODD_LINE.test(saidNow)) reading.odd = true;   // the reader missed it: by rule, an odd line
+  if (reading && !reading.odd && (ODD_LINE.test(saidNow) || DARK_JOKE.test(saidNow))) reading.odd = true;   // the reader missed it: by rule, an odd line
   if (level.his >= 2 && NOT_SEXUAL.test(saidNow) && replyLevel(saidNow) === 0) { level.his = 0; relevel(); }
   if (level.his < 2 && SEXUAL_INTENT.test(saidNow)) { level.his = 2; relevel(); }   // his own words are unmistakable: at least suggestive
   // the planner's read of his level is checked against his own words (deep dive): a short message with nothing sexual
@@ -1145,7 +1145,8 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const hard = ['venting', 'complaining'].includes(reading?.doing) || reading?.stance === 'comfort' || (session.gauges?.mood ?? 100) < 40;
   // he answered her question in a few words and gave nothing else: the natural move is one more question, not a story of hers
   const shortAnswer = wordCount(saidNow) <= 7 && !/\?/.test(saidNow) && /\?/.test(herReplies(convo).slice(-1)[0] || '');
-  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start, hard, shortAnswer }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes, closeness: first.closeness, lately: herReplies(convo).slice(-15) };
+  // (an odd line keeps the follow-up question open too: a real girl asks about it, even after two questions)
+  const voice = { ...voiceFor({ chat: convo, fan, latest, followUp, from: talk.start, hard, shortAnswer: shortAnswer || !!reading?.odd }), pastOpeners: rotation.openers, pastGoodbyes: rotation.goodbyes, closeness: first.closeness, lately: herReplies(convo).slice(-15) };
   // sexting: the story she leads (the practice room keeps its scene), with ideas from the agency's sexting chats
   const scene = [...typed].reverse().find(m => !m.from_fan && m.scene)?.scene || null;
   // a new subscriber sexts after his first buy, not before (A1): the probe comes first
@@ -1170,7 +1171,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   const herLast = herReplies(convo).slice(-10);
   let qRun = 0;
   for (let i = herLast.length - 1; i >= 0 && /\?/.test(herLast[i]); i -= 1) qRun += 1;
-  const questions = { n: herLast.length, asked: herLast.filter(r => /\?/.test(r)).length, share: herLast.length ? herLast.filter(r => /\?/.test(r)).length / herLast.length : 0, run: qRun, short_answer: shortAnswer };
+  const questions = { n: herLast.length, asked: herLast.filter(r => /\?/.test(r)).length, share: herLast.length ? herLast.filter(r => /\?/.test(r)).length / herLast.length : 0, run: qRun, short_answer: shortAnswer, odd: !!reading?.odd };
   // the meters (engine v2, step 3): moved by the numbers and the reading, kept in the session
   const gauged = G.updateGauges(session.gauges || G.startGauges({ profile: first }), {
     level, reading, profile: first, session, dry, asks: asksNow, tip: latestTip > 0, nWords, question: /\?/.test(saidNow), media: latestSeen.length > 0, cools,
@@ -1179,7 +1180,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   });
   session = { ...session, gauges: gauged.gauges };
   const replyPlan = Plan.planReply({
-    level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
+    herLast: herReplies(here).slice(-1)[0] || '', level, voice, latest, followUp, sell, noOffer, waiting, match, sexting, profile, ids: plan.ids, card, gap,
     herReplies: herReplies(here).length, away: talk.away,
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
@@ -1728,6 +1729,8 @@ const SELL_GOALS = new Set(['offer', 'first_offer', 'steer_to_sale', 'tease', 'l
 // foreign swearing, slang and politicians read as sexual by the planner (fix 3)
 const NOT_SEXUAL = /\b(?:puta madre|puta|mierda|joder|co[ñn]o|cabr[oó]n|pendejo|blyat|suka|cyka|pizdec|merde|putain|scheisse|scheiße|verdammt|kurwa|putin|trump|zelensky|zelenskyy|biden|obama|kim jong|macron|erdogan|netanyahu)\b/i;
 // an odd line for a man chatting her up (engine v2): about other men's bodies or men as what he's into, not about her
+// a dark joke about himself or his people ("we like to explode", "I feel like making jihad"): he is testing her reaction
+const DARK_JOKE = /\b(?:i|i'?m|we|we'?re|us|my people|my family)\b[^.!?]{0,30}\b(?:explode|blow (?:things |stuff |myself |ourselves |it )?up(?! (?:my|your|his|her|the) (?:phone|dms?|inbox|notifications))|(?<!the )bomb(?:s|er|ers)?|jihad|terroris\w*|suicide vest)\b/i;
 const ODD_LINE = /\b(?:dicks|cocks|penises|balls)\b(?![^.!?]*\b(?:your|ur|you|u)\b)|\b(?:i'?m|i am|im) (?:into|attracted to) (?:guys|men|boys|dudes)\b|\b(?:guys|men|boys|dudes) are (?:hot|sexy)\b|\bi love (?:hard |big )?(?:dicks|cocks)\b/i;
 // a brand-new fan has no history with her: these imply one
 const HISTORY_GUESS = /\b(?:finally|took (?:you|u) long enough|about time|where have (?:you|u) been|long time no see|been a while|stranger|decided to (?:say hi|show up|talk)|took (?:you|u|your time))\b/i;
@@ -1751,6 +1754,10 @@ function flatLine(list) {
   const text = list.join(' ');
   return !!text.trim() && !/\?/.test(text) && wordCount(text) <= 12 && !OF_HERS.test(text);
 }
+// Her questions that really ask (an echo like "South Africa, huh?" or "This weekend?" doesn't), and her text without those echoes.
+const echoQ = (s, his) => /\?/.test(s) && isEcho(s.replace(/\?[\s\S]*$/, ''), his) && !/\b(?:how|what|why|where|when|who|which)\b/i.test(s);   // "Explode how?" asks
+const realQuestions = (list, his = '') => list.flatMap(m => sentences(String(m))).filter(s => /\?/.test(s) && !echoQ(s, his));
+const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))).filter(s => !echoQ(s, his)).join(' ');
 // A door: something he can pick up (a question, a word to him, a guess about him, an invitation).
 const DOOR = /\?|\b(?:you|your|yours|u|ya)\b|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|don'?t you|aren'?t you)\b/i;
 // A bubble that only says his words back ("South Africa…"): three words at most, all of them his, ending in "…" or nothing.
@@ -1764,8 +1771,10 @@ function echoOnly(bubble, his = '') {
   const all = new Set(String(his).toLowerCase().match(/[\p{L}\p{N}']+/gu) || []);
   return (body.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).every(w => all.has(w)) && [...mine].every(w => hisWords.has(w));
 }
+// her mood of the day put into words: colour, never content (and never stored as a fact about her)
+const MOOD_TALK = /\b(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off|blah|flat)|could use (?:some|a bit of) (?:that|cheering|energy|of that)|not (?:my|the best) day|in a (?:mood|funk)|bit of a (?:mood|funk|slump)|cheer me up)\b/i;
 // style problems that are about meaning, not sound: a second rewrite, and "check" if they remain
-const SERIOUS_STYLE = /subscribed today|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+const SERIOUS_STYLE = /subscribed today|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2413,6 +2422,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
   try {
     let retry = fixWith || null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
     const passed = [];                                      // the drafts that kept the rules, in order
+    let questionDropped = false;                            // the planned question failed Claude's question check: no question now
     const steps = [];                                       // each draft, for the decision map
     for (let attempt = 0; attempt < (fixWith ? 2 : 3); attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
@@ -2444,7 +2454,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         const list = P.readReplies(res.text).map(d => ({ ...d, raw: [...d.messages] }));
         if (list.length >= 2) {
           list.forEach(prep);
-          picked = pickCandidate(list, { plan: base.plan, voice, closeness: voice?.closeness || 'new' });
+          picked = pickCandidate(list, { plan: base.plan, voice, closeness: voice?.closeness || 'new', questionDropped });
           draft = picked.draft; raw = draft.raw;
         }
       }
@@ -2509,9 +2519,9 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // he handed her the lead: a reply that only promises ("I've got ideas") is stalling
       if (base.plan?.invited && PROMISE_ONLY.test(draft.messages.join(' '))) now.style.push('He handed you the lead: do something concrete now (a playful command, what you do first); "I have ideas" and "you\'ll see" are stalling.');
       // a curious reply (step 2) asks the one real question it was planned around
-      if (base.plan?.goal === 'curious' && draft.messages.length) {
+      if (base.plan?.goal === 'curious' && draft.messages.length && !questionDropped) {
         const planned = wordsOf(base.plan.reading?.curious || '');
-        const asked = draft.messages.filter(m => /\?/.test(String(m))).map(m => wordsOf(m));
+        const asked = realQuestions(draft.messages, voice?.his || (latest || []).join(' ')).map(m => wordsOf(m));
         // (any check-in question will do when he is sharing something hard; a question in other words is a note, not a serious problem)
         const onIt = base.plan.hard || asked.some(w => !planned.size || [...w].some(x => planned.has(x)));
         if (!asked.length) now.style.push(`This reply has to ask the one thing you wanted to know${base.plan.reading?.curious ? `, close to these words: "${base.plan.reading.curious}"` : ''}. End with that question; not a rhetorical one, not a different one.`);
@@ -2541,7 +2551,17 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
           const q = await questionCheck({ chat: base.chat || [], messages: draft.messages });
           out.cost += q.usage.cost;
           await logUsage(orgId, 'check', CHECK_MODEL, q.usage, { creatorId, fanUuid });
-          if (!q.ok) { now.badQuestion = q.problem || 'it doesn\'t fit the chat'; now.style.push(`The question doesn't make sense here: ${now.badQuestion.replace(/\.$/, '')}. Ask what a real girl would naturally ask about what he said or about him, or no question.`); }
+          if (!q.ok) {
+            now.badQuestion = q.problem || 'it doesn\'t fit the chat';
+            // the question that failed is the planned one: it's dropped, not insisted on (the curious check stops asking for it)
+            const planned = wordsOf(base.plan?.reading?.curious || '');
+            const askedQ = draft.messages.filter(m => /\?/.test(String(m))).flatMap(m => [...wordsOf(m)]);
+            if (base.plan?.goal === 'curious' && planned.size && askedQ.some(w => planned.has(w)) && !questionDropped) {
+              questionDropped = true;
+              now.style.push('The question you planned didn\'t fit this moment: no question this time, react and say what you meant.');
+            } else now.style.push(`The question doesn't make sense here: ${now.badQuestion.replace(/\.$/, '')}. Ask what a real girl would naturally ask about what he said or about him, or no question.`);
+            now.badQuestion = '';                             // not cut at the end: a reply that doesn't make sense is rewritten, then a person looks
+          }
         } catch (e) { console.error('[ai-chat] question check:', e.message); }
       }
       // the topic ran out (the reader): a question that stays on it drags; a fresh one about him is fine
@@ -2554,10 +2574,12 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       const hisLast = (latest || []).join(' ') || (voice?.his || '').split('\n').pop();
       if (TALK_GOALS.has(base.plan?.goal) && (draft.cut || hisShort) && flatLine(draft.messages)) {
         now.style.push(`It gives him nothing to answer: a flat comment${draft.cut ? ' once its question was taken out' : ' after his short reply'}. Add one small thing of yours he can pick up (what you're doing right now, an opinion, a playful tease)${voice?.noQuestion || base.plan?.ask?.allowed === false ? ', still no question' : ''}.`);
-      } else if (TALK_GOALS.has(base.plan?.goal) && hisShort && draft.messages.length && !asks && !DOOR.test(draft.messages.join(' '))) {
+      } else if (TALK_GOALS.has(base.plan?.goal) && hisShort && draft.messages.length && !asks && !DOOR.test(withoutEchoes(draft.messages, hisLast))) {
         // a reply all about her ("I love how names travel makes me want to try some rooibos tea again"): no door for him
         now.style.push('It gives him nothing to answer: it is all about you. Say something to him he can pick up (a guess about him, "bet you…", "you seem…", or tell him something and hand it back).');
       }
+      // her mood of the day said or hinted ("I could use some of that right now", "feeling a little slow today") early on
+      if (TALK_GOALS.has(base.plan?.goal) && (voice?.closeness === 'new' || recentHer.length < 5) && MOOD_TALK.test(draft.messages.join(' '))) now.style.push('Your mood of the day is colour, not content: don\'t tell him you\'re slow or down; react to him instead.');
       // a first bubble that only says his words back ("South Africa…")
       if (draft.messages.length && echoOnly(draft.messages[0], hisLast)) now.style.push(`The first bubble only repeats his words back ("${draft.messages[0]}"): drop it and start with your reaction.`);
       // the plan was to share something of hers: a reply with nothing of hers in it didn't
@@ -2583,6 +2605,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       retry = [...(verdict === 'block' ? problems : []), ...now.style].join(' ');
     }
     // the newest draft that kept the rules with nothing serious left; else the newest that kept the rules; else the last
+    for (const x of passed) x.draft.about_me = (x.draft.about_me || []).filter(t => !MOOD_TALK.test(t));   // her mood is not a fact about her
     const pick = [...passed].reverse().find(x => !x.style.some(y => SERIOUS_STYLE.test(y))) || kept || last;
     const { draft } = pick;
     const notes = [...pick.problems];
@@ -2640,7 +2663,7 @@ const DECLARED_RE = /\b(?:i\s+(?:really\s+|truly\s+|so\s+)?(?:care\s+(?:about|fo
 // a non-answer to his question ("good question", "wouldn't you like to know")
 const DEFLECTS = /\b(?:good question|great question|wouldn'?t you like to know|that'?s for me to know|you'?ll (?:have to|never) (?:find out|know)|maybe one day|i'?ll never tell|a girl (?:has to have|needs) (?:her|some) secrets|that'?s a secret|mystery|you know\W*$|guess\b)/i;
 const QUESTION_GOALS = new Set(['curious', 'direct_ask', 'dry_ask', 'readiness_check', 'why_not', 'welcome_new', 'get_to_know']);
-function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = {}) {
+function pickCandidate(list, { plan = null, voice = null, closeness = 'new', questionDropped = false } = {}) {
   const words = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
   const target = { short: 7, medium: 9, long: 14, piece: 90 }[plan?.length?.target] || 9;
   const wantsQ = QUESTION_GOALS.has(plan?.goal) || /would be good now/.test(plan?.ask?.why || '');
@@ -2651,7 +2674,7 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = 
   const hisQ = new Set(Plan.topicWords(plan?.reading?.asked?.[0] || hisLine));
   const scored = list.map((d) => {
     const text = d.messages.join(' ');
-    const asks = /\?/.test(text);
+    const asks = realQuestions(d.messages, voice?.his || '').length > 0;   // an echo ("South Africa, huh?") doesn't ask
     const n = words(text);
     const why = [];
     let score = 50 - Math.abs(n - target) * (plan?.answer_first ? 0.8 : 1.5);   // an answer may need a few more words
@@ -2667,7 +2690,7 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = 
     if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
     const beats = (plan?.beats || []).join(' ');
     if (/thing of yours/.test(beats)) { if (SHARES.test(text)) { score += 14; why.push('carries the small thing of hers'); } else { score -= 10; } }
-    if (plan?.goal === 'curious' && plan.reading?.curious) { const w = wordsOf(plan.reading.curious); const q = d.messages.filter(m => /\?/.test(m)).join(' '); if (q && [...wordsOf(q)].some(x => w.has(x))) { score += 14; why.push('asks the planned question'); } }
+    if (plan?.goal === 'curious' && plan.reading?.curious && !questionDropped) { const w = wordsOf(plan.reading.curious); const q = d.messages.filter(m => /\?/.test(m)).join(' '); if (q && [...wordsOf(q)].some(x => w.has(x))) { score += 14; why.push('asks the planned question'); } }
     if (plan?.complimented && BRUSH_OFF.test(text)) { score -= 25; why.push('brushes him off'); }
     if (plan?.new_today && HISTORY_GUESS.test(text)) { score -= 25; why.push('implies a history'); }
     // he asked her something: the candidate that answers it beats one that dodges it or only asks back
@@ -2677,7 +2700,7 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = 
       if (d.messages.length && d.messages.every(m => /\?\s*\S{0,3}$/.test(String(m).trim()))) { score -= 20; why.push('a question back isn\'t an answer'); }
     }
     if (TALK_GOALS.has(plan?.goal) && flatLine(d.messages)) { score -= 15; why.push('a flat line, nothing for him to answer'); }
-    if (TALK_GOALS.has(plan?.goal) && !asks && !DOOR.test(text)) { score -= 12; why.push('no door for him'); }
+    if (TALK_GOALS.has(plan?.goal) && !asks && !DOOR.test(withoutEchoes(d.messages, hisLine))) { score -= 12; why.push('no door for him'); }
     if (d.messages.some(m => echoOnly(m, hisLine))) { score -= 15; why.push('echoes his words back'); }
     if (plan?.dead_words?.length && d.messages.some(m => /\?/.test(m) && Plan.topicWords(m).some(w => plan.dead_words.includes(w)))) { score -= 25; why.push('asks about a topic that ran out'); }
     return { d, score, why: why.join(', ') || `${n} words, fits the target` };

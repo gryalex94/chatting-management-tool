@@ -280,7 +280,8 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
     if (sexting?.on && level.his >= 3 && level.max >= 3 && ['building', 'peak'].includes(sexting.stage)) now_.push('He is explicit and the story is there: match his words now. Use the plain words he uses (if he says pussy or cock, so do you), say what you are doing and feeling in concrete terms, one short message; hinting at this point reads as stalling.');
     else if (level.his >= 2) now_.push('He got sexual first. Don\'t stall or play coy: say yes in your own playful way and tease (hint, don\'t describe yet). Don\'t comment on how eager or direct he is.');
   }
-  if (mood) now_.push(`Your mood today: ${mood}. Let it colour your tone a little; don't announce it.`);
+  // (not at all in her first three replies to a new subscriber: the writer turned it into lines about her day)
+  if (mood && !((fan?.new_sub || plan?.new_today) && (voice?.recent || []).length < 3)) now_.push(`Your mood today: ${mood}. It colours your tone only: never say it, hint at it, or make it the thing of yours you share.`);
   if (voice?.pastOpeners?.length && !chat.some(m => !m.from_fan && !m.mass && !m.at)) now_.push(`Don't open this conversation the way you opened earlier ones: ${voice.pastOpeners.slice(-5).map(o => `"${o.split(/\s+/).slice(0, 4).join(' ')}…"`).join(', ')}.`);
   if (voice?.pastGoodbyes?.length && plan?.goal === 'goodbye') now_.push(`Don't say goodbye the way you did before: ${voice.pastGoodbyes.slice(-5).map(o => `"${o.split(/\s+/).slice(0, 4).join(' ')}…"`).join(', ')}.`);
   if (voice?.noQuestion) now_.push(`No question in this reply: ${voice.noQuestion}`);
@@ -488,7 +489,9 @@ function dropPet(t) {
     .replace(new RegExp(`\\b(hey|hi|hello|aww*|oh|mm+|ok(?:ay)?|yes|night)\\s+(?:${PETS})\\b`, 'gi'), '$1')
     .replace(new RegExp(`^\\s*(?:${PETS})\\s*[,!.…]+\\s*`, 'i'), '')
     .replace(new RegExp(`,\\s*(?:${PETS})\\s*,`, 'gi'), ',')
-    .replace(new RegExp(`,\\s*(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '');
+    .replace(new RegExp(`,\\s*(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '')
+    // the last word with no comma ("I love that energy babe"), not "you're my baby" or "a baby"
+    .replace(new RegExp(`(?<!\\b(?:my|your|his|her|a|the|that|this))\\s+(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '');
   if (out === t || out.trim().split(/\s+/).length < 2) return t;
   return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
@@ -680,6 +683,8 @@ function readReply(text) {
  */
 const SENTENCE_END = /(?<=[.!?…])\s+(?=[^\s])/u;
 // a second part that hangs on the question ("If so, that is my favourite"): never put before it
+// a short reaction question ("This weekend?", "Proper carbonara, huh?", "Really?"): it reacts to him, so it stays first
+const REACTION_Q = /^(?:\S+(?:\s+\S+){0,2}\?|.{0,40},\s*(?:huh|right|really|yeah|eh)\?)\s*\p{Extended_Pictographic}?\s*$/iu;
 const DEPENDS = /^(?:if\b|then\b|because\b|cause\b|cos\b|so\b|and\b|but\b|or\b|either way|that way|otherwise|which\b|it\b|it'?s\b|that\b|that'?s\b|this\b|those\b|these\b|they\b|he\b|she\b|same\b|me too)/i;
 function splitBubbles(list) {
   const words = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
@@ -694,11 +699,11 @@ function splitBubbles(list) {
         if (Math.abs(a - b) < gap) { gap = Math.abs(a - b); best = k; }
       }
       out.push(parts.slice(0, best).join(' '), parts.slice(best).join(' '));
-    } else if (parts.length === 2 && /\?$/.test(parts[0]) && !/\?/.test(parts[1]) && words(t) <= 15 && !DEPENDS.test(parts[1])) out.push(`${parts[1]} ${parts[0]}`);   // the question goes last, like people put it
+    } else if (parts.length === 2 && /\?$/.test(parts[0]) && !/\?/.test(parts[1]) && words(t) <= 15 && !DEPENDS.test(parts[1]) && !REACTION_Q.test(parts[0])) out.push(`${/[\p{L}\p{N}]$/u.test(parts[1]) ? `${parts[1]}.` : parts[1]} ${parts[0]}`);   // the question goes last, like people put it
     else out.push(t);
   }
   out = out.filter(Boolean).slice(0, 3);
-  if (out.length === 2 && /\?/.test(out[0]) && !/\?/.test(out[1]) && !DEPENDS.test(out[1])) out = [out[1], out[0]];
+  if (out.length === 2 && /\?/.test(out[0]) && !/\?/.test(out[1]) && !DEPENDS.test(out[1]) && !REACTION_Q.test(out[0])) out = [out[1], out[0]];
   return out;
 }
 

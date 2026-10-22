@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Four moments written by the real writer (fix plan of 22 Oct 2026), to judge by eye after a change to the engine.
+// Five moments written by the real writer (fix plan of 22 Oct 2026), to judge by eye after a change to the engine.
 // Her kept replies go back into the chat between turns, like the practice room. Real model calls (a few cents);
 // nothing goes to Fanvue, and the check and outcome rows these replies write are deleted at the end.
-//   cd server && node scripts/written-moments.js          all four
+//   cd server && node scripts/written-moments.js          all five
 //   node scripts/written-moments.js 1 3                   only these
 const path = require('path');
 const SRV = path.join(__dirname, '..');
@@ -30,6 +30,13 @@ const MOMENTS = [
     lines: ['hello', 'I\'m Dan', 'from Leeds, in England', 'I work in a bike shop', 'haha yeah it\'s fun, lots of regulars', 'I mostly ride on weekends', 'yeah the moors are beautiful', 'what about you, what do you do for fun?',
       'that sounds nice', 'I\'m cooking pasta tonight', 'carbonara, proper one, no cream', 'haha you\'d love it', 'you seem really sweet', 'what are you up to this weekend?'],
     judge: (turns) => [turns.every(t => t.goal !== 'direct_ask') || `a direct ask at "${turns.find(t => t.goal === 'direct_ask').him}"`, turns.every(t => !t.ppv) || 'a PPV with selling off'] },
+  { title: 'A new subscriber, Mike, with a dark joke: the third reply asks about it or calls it, never her mood; the fourth explains her line with no question back; no "babe" early; no mood stored',
+    type: 'new_sub', selling: true, lines: ['Hey', 'Im arab', 'We like to explode every now and then', 'What do you mean?'],
+    judge: (turns) => {
+      const mood = /\b(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off)|could use (?:some|a bit of)|not (?:my|the best) day|cheer me up)\b/i;
+      return [turns[2].odd || 'the dark joke was not read as odd', !mood.test(turns[2].her.join(' ')) || 'her mood in the third reply', !/\?/.test(turns[3].her.join(' ')) || 'a question back when he asked what she meant',
+        turns.slice(0, 3).every(t => !/\bbabe\b/i.test(t.her.join(' '))) || '"babe" in her first three replies', turns.every(t => !t.aboutMe.some(x => mood.test(x))) || 'her mood stored as a fact'];
+    } },
 ];
 
 (async () => {
@@ -51,7 +58,7 @@ const MOMENTS = [
         const x = r.results?.[0] || {};
         const said = (x.replies || []).map(m => m.creator_message);
         cost += x.cost || 0;
-        turns.push({ him: line, her: said, goal: r.used?.plan?.goal, status: x.status, ppv: x.ppv || null });
+        turns.push({ him: line, her: said, goal: r.used?.plan?.goal, status: x.status, ppv: x.ppv || null, aboutMe: x.about_me || [], odd: (r.used?.plan?.gauge_changes || []).some(c => /odd line/.test(c.why)) });
         console.log(`  him: ${line}\n  her: ${said.join(' / ') || '(nothing)'}    [${r.used?.plan?.goal} · ${x.status || r.quiet?.why || 'no reply'}${x.ppv ? ` · PPV ${x.ppv.title}` : ''}]`);
         if ((x.problems || []).length) console.log(`       notes: ${x.problems.join(' | ').slice(0, 300)}`);
         said.forEach(t => test.push(her(t)));
