@@ -451,11 +451,23 @@ const dropFirst = (t, re) => {
 const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // "Sounds like someone's ready", "someone needs attention": said to him instead.
 const PRESENT = { needs: 'need', wants: 'want', seems: 'seem', sounds: 'sound', knows: 'know', likes: 'like', loves: 'love', has: 'have', got: 'got', can: 'can' };
-const toHim = (t) => t
+// Only a sentence that teases him ("someone" first, or after a lead-in like "looks like") and
+// talks about nobody else: "My flatmate says someone is stealing her coffee" stays a story.
+const TEASE_LEAD = /^(?:(?:looks|sounds|seems|feels) like|i (?:see|think|bet|guess)|well,?|so,?|oh+,?|ooh,?|haha,?|lol,?|hmm,?)?\s*someone\b/i;
+const THIRD_PERSON = /\b(?:he|she|him|her|his|hers|they|them|their|says|said|told|thinks)\b/i;
+const sayToHim = (s) => s
   .replace(/\bsomeone['’]s\s+got\b/gi, 'you\'ve got')
   .replace(/\bsomeone(?:['’]s|\s+is)\b(?!\s+(?:else|like))/gi, 'you\'re')
-  .replace(/\bsomeone\s+(needs|wants|seems|sounds|knows|likes|loves|has|got|can)\b/gi, (_, v) => `you ${PRESENT[v.toLowerCase()]}`)
-  .replace(/(^|[.!?…]\s+)you/g, (_, p) => `${p}You`);
+  .replace(/\bsomeone\s+(needs|wants|seems|sounds|knows|likes|loves|has|got|can)\b/gi, (_, v) => `you ${PRESENT[v.toLowerCase()]}`);
+const toHim = (t) => {
+  let out = t;
+  if (/\bsomeone\b/i.test(t)) {
+    const parts = sentences(t);
+    const fixed = parts.map(s => (TEASE_LEAD.test(s) && !THIRD_PERSON.test(s) ? sayToHim(s) : s));
+    if (fixed.some((s, i) => s !== parts[i])) out = fixed.join(' ');
+  }
+  return out.replace(/(^|[.!?…]\s+)you/g, (_, p) => `${p}You`);
+};
 // His name said to him ("Mike, …", "…, Mike?", "tell me, Mike, do you…"): left out
 // when she used it in her last few replies (a name in every reply sounds scripted).
 function dropName(t, name) {
@@ -563,8 +575,10 @@ function unQuestion(list, { keep = 0, his = '' } = {}) {
 // Sentences that shouldn't be there, left out when the rest of the reply still says
 // something: a comment on how eager he is ("you don't waste time"), a guess at his
 // time of day, a promise of content when no PPV can go with it.
+// (a time guess only counts when the sentence is about him or asks him: "I went hiking this morning" is hers)
+const ABOUT_HIM = /\b(?:you|your|yours|u|ya)\b|\?\s*$/i;
 function dropSentences(list, { his = '', noOffer = '' } = {}) {
-  const bad = (s) => COMMENTS_EAGER.test(s) || (GUESSES_TIME.test(s) && !SAYS_TIME.test(his)) || (noOffer && PROMISES_SHOW.test(s));
+  const bad = (s) => COMMENTS_EAGER.test(s) || (GUESSES_TIME.test(s) && !SAYS_TIME.test(his) && ABOUT_HIM.test(s)) || (noOffer && PROMISES_SHOW.test(s));
   const parts = list.map(sentences);
   const kept = parts.map(p => p.filter(s => !bad(s)));
   if (wordCount(kept.flat().join(' ')) < 3 || kept.every((p, i) => p.length === parts[i].length)) return list;
@@ -665,6 +679,8 @@ function readReply(text) {
  * than three bubbles.
  */
 const SENTENCE_END = /(?<=[.!?…])\s+(?=[^\s])/u;
+// a second part that hangs on the question ("If so, that is my favourite"): never put before it
+const DEPENDS = /^(?:if\b|then\b|because\b|cause\b|cos\b|so\b|and\b|but\b|or\b|either way|that way|otherwise|which\b|it\b|it'?s\b|that\b|that'?s\b|this\b|those\b|these\b|they\b|he\b|she\b|same\b|me too)/i;
 function splitBubbles(list) {
   const words = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
   let out = [];
@@ -678,11 +694,11 @@ function splitBubbles(list) {
         if (Math.abs(a - b) < gap) { gap = Math.abs(a - b); best = k; }
       }
       out.push(parts.slice(0, best).join(' '), parts.slice(best).join(' '));
-    } else if (parts.length === 2 && /\?$/.test(parts[0]) && !/\?/.test(parts[1]) && words(t) <= 15) out.push(`${parts[1]} ${parts[0]}`);   // the question goes last, like people put it
+    } else if (parts.length === 2 && /\?$/.test(parts[0]) && !/\?/.test(parts[1]) && words(t) <= 15 && !DEPENDS.test(parts[1])) out.push(`${parts[1]} ${parts[0]}`);   // the question goes last, like people put it
     else out.push(t);
   }
   out = out.filter(Boolean).slice(0, 3);
-  if (out.length === 2 && /\?/.test(out[0]) && !/\?/.test(out[1])) out = [out[1], out[0]];
+  if (out.length === 2 && /\?/.test(out[0]) && !/\?/.test(out[1]) && !DEPENDS.test(out[1])) out = [out[1], out[0]];
   return out;
 }
 
