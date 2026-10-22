@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -78,7 +78,7 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   check('confusion is not offence', ['What do you mean?', 'huh?'].every(t => makePlan(t).repair === false));
   const notPraise = ['Your eyes look tired, are you okay?', 'I don\'t like your photos', 'you\'re not that cute lol'].map(t => makePlan(t).complimented);
   check('concern_and_negative_opinion_become_compliments', notPraise.every(x => x === false), { notPraise });
-  const praise = ['I love your smile', 'your eyes are insane', 'you\'re so cute', 'beautiful smile', 'I like your photos'].map(t => makePlan(t).complimented);
+  const praise = ['you seem really sweet', 'you sound like a fun girl', 'I love your smile', 'your eyes are insane', 'you\'re so cute', 'beautiful smile', 'I like your photos'].map(t => makePlan(t).complimented);
   check('compliments are still received', praise.every(x => x === true), { praise });
   const noQuestion = A._test.noQuestionWhy({ latest: ['I need to talk about something difficult'] });
   check('ordinary_need_suppresses_followup', noQuestion === '', { noQuestion });
@@ -139,6 +139,12 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   const od = odd.results[0];
   check('a reply whose question makes no sense is not trimmed into "ok"', od.status === 'check' && (od.replies || []).some(m => /\?/.test(m.creator_message)), { status: od.status, drafts: od.drafts, replies: od.replies });
   questionVerdict = { ok: true, problem: '' };
+
+  // the leftover writing slips (22 Oct, after the plan)
+  check('a reworded welcome question counts as asked', Plan.sameKind('What made you stop by my page?', 'hi! What brought you here today?') && Plan.sameKind('what made you pick my page, Abeba?', 'Hi! What brought you my way? 😊') && !Plan.sameKind('Where are you from?', 'hi! What brought you here today?') && !Plan.sameKind('What part of South Africa?', 'Where are you from?'));
+  check('a reason is a reason', !!audit.GIVES_REASON && audit.GIVES_REASON.test('Honestly? It\'s my way of making something pretty') && !audit.GIVES_REASON.test('My sister always steals my brushes though, drives me nuts'));
+  check('a compliment received is seen', !!audit.RECEIVES && audit.RECEIVES.test('aww you\'re sweet') && audit.RECEIVES.test('stop, you\'ll make me blush') && !audit.RECEIVES.test('Now I\'m hungry... You\'re making me jealous over here'));
+  check('"when I\'m feeling off" is a reason, not her mood', !audit.MOOD_TALK.test('It\'s my way of making something pretty when I\'m feeling off') && audit.MOOD_TALK.test('oh just feeling a little slow today'));
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);

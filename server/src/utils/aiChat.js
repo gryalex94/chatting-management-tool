@@ -1743,7 +1743,7 @@ const DANGLING = /\b(?:but i'?m curious|i'?m curious though|so tell me|tell me|b
 // an excuse for her own line after he pushed back
 const EXCUSE = /\b(?:i just (?:thought|figured|assumed|meant)|i (?:thought|figured|assumed) (?:you|u)|i was just (?:saying|asking)|sorry,? i)\b/i;
 // he hands her the lead ("I'm all yours", "what are you going to do with me"): a concrete move now, and a new subscriber's direct ask may come
-const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m yours|do (?:whatever|what|anything) you want (?:with|to) me|take the lead|(?:you'?re|you are|ur) in charge|what (?:are you going|would you like|do you want) to do (?:with|to) me|what would you do (?:with|to) me|use me|have your way|show me what you'?ve got|i'?m (?:in your hands|at your mercy))\b/i;
+const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m yours|do (?:whatever|what|anything) you want (?:with|to) me|take the lead|(?:you'?re|you are|ur) in charge|what (?:are you going|would you like|do you want) to do (?:with|to) me|what would you do (?:with|to) me|tell me what (?:you'?d|you would|you'?re (?:gonna|going to)|you will|u would|u'?d) do\b|use me|have your way|show me what you'?ve got|i'?m (?:in your hands|at your mercy))\b/i;
 // a reply that only promises instead of doing something: "I've got ideas", "you'll see"
 // A flat line (research: dead ends end chats): no question, nothing of hers, a handful of words; nothing for him to answer.
 // Checked on the talk moments only, when a question was cut or his own reply was short.
@@ -1772,9 +1772,15 @@ function echoOnly(bubble, his = '') {
   return (body.toLowerCase().match(/[\p{L}\p{N}']+/gu) || []).every(w => all.has(w)) && [...mine].every(w => hisWords.has(w));
 }
 // her mood of the day put into words: colour, never content (and never stored as a fact about her)
-const MOOD_TALK = /\b(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off|blah|flat)|could use (?:some|a bit of) (?:that|cheering|energy|of that)|not (?:my|the best) day|in a (?:mood|funk)|bit of a (?:mood|funk|slump)|cheer me up)\b/i;
+const MOOD_TALK = /\b(?<!when (?:i'?m |i am )?)(?<!whenever (?:i'?m |i am )?)(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off|blah|flat)|could use (?:some|a bit of) (?:that|cheering|energy|of that)|not (?:my|the best) day|in a (?:mood|funk)|bit of a (?:mood|funk|slump)|cheer me up)\b/i;
+// a reply that only asks back (every sentence a question): "It's my escape. What about you?" answers first, so it isn't one
+const onlyQuestions = (list) => list.flatMap(m => sentences(String(m))).every(x => /\?/.test(x));
+// he asks why; a reply that gives a reason; a compliment received
+const WHY_Q = /\bwhy\b[^.!]*\?|^\W*why\W*$/i;
+const GIVES_REASON = /\b(?:because|cause|cuz|'?cos|since|so (?:i|that)|it'?s|it is|it'?s like|it makes|makes me|it helps|helps me|lets me|i can|i get to|my way|the way|love|calm|relax|free|feel|feels|zone out|switch off|escape|reminds me|i just)\b/i;
+const RECEIVES = /\b(?:thank|thanks|thx|ty|aww*|aw|you'?re (?:so |too )?(?:sweet|kind|cute|nice)|that'?s (?:so |really )?(?:sweet|nice|kind|cute|lovely)|sweet of you|made me (?:smile|blush)|blush\w*|flatter\w*|stop it|stoppp*|you'?re making me (?:blush|smile|melt|shy|all)|takes one to know|i'?ll take (?:it|that)|right back at (?:you|u)|you too|appreciate|means a lot|you'?re not so bad yourself|charmer|smooth)\b/i;
 // style problems that are about meaning, not sound: a second rewrite, and "check" if they remain
-const SERIOUS_STYLE = /subscribed today|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+const SERIOUS_STYLE = /subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2422,7 +2428,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
   try {
     let retry = fixWith || null, noPpv = '', first = null, kept = null, last = null, drafts = 0;
     const passed = [];                                      // the drafts that kept the rules, in order
-    let questionDropped = false;                            // the planned question failed Claude's question check: no question now
+    let questionDropped = false;
+    const latestText = (latest || []).join(' ');                            // the planned question failed Claude's question check: no question now
     const steps = [];                                       // each draft, for the decision map
     for (let attempt = 0; attempt < (fixWith ? 2 : 3); attempt += 1) {
       const ask = retry && noPpv ? `${retry} This time attach no PPV (${noPpv}), and don't promise or tease one either.` : retry;
@@ -2515,7 +2522,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // a dangling lead-in ("But I'm curious", "so tell me") left when a question was cut: finish the thought or drop it
       if (draft.messages.some(m => DANGLING.test(String(m).trim()))) now.style.push('A line trails off ("but I\'m curious", "so tell me"): finish the thought as a statement, or drop that line.');
       // a planned small thing of hers has to be there: a one-line quip isn't it
-      if (base.plan?.beats?.some(b => /thing of yours/.test(b)) && !SHARES.test(draft.messages.join(' '))) now.style.push('The plan had a small real thing of yours in this reply: add one line of yours that connects to what he said (a place, a memory, a plan of yours about it); a quip about him isn\'t it, and neither is your day out of nowhere.');
+      // (when he asked her something, her answer about herself is the thing of hers)
+      if (base.plan?.beats?.some(b => /thing of yours/.test(b)) && !SHARES.test(draft.messages.join(' ')) && !(base.plan?.answer_first && OF_HERS.test(draft.messages.join(' ')))) now.style.push('The plan had a small real thing of yours in this reply: add one line of yours that connects to what he said (a place, a memory, a plan of yours about it); a quip about him isn\'t it, and neither is your day out of nowhere.');
       // he handed her the lead: a reply that only promises ("I've got ideas") is stalling
       if (base.plan?.invited && PROMISE_ONLY.test(draft.messages.join(' '))) now.style.push('He handed you the lead: do something concrete now (a playful command, what you do first); "I have ideas" and "you\'ll see" are stalling.');
       // a curious reply (step 2) asks the one real question it was planned around
@@ -2530,7 +2538,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // the direct ask (A1) must ask: a reply without a question doesn't do its job
       if (base.plan?.goal === 'direct_ask' && draft.messages.length && !draft.messages.some(m => /\?/.test(String(m)))) now.style.push('This reply has to ask him what he\'d like to see of you (or whether he\'s alone and wants to see something): one real question.');
       // he asked something (fix 4): a reply that is only questions didn't answer him
-      if (base.plan?.answer_first && draft.messages.length && draft.messages.every(m => /\?\s*$/.test(String(m).trim()))) now.style.push('He asked you something: answer it first, in a plain statement; a question back isn\'t an answer.');
+      if (base.plan?.answer_first && draft.messages.length && onlyQuestions(draft.messages)) now.style.push('He asked you something: answer it first, in a plain statement; a question back isn\'t an answer.');
       // his first PPV (A1): the caption teases, never explicit (explicit captions sold half as well in the 35k chats)
       if (sell?.firstPpv && draft.offer && replyLevel(draft.messages[draft.messages.length - 1] || '') >= 3) now.style.push('It\'s his first PPV and the caption is explicit: tease it instead ("just took these for you…", "wanna see what I\'d do if you were here?"); explicit captions sold half as well (A1).');
       // a paid written piece that's too thin for the money (D1)
@@ -2564,13 +2572,22 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
           }
         } catch (e) { console.error('[ai-chat] question check:', e.message); }
       }
+      // he asked her why: the reason comes first ("my sister steals my brushes" isn't one)
+      if (base.plan?.answer_first && WHY_Q.test(latestText) && draft.messages.length && !GIVES_REASON.test(draft.messages.join(' ')) && !Plan.topicWords(draft.messages.join(' ')).some(w => Plan.topicWords(latestText).includes(w))) now.style.push('He asked you why: give him your reason first, in one plain line, then the rest.');
+      // a question she already asked (the same words, or the same kind in other words: "what brought you here?" twice)
+      // (the same kind across her recent replies in the chat, the same words across her last three)
+      const herBefore = recentHer.slice(-3).join(' '), herLately = (voice?.lately || recentHer).join(' ');
+      const again = realQuestions(draft.messages, voice?.his || latestText).find(q => Plan.sameKind(q, herLately) || [...wordsOf(q)].filter(w => wordsOf(herBefore).has(w)).length >= 3);
+      if (again) now.style.push(`You already asked him that ("${again.trim()}"): don't ask it again; react to what he said, or ask something new.`);
+      // he complimented her: it is received, not skipped ("you seem really sweet" → straight to pasta)
+      if (base.plan?.complimented && draft.messages.length && !RECEIVES.test(draft.messages.join(' '))) now.style.push('He paid you a compliment: receive it first, warm and in your way ("aww, you\'re sweet", "stop, you\'ll make me blush"), then the rest.');
       // the topic ran out (the reader): a question that stays on it drags; a fresh one about him is fine
       const dead = new Set(base.plan?.dead_words || []);
       const stale = dead.size ? draft.messages.filter(m => /\?/.test(String(m))).find(m => Plan.topicWords(m).some(w => dead.has(w))) : null;
       if (stale && !now.badQuestion) now.badQuestion = 'it asks about a topic that ran out';
       if (stale) now.style.push(`The topic you were on ran out, so don't ask about it again ("${stale}"). Ask something new and easy about him (where he's from, what he does, what he's into), or share a small thing of yours.`);
       // a dead end (a question cut, or a flat line after his short reply): nothing for him to answer
-      const hisShort = wordCount((latest || []).join(' ')) <= 7;
+      const hisShort = wordCount(latestText) <= 7;
       const hisLast = (latest || []).join(' ') || (voice?.his || '').split('\n').pop();
       if (TALK_GOALS.has(base.plan?.goal) && (draft.cut || hisShort) && flatLine(draft.messages)) {
         now.style.push(`It gives him nothing to answer: a flat comment${draft.cut ? ' once its question was taken out' : ' after his short reply'}. Add one small thing of yours he can pick up (what you're doing right now, an opinion, a playful tease)${voice?.noQuestion || base.plan?.ask?.allowed === false ? ', still no question' : ''}.`);
@@ -2697,7 +2714,7 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new', que
     if (plan?.answer_first) {
       if (DEFLECTS.test(text)) { score -= 25; why.push('dodges his question'); }
       if (Plan.topicWords(text).some(w => hisQ.has(w))) { score += 12; why.push('answers him'); }
-      if (d.messages.length && d.messages.every(m => /\?\s*\S{0,3}$/.test(String(m).trim()))) { score -= 20; why.push('a question back isn\'t an answer'); }
+      if (d.messages.length && onlyQuestions(d.messages)) { score -= 20; why.push('a question back isn\'t an answer'); }
     }
     if (TALK_GOALS.has(plan?.goal) && flatLine(d.messages)) { score -= 15; why.push('a flat line, nothing for him to answer'); }
     if (TALK_GOALS.has(plan?.goal) && !asks && !DOOR.test(withoutEchoes(d.messages, hisLine))) { score -= 12; why.push('no door for him'); }

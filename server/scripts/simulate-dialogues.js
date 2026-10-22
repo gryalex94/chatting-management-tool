@@ -220,7 +220,7 @@ const standIn = (goal, pl, i) => {
   await run('New subscriber who gets sexual himself early', { name: 'Gil', type: 'new_sub' }, [
     him('hey, you look amazing', { expect: 'welcome_new' }), him('i am already hard just looking at your pics', { expect: ['tease', 'sexy_vibe'], ppv: false }),
     him('mm i want you so bad', { expect: ['tease', 'sexy_vibe'], ppv: false }), him('tell me what you would do to me', { expect: ['tease', 'sexy_vibe', 'direct_ask'], ppv: false }),
-    him('fuck yes', { expect: ['direct_ask', 'tease', 'first_offer', 'offer'] }), him('show me your ass', { expect: ['first_offer', 'offer', 'after_buy'] }),
+    him('fuck yes', { expect: ['direct_ask', 'tease', 'first_offer', 'offer'] }), him('show me your ass', { expect: ['first_offer', 'offer', 'after_buy', 'point_to_ppv'] }),   // (when the offer went out a message earlier and is still unopened, she points to it: Q37)
   ]);
   await run('A big spender who has not bought lately: the personal discount', { name: 'Hank', type: 'spender' }, [
     him('hey babe', { expect: ['chat', 'readiness_check'] }), him('what do you have for me tonight?', { expect: ['offer', 'readiness_check'], check: C((pl, r) => r.used.profile?.tier !== 'whale' || r.used.session?.aim !== 'sell' || !(r.used.profile.days_since_buy == null || r.used.profile.days_since_buy >= 14) || (/discount/.test(pl.price_hint || '') && Object.keys(pl.offer?.prices || {}).length > 0), 'a whale on a selling day who has not bought in 2 weeks: the 15% personal discount, priced in code') }),

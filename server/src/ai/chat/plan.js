@@ -81,6 +81,18 @@ function beatsFor(p) {
   if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
   return base.slice(0, 3);
 }
+// Kinds of getting-to-know question: asking one of a kind she just asked, in other words, is asking it twice
+// ("what brought you here?" then "what made you stop by my page?").
+const QUESTION_KINDS = [
+  /\b(?:what|who)\b[^?]{0,25}\b(?:brought|brings|made|makes|got|led|drew)\b[^?]{0,25}\b(?:here|by|over|page|way|me|subscribe|stop|come|say hi|find|curious|join)|\bhow did (?:you|u) find me\b|\bwhat brings (?:you|u)\b/i,
+  /\bwhat'?s your name\b|\bwhat (?:do|should) i call you\b|\bwho am i talking to\b/i,
+  /\bwhere (?:are|r) (?:you|u) from\b|\bwhere (?:do|d'?you) (?:you|u) live\b/i,   // ("what part?" after it is a follow-up, not a repeat)
+  /\bhow'?s (?:your|ur) (?:day|night|evening|morning|week)\b|\bhow (?:is|was) (?:your|ur) (?:day|night|evening|week)\b|\bhow are (?:you|u)(?: doing)?\b/i,
+  /\bwhat (?:do|d'?you) (?:you|u) do for fun\b|\bwhat are (?:you|u) into\b|\bwhat do (?:you|u) like to do\b|\bany hobbies\b/i,
+  /\bwhat do (?:you|u) do\b(?! for fun)|\bwhat'?s your job\b|\bwhat do (?:you|u) do for (?:work|a living)\b/i,
+];
+const kindOf = (t) => QUESTION_KINDS.findIndex(re => re.test(String(t || '')));
+const sameKind = (q, before) => { const k = kindOf(q); return k >= 0 && String(before || '').split(/(?<=\?)/).some(x => /\?/.test(x) && kindOf(x) === k); };
 // words that don't make a topic (a question on a dead topic is one that shares any other word with it)
 const TOPIC_STOP = new Set('what whats when where which while your yours have been like just that this with about today really doing going there them they then than something anything right know think want would could should kind sort much more some very well okay yeah also into from over only even still make made making does dont tell guess babe baby thing'.split(' '));
 const topicWords = (t) => (String(t || '').toLowerCase().match(/[a-z]{4,}/g) || []).map(w => w.replace(/s$/, '')).filter(w => w.length >= 4 && !TOPIC_STOP.has(w));
@@ -114,7 +126,7 @@ const CONFUSED = /^(?:what do (?:you|u) mean|what\W*$|huh\W*$|wait,? what\W*$|lo
 // he pays her a compliment, or tells her what drew him: it gets received, never brushed off
 // (a positive frame only: "your eyes look tired, are you okay?" is concern, and a negated or critical line is never one)
 const NEGATED = /\b(?:don'?t|dont|do not|didn'?t|not|never|can'?t|cannot|hate|stop)\s+(?:really\s+|even\s+|that\s+)?(?:like|love|into|a fan of|care for|feeling)\b|\bnot (?:that|very|so|really|exactly|even) (?:hot|cute|pretty|sexy|beautiful|gorgeous|special|funny|my type)\b|\b(?:ugly|disgusting|gross|fake|photoshopped?|filtered)\b/i;
-const COMPLIMENT = /\b(?:you'?re|you are|ur|you look|looking|u look) (?:so |really |very |honestly |just |absolutely |too )?(?:hot|gorgeous|beautiful|pretty|cute|sexy|stunning|amazing|perfect|fine|lovely|adorable|unreal|a dream|a (?:ten|10)|my type)\b|\b(?:love|like|adore|obsessed with|into|crazy about|a fan of|digging) (?:your|ur|the way you|how you|that (?:smile|look|dress|outfit|pic)|tall)\b|\byour (?:looks|smile|eyes|body|pics|photos|face|lips|legs|voice|hair|style|energy|vibe) (?:(?:are|is|look|looks) )?(?:so |really |just |absolutely |honestly )?(?:beautiful|gorgeous|pretty|amazing|stunning|cute|nice|perfect|incredible|insane|unreal|fire|killer|lovely|hypnoti\w+|something else|next level|adorable|great)\b|\b(?:beautiful|gorgeous|pretty|amazing|stunning|cute|nice|perfect|incredible|lovely|killer|great|sexy) (?:smile|eyes|body|pics|photos|face|lips|legs|voice|hair|style)\b|\bcouldn'?t resist\b|\bi like you\b|\bcaught my eye\b/i;
+const COMPLIMENT = /\b(?:you'?re|you are|ur|you look|looking|u look) (?:so |really |very |honestly |just |absolutely |too )?(?:hot|gorgeous|beautiful|pretty|cute|sexy|stunning|amazing|perfect|fine|lovely|adorable|unreal|sweet|a dream|a (?:ten|10)|my type)\b|\b(?:you|u) (?:seem|sound) (?:so |really |very |honestly |just |super |like a )?(?:sweet|kind|nice|lovely|fun|funny|cool|smart|genuine|chill|amazing|awesome|cute|sweet girl|real one|different)\b|\b(?:love|like|adore|obsessed with|into|crazy about|a fan of|digging) (?:your|ur|the way you|how you|that (?:smile|look|dress|outfit|pic)|tall)\b|\byour (?:looks|smile|eyes|body|pics|photos|face|lips|legs|voice|hair|style|energy|vibe) (?:(?:are|is|look|looks) )?(?:so |really |just |absolutely |honestly )?(?:beautiful|gorgeous|pretty|amazing|stunning|cute|nice|perfect|incredible|insane|unreal|fire|killer|lovely|hypnoti\w+|something else|next level|adorable|great)\b|\b(?:beautiful|gorgeous|pretty|amazing|stunning|cute|nice|perfect|incredible|lovely|killer|great|sexy) (?:smile|eyes|body|pics|photos|face|lips|legs|voice|hair|style)\b|\bcouldn'?t resist\b|\bi like you\b|\bcaught my eye\b/i;
 const FREE_ASK = /\b(?:for\s+free|free\s+(?:pics?|nudes?|content|stuff|vid\w*|preview|ones?|something|sample)|(?:something|anything)\s+free|send\s+(?:me\s+)?(?:a\s+)?(?:free|preview)|no\s+money|broke)\b/i;
 // he's leaving (Q8)
 const GOODBYE = /\b(?:good\s*night|good\s*bye|g'?night|nighty?\s*night|gn|nite|gotta\s+(?:go|run|sleep)|got\s+to\s+go|have\s+to\s+(?:go|leave|run)|need\s+to\s+(?:go|sleep|leave)|i'?m\s+(?:off|out|going\s+to\s+(?:bed|sleep))|heading\s+(?:to\s+bed|out|off)|off\s+to\s+(?:bed|sleep|work)|going\s+to\s+(?:bed|sleep)|talk\s+(?:to\s+(?:you|u)\s+)?(?:later|tomorrow|tmrw|soon)|ttyl|bye+|see\s+(?:you|ya|u)\s+(?:later|tomorrow|soon))\b/i;
@@ -242,7 +254,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   const joke = reading?.answers === 'joke' && !reading?.odd && reading?.doing !== 'testing';   // a harmless joke; a dark one that tests her is odd
   const dead = reading?.thread === 'dead' && !invited && words(said) <= 6 && !/\?/.test(said) && !reading.asked?.length;   // a question from him is never a dead end
   const topic = new Set([...(session?.asked_about || []).slice(-2), said].flatMap(topicWords));
-  const freshAsk = (q) => !dead || !topicWords(q).some(w => topic.has(w));
+  const freshAsk = (q) => (!dead || !topicWords(q).some(w => topic.has(w))) && !sameKind(q, herLast);   // nor a kind of question she just asked
   p.dead_words = dead ? [...topic] : [];                     // the writer's question is checked against them (aiChat.writeOne)
   p.reading = reading ? {
     doing: reading.doing, new: politics || joke ? '' : reading.new, readings: politics || joke ? [] : reading.readings.filter(r => r.sure < 0.85),
@@ -360,7 +372,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
       tease: level.max >= 2 || stageNow === 'sexy', sell: sellOk, steer: sell && !noOffer && !holdFor('steer_to_sale'), check: sellOk && aim === 'sell' && !session?.asked_ready && !profile.time_waster,
     };
     const hardNow = ['venting', 'complaining'].includes(p.reading?.doing) || gauges.mood < 40;
-    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, clarify: confusedNow, rand });
+    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, clarify: confusedNow, invited: !!invited && level.his >= 2, rand });
     p.scores = ranked.map(x => ({ move: x.move, score: x.score, allowed: x.allowed, why: x.why }));
     // the ladder's goal is the incumbent: another move has to beat it clearly (or the incumbent isn't allowed)
     const best = ranked.find(x => x.allowed);
@@ -618,4 +630,4 @@ function planText(p) {
   return lines;
 }
 
-module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, TIER_LABEL, BUDGET, GOODBYE };
+module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, TIER_LABEL, BUDGET, GOODBYE };
