@@ -11,6 +11,7 @@ const { mediaNote, emptyBody } = require('./notes');
 const { ago } = require('./memory');
 
 const MODEL = 'claude-haiku-5-5';
+const tidy = (x) => String(x || '').replace(/\s+/g, ' ').trim();
 const PRICE = [0.10, 0.50];            // $ per million tokens in / out (prompts up to 100K tokens)
 
 const FAN_SCHEMA = {
@@ -96,7 +97,7 @@ const MISTAKES = [
 async function judgeDuel({ profile = {}, chat = [], options = [], fan = null }) {
   const letters = ['A', 'B', 'C'].slice(0, options.length);
   const said = (list) => list.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n');
-  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`].filter(Boolean).join('; ');
+  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.personality && `personality: ${tidy(profile.personality).slice(0, 300)}`].filter(Boolean).join('; ');
   const him = fan ? `About him then: ${fan.standing_text ? `${fan.standing_text} ` : ''}${fan.spent_before ? `He had spent $${fan.spent_before} with her` : 'He had not spent anything yet'}; ${fan.messages_before} messages in the chat so far.\n\n` : '';
   const line = (m) => {
     const note = mediaNote(m);
@@ -184,7 +185,7 @@ const COACH_SCHEMA = {
 };
 async function coachCheck({ profile = {}, fan = null, card = [], plan = null, chat = [], messages = [], ppv = null, rules = [], lessons = [], diary = [] }) {
   const line = (m) => `${m.from_fan ? 'Him' : m.mass ? 'Her (mass message)' : 'Her'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m)}${mediaNote(m) ? ` [${mediaNote(m)}]` : ''}`;
-  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.heat && `how spicy: ${profile.heat}`].filter(Boolean).join('; ');
+  const who = [profile.name, profile.vibe && `vibe: ${profile.vibe}`, profile.personality && `personality: ${tidy(profile.personality).slice(0, 300)}`, profile.likes && `likes: ${tidy(profile.likes).slice(0, 150)}`, profile.heat && `how spicy: ${profile.heat}`].filter(Boolean).join('; ');
   const him = fan ? `${fan.name ? `he goes by ${fan.name}; ` : ''}${fan.tier_label}${fan.new_sub ? ', new subscriber' : ''}${fan.time_waster ? ', time waster' : ''}${fan.suspicious ? ', suspicious' : ''}; closeness: ${fan.closeness}; free talk ${fan.budget.used} of ${fan.budget.limit}` : 'unknown';
   const r = await ask(
     'You coach the chat replies of an AI character on Fanvue, a subscription site for verified adults; flirting and sex talk between adults are allowed. You judge one reply against the agency\'s rules, the plan made for it and the manager\'s notes. You never rewrite it. Be specific and short.',

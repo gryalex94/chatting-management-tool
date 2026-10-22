@@ -85,7 +85,7 @@ function himStep({ real = false, fan = {}, type = null, money: m = null, card = 
 }
 
 /** 2b. This conversation: the plan for it (session.js), the sticky mood, no-selling, how the last one went. */
-function sessionStep({ session = null, state = null, herHere = 0, stage = null, attempts = null }) {
+function sessionStep({ session = null, state = null, herHere = 0, stage = null, attempts = null, skipped = '' }) {
   if (!session) return null;
   const aimWord = (a) => String(a || '').replace(/_/g, ' ');
   return step('session', 'This conversation', {
@@ -97,6 +97,7 @@ function sessionStep({ session = null, state = null, herHere = 0, stage = null, 
       stage ? { label: 'His first sale', value: `the ${stage.stage === 'done' ? 'offer is made' : stage.stage === 'offer' ? 'offer' : stage.stage === 'ask' ? 'direct ask' : `${stage.stage} stage`}: ${stage.text} (${stage.why})` }
         : { label: 'PPV allowed from', value: `her message ${session.warm_up} in this conversation (they're ${session.closeness}); ${herHere} so far${herHere >= session.warm_up ? ': allowed when it fits' : ''}` },
       session.cadence ? { label: 'Planned attempts', value: `${session.cadence.text}; ${session.cadence.due ? 'due: one today' : `the next in about ${session.cadence.next_in} day${session.cadence.next_in === 1 ? '' : 's'}`} (give or take, never a fixed date: E5). He can always ask, or get sexual, himself` } : null,
+      skipped ? { label: 'Selling off', value: skipped } : null,
       session.pause ? { label: 'After his big spend', value: session.pause.why } : null,
       attempts && (attempts.here || attempts.today) ? { label: 'Attempts', value: `${attempts.here} PPV${attempts.here === 1 ? '' : 's'} this conversation, ${attempts.today} earlier today: one selling attempt a day (A7)` } : null,
       session.taste_text ? { label: 'His taste', value: `${session.taste_text} (A3)` } : null,
