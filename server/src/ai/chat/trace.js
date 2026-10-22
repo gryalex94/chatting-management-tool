@@ -128,6 +128,8 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
     tags: [readFailed ? 'The read failed' : readerWord, ...(reading ? ['R2'] : [])],
     details: [
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
+      reading?.answers ? { label: 'His answer to her', value: { straight: 'a real answer', short: 'the bare minimum', joke: 'a joke: its meaning is plain, she plays along', dodge: 'he skips what she said' }[reading.answers] } : null,
+      reading?.thread === 'dead' ? { label: 'The topic', value: 'ran out: she lets it go and brings up something new' } : null,
       reading?.new ? { label: 'What\'s new', value: reading.new } : null,
       reading?.readings?.length ? { label: 'Could mean', value: reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}%)`).join(' · ') } : null,
       reading?.curious ? { label: 'She\'d want to ask', value: reading.curious } : null,
@@ -312,6 +314,7 @@ function writerSteps({ label, drafts = [], pick = -1, status, ppv = null, scene 
       tags: [turned ? 'Rules' : null, d.style.length ? 'Voice checks' : null, d.review ? 'Claude' : null, changed ? 'Tidied in code' : null].filter(Boolean),
       quotes: d.final,
       details: [
+        d.picked ? { label: 'Candidates', value: d.picked } : null,
         changed ? { label: 'Code changed it from', value: d.raw.map(t => `"${t}"`).join(' / ') } : null,
         d.ppv ? { label: 'PPV', value: d.offer ? `"${d.offer}"` : d.ppv } : null,
         ...d.problems.map(p => ({ label: 'Rule', value: p })),

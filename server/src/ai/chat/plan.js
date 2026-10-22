@@ -78,6 +78,9 @@ function beatsFor(p) {
   if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
   return base.slice(0, 3);
 }
+// words that don't make a topic (a question on a dead topic is one that shares any other word with it)
+const TOPIC_STOP = new Set('what whats when where which while your yours have been like just that this with about today really doing going there them they then than something anything right know think want would could should kind sort much more some very well okay yeah also into from over only even still make made making does dont tell guess babe baby thing'.split(' '));
+const topicWords = (t) => (String(t || '').toLowerCase().match(/[a-z]{4,}/g) || []).map(w => w.replace(/s$/, '')).filter(w => w.length >= 4 && !TOPIC_STOP.has(w));
 // how alike two short texts are (the questions she already asked): shared words over the longer one
 const overlap = (a, b) => {
   const w = (t) => new Set(String(t || '').toLowerCase().match(/[\p{L}\p{N}']{3,}/gu) || []);
@@ -221,7 +224,19 @@ function planReply({ level, voice = null, latest = [], followUp = false, sell = 
   // the reading (step 2): what he is doing, what is new, what it could mean, what she'd want to ask (not twice)
   const askedBefore = (q) => (session?.asked_about || []).some(a => overlap(a, q) >= 0.6);
   // politics, religion, a public figure (fix 5): the non-answer is the answer, nothing to be curious about
-  p.reading = reading ? { doing: reading.doing, new: politics ? '' : reading.new, readings: politics ? [] : reading.readings.filter(r => r.sure < 0.85), curious: reading.curious && !politics && !askedBefore(reading.curious) ? reading.curious : '', stance: politics ? 'deflect' : reading.stance } : null;
+  // a joke answer to her question is plain, not a riddle: nothing to puzzle over, no question about what he meant;
+  // a dead topic gets no more questions (a fresh one about him is fine)
+  // (dead only on his little answers: a man who writes a real message, or hands her the lead, is opening something, not ending it)
+  const joke = reading?.answers === 'joke';
+  const dead = reading?.thread === 'dead' && !invited && words(said) <= 6;
+  const topic = new Set([...(session?.asked_about || []).slice(-2), said].flatMap(topicWords));
+  const freshAsk = (q) => !dead || !topicWords(q).some(w => topic.has(w));
+  p.dead_words = dead ? [...topic] : [];                     // the writer's question is checked against them (aiChat.writeOne)
+  p.reading = reading ? {
+    doing: reading.doing, new: politics || joke ? '' : reading.new, readings: politics || joke ? [] : reading.readings.filter(r => r.sure < 0.85),
+    curious: reading.curious && !politics && !joke && !askedBefore(reading.curious) && freshAsk(reading.curious) ? reading.curious : '',
+    stance: politics ? 'deflect' : joke ? 'playful' : reading.stance, answers: reading.answers || '', thread: dead ? 'dead' : 'alive',
+  } : null;
   const goal = (g, text, why, rules = []) => { p.goal = g; p.goal_text = text; p.why = why; p.rules.push(...rules); };
   const leaving = !followUp && (GOODBYE.test(said) || ids.includes('leaving_soon'));
   const back = !followUp && away >= 2 * DAY_MS && herReplies === 0;
@@ -531,6 +546,8 @@ function planText(p) {
   if (p.hour_note) lines.push(p.hour_note);
   if (p.reading?.new) lines.push(`What's new in his message: ${p.reading.new}. Pick up on it; don't skate past it.`);
   if (p.reading?.readings?.length) lines.push(`You're not sure what he means: ${p.reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}% sure)`).join('; ')}. Don't assume; ask lightly or tease around it.`);
+  if (p.reading?.answers === 'joke') lines.push('He answered your last message with a joke: laugh or play along with it, its meaning is plain; never ask what he meant, and never take it literally.');
+  if (p.reading?.thread === 'dead') lines.push('The topic you two were on has run out (he has nothing more to give it): let it go now. React briefly, then bring up something new: something easy about him (where he\'s from, what he does, what he\'s into), or a small real thing of yours. No more questions about the old topic.');
   if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
   if (p.invited) lines.push('He handed you the lead ("I\'m yours", "what are you going to do with me"): make a concrete first move now, a playful command or what you do first, in one or two short lines; never a promise of ideas or "you\'ll see".');
@@ -545,7 +562,7 @@ function planText(p) {
   if (p.back) lines.push(`He's back after ${p.back}: let him feel you're glad he's back.`);
   if (p.tone) lines.push(`Tone: ${p.tone}.`);
   lines.push(`Length: ${p.length.text}.`);
-  lines.push(p.check ? 'Questions: just the one below.' : p.ask.allowed ? 'Questions: one at most, and only if it helps.' : `Questions: none this time (${p.ask.why}).`);
+  lines.push(p.check ? 'Questions: just the one below.' : p.ask.allowed ? 'Questions: one at most, and only if it helps. If you ask, ask what a real girl would naturally ask here, about what he actually said or about him: never one that treats something ordinary as a problem with a cause ("what\'s making it quiet?"), never what his joke meant, never one he already answered.' : `Questions: none this time (${p.ask.why}). Then give him something to pick up instead (a small real thing of yours, an opinion, a playful tease), never a flat comment that ends the chat.`);
   if (p.check) lines.push(`Check with him: what he just said doesn't fit what you remember ("${p.check.note}"). Ask lightly, like a real person would ("wait, I thought you said…"); no dates, and believe what he says now.`);
   if (p.callback) lines.push(`Show you remember him: bring up "${p.callback.note}" (${p.callback.ask}); naturally, no dates, don't quote it.`);
   if (p.hook) lines.push(`A hook for next time: "${p.hook.note}" is ${p.hook.when}; like "tell me how it goes".`);
@@ -565,4 +582,4 @@ function planText(p) {
   return lines;
 }
 
-module.exports = { fanProfile, planReply, planText, goodbyeOf, TIER_LABEL, BUDGET, GOODBYE };
+module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, TIER_LABEL, BUDGET, GOODBYE };

@@ -21,7 +21,7 @@ const V = require('../ai/chat/vision');
 const Sv = require('../ai/chat/services');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, STORY_MOVE, SEXUAL_INTENT } = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
-const { reviewFan, reviewReply, reviewOffer, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
+const { reviewFan, reviewReply, reviewOffer, questionCheck, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { RULES } = require('../ai/chat/rules');
 const { typingPlan, SPEEDS } = require('../ai/chat/timing');
 const strategy = require('../ai/chat/strategy');
@@ -1723,6 +1723,15 @@ const ODD_LINE = /\b(?:dicks|cocks|penises|balls)\b(?![^.!?]*\b(?:your|ur|you|u)
 // he hands her the lead ("I'm all yours", "what are you going to do with me"): a concrete move now, and a new subscriber's direct ask may come
 const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m yours|do (?:whatever|what|anything) you want (?:with|to) me|take the lead|(?:you'?re|you are|ur) in charge|what (?:are you going|would you like|do you want) to do (?:with|to) me|what would you do (?:with|to) me|use me|have your way|show me what you'?ve got|i'?m (?:in your hands|at your mercy))\b/i;
 // a reply that only promises instead of doing something: "I've got ideas", "you'll see"
+// A flat line (research: dead ends end chats): no question, nothing of hers, a handful of words; nothing for him to answer.
+// Checked on the talk moments only, when a question was cut or his own reply was short.
+const OF_HERS = /\b(?:i|i'?m|i'?ve|i'?d|i'?ll|my|me|mine|we|us|here)\b/i;
+const TALK_GOALS = new Set(['chat', 'get_to_know', 'curious', 'share', 'flirt', 'sexy_vibe', 'welcome_new', 'welcome_back', 'dry_ask']);
+const wordCount = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
+function flatLine(list) {
+  const text = list.join(' ');
+  return !!text.trim() && !/\?/.test(text) && wordCount(text) <= 12 && !OF_HERS.test(text);
+}
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2382,7 +2391,10 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [] });
         if (voice) d.messages = P.dropSentences(d.messages, { his: voice.his, noOffer: d.ppv ? '' : noPpv || base.noOffer || '' });
         const n = voice ? questionsIn(d.messages, voice.his) : 0;
-        if (voice && ((voice.noQuestion && n) || n > 1)) d.messages = P.unQuestion(d.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
+        if (voice && ((voice.noQuestion && n) || n > 1)) {
+          d.messages = P.unQuestion(d.messages, { keep: voice.noQuestion ? 0 : 1, his: voice.his });
+          d.cut = n - questionsIn(d.messages, voice.his);   // questions the code took out: what's left may be a dead end
+        }
         if (!piece) d.messages = P.splitBubbles(d.messages);
         return d;
       };
@@ -2468,10 +2480,32 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       if (draft.offer && !draft.offer.item.series && C.levelOf(draft.offer.item) <= (base.level?.his ?? 0) - 2) {
         now.style.push(`The PPV "${draft.offer.item.title}" is much tamer than where the chat is: offer something closer to what he wants.`);
       }
-      if (picked) now.style.push(`(picked 1 of ${picked.n} candidates: ${picked.why})`);
+      // a question that doesn't make sense here (Claude reads it in the chat): rewritten, or cut if it is still there at the end
+      if (asks && verdict !== 'block') {
+        try {
+          const q = await questionCheck({ chat: base.chat || [], messages: draft.messages });
+          out.cost += q.usage.cost;
+          await logUsage(orgId, 'check', CHECK_MODEL, q.usage, { creatorId, fanUuid });
+          if (!q.ok) { now.badQuestion = q.problem || 'it doesn\'t fit the chat'; now.style.push(`The question doesn't make sense here: ${now.badQuestion.replace(/\.$/, '')}. Ask what a real girl would naturally ask about what he said or about him, or no question.`); }
+        } catch (e) { console.error('[ai-chat] question check:', e.message); }
+      }
+      // the topic ran out (the reader): a question that stays on it drags; a fresh one about him is fine
+      const dead = new Set(base.plan?.dead_words || []);
+      const stale = dead.size ? draft.messages.filter(m => /\?/.test(String(m))).find(m => Plan.topicWords(m).some(w => dead.has(w))) : null;
+      if (stale && !now.badQuestion) now.badQuestion = 'it asks about a topic that ran out';
+      if (stale) now.style.push(`The topic you were on ran out, so don't ask about it again ("${stale}"). Ask something new and easy about him (where he's from, what he does, what he's into), or share a small thing of yours.`);
+      // a dead end (a question cut, or a flat line after his short reply): nothing for him to answer
+      const hisShort = wordCount((latest || []).join(' ')) <= 4;
+      if (TALK_GOALS.has(base.plan?.goal) && (draft.cut || hisShort) && flatLine(draft.messages)) {
+        now.style.push(`It gives him nothing to answer: a flat comment${draft.cut ? ' once its question was taken out' : ' after his short reply'}. Add one small thing of yours he can pick up (what you're doing right now, an opinion, a playful tease)${voice?.noQuestion || base.plan?.ask?.allowed === false ? ', still no question' : ''}.`);
+      }
+      // the plan was to share something of hers: a reply with nothing of hers in it didn't
+      if (base.plan?.goal === 'share' && draft.messages.length && !OF_HERS.test(draft.messages.join(' '))) now.style.push('The plan was to share a small real thing of yours (what you did, a friend, your flatmate): it has nothing of yours yet.');
+      // which candidate was picked: for the decision map only, not a reason to rewrite
+      now.picked = picked ? `picked 1 of ${picked.n} candidates: ${picked.why}` : '';
       steps.push({
         raw, final: [...draft.messages], ppv: draft.ppv ? `${draft.ppv.item} at $${draft.ppv.price ?? '?'}${offerProblem ? `: ${offerProblem}` : ''}` : null,
-        offer: draft.offer ? `${draft.offer.item.title}, $${draft.offer.price}` : null, problems, style: now.style, review, verdict,
+        offer: draft.offer ? `${draft.offer.item.title}, $${draft.offer.price}` : null, problems, style: now.style, review, verdict, picked: now.picked,
       });
       last = now;
       if (verdict !== 'block') kept = now;
@@ -2487,6 +2521,12 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     const pick = kept || last;
     const { draft } = pick;
     const notes = [...pick.problems];
+    // still a question that doesn't make sense after the rewrite: it goes, when the rest still says something
+    if (pick.badQuestion && pick.verdict !== 'block') {
+      const before = draft.messages.join(' ');
+      draft.messages = P.unQuestion(draft.messages, { keep: 0, his: voice?.his || '' });
+      if (draft.messages.join(' ') !== before) notes.push(`Its question was cut: ${pick.badQuestion}`);
+    }
     // a typo now and then (A8), only on a reply that passed and carries no PPV
     let typo = null;
     if (pick.verdict !== 'block' && !draft.offer && !draft.ppv && (recentHer.length > 0)) {   // never on her first reply to him
@@ -2552,6 +2592,8 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new' } = 
     if (d.messages.length > 3) { score -= 20; why.push('too many messages'); }
     if (d.messages.some(m => words(m) > 15)) { score -= 10; why.push('a long message'); }
     if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
+    if (TALK_GOALS.has(plan?.goal) && flatLine(d.messages)) { score -= 15; why.push('a flat line, nothing for him to answer'); }
+    if (plan?.dead_words?.length && d.messages.some(m => /\?/.test(m) && Plan.topicWords(m).some(w => plan.dead_words.includes(w)))) { score -= 25; why.push('asks about a topic that ran out'); }
     return { d, score, why: why.join(', ') || `${n} words, fits the target` };
   }).sort((a, b) => b.score - a.score);
   return { draft: scored[0].d, n: list.length, why: scored[0].why, scores: scored.map(x => x.score) };

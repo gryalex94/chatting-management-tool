@@ -85,6 +85,11 @@ const STANCES = ['steady', 'curious', 'playful', 'match', 'deflect', 'comfort', 
  */
 function readPrompt({ chat, money, selling = false, notes = [] }) {
   const menu = selling ? PLAYBOOK.situations : SITUATIONS;
+  // her last message before his latest ones: his reply is first of all an answer to it
+  const real = chat.filter(m => !m.mass);
+  let i = real.length - 1;
+  while (i >= 0 && real[i].from_fan) i -= 1;
+  const herLast = i >= 0 ? clean(real[i].text).replace(/\s+/g, ' ') : '';
   return [
     { role: 'system', content: 'You read one moment in a chat between a creator on Fanvue (an AI character played as a real girl; every fan is a verified adult) and a fan, for the engine that decides her next reply. You never write her reply. Read his latest message the way a sharp, warm woman in her place would: what he is doing, what is new, what it could mean, what she would want to know. Answer with JSON only.' },
     {
@@ -94,33 +99,39 @@ function readPrompt({ chat, money, selling = false, notes = [] }) {
         `About this moment: ${momentFacts(chat, money)}`,
         `The last messages:\n${chat.filter(m => !m.mass).slice(-12).map(line).join('\n')}`,
         notes.length ? `What she remembers about him:\n${notes.map(n => `- ${n}`).join('\n')}` : '',
+        herLast ? `Her last message to him: "${herLast}". Read his latest message first as his answer to it: a short or sarcastic answer often says her message was dull or odd, not that he is.` : '',
         'Answer about his latest message(s):\n'
           + '- ids: the situations (at most 3) that clearly fit right now; only ones that clearly fit.\n'
           + '- level: how sexual his latest message is: 0 = friendly, no flirting; 1 = flirty (compliments, light teasing); 2 = suggestive (hints, innuendo); 3 = explicit (sex acts or intimate body parts). Swearing, politics and slang are not sexual.\n'
+          + '- answers: how his latest message answers her last one: "straight" (a real answer), "short" (the bare minimum: "true", "idk", "I guess"), "joke" (a joke or a sarcastic answer, like "lack of bombs" to "what\'s making it quiet?": its meaning is plain, it is not a riddle), "dodge" (he skips what she said), or "" if she asked or said nothing he could answer.\n'
+          + '- thread: "dead" when the topic they are on has run out (he has little more to give it: short or joking answers to it, or it has filled two or more of her replies with nothing new from him), so a real girl would let it go and bring up something new; "alive" otherwise.\n'
           + `- mood: his mood right now, one of ${MOODS.join(', ')}.\n`
           + '- pulled_back: true only if he is slowing things down after something sexual (says it\'s going fast, changes the subject away from sex, seems put off).\n'
           + `- doing: what he is doing with this message, one of ${DOING.join(', ')}.\n`
           + '- new: what is new or surprising in it, in one short line of at most 15 words (something she did not know, a turn she would not expect, a line that does not fit the chat so far), or "" if nothing.\n'
           + '- readings: when the message is really open to more than one reading, up to 3 ways to read it, each {"what": "…", "sure": 0–1}, "what" in at most 10 words (for example "he may be gay", "testing whether she is a bot", "wants a reaction"); [] when it is plain.\n'
-          + '- curious: what a real girl in her place would want to ask him about it, one short question in plain words (at most 15 words), or "" (a question about what he meant, what he is into or who he is is fine; never a graphic one, never something he just answered).\n'
+          + '- curious: what a real girl in her place would want to ask him about it, one short question in plain words (at most 15 words), or "" (a question about what he meant, what he is into or who he is is fine; never a graphic one, never something he just answered, never what his joke meant, never more about a dead topic: then a fresh, easy question about him, or ""; never one that treats something ordinary as a problem with a cause).\n'
           + '- asked: his open question(s) to her in his latest message(s), each as he put it, at most 3, [] if none.\n'
           + '- promised: anything she told him earlier in these messages that is still open ("I\'ll show you later", "remind me to tell you"), at most 2, [] if none.\n'
-          + '- odd: true when his message does not fit a man chatting up a girl on her page (he talks about other men or his own body in a way that does not involve her, a non-sequitur, a provocation, a line that reads like a test), false when it fits, however blunt.\n'
+          + '- odd: true when his message does not fit a man chatting up a girl on her page (he talks about other men or his own body in a way that does not involve her, a non-sequitur, a provocation, a line that reads like a test), false when it fits, however blunt; a joke answer to her question is not odd.\n'
           + `- stance: the attitude that fits her reply, one of ${STANCES.join(', ')} (steady = warm and normal; curious = she wants to know more first; playful = tease it, don't take it seriously; match = he set the tone, go with it; deflect = don't take the bait, move it somewhere better; comfort = he needs care; firm = a clear boundary, kindly).\n`
           + (notes.length ? '- contradicts: if his latest message clearly contradicts one of the remembered notes (the note says he has a dog, now he says he has no pets), copy that note word for word; else "". New details that fit, or things he says about her, are not contradictions.\n' : '')
-          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "doing": "small_talk", "new": "", "readings": [], "curious": "", "asked": [], "promised": [], "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
+          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "answers": "straight", "thread": "alive", "doing": "small_talk", "new": "", "readings": [], "curious": "", "asked": [], "promised": [], "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
       ].filter(Boolean).join('\n\n'),
     },
   ];
 }
-/** The reading from Claude's answer, checked: { doing, new, readings: [{ what, sure }], curious, stance }. */
+/** The reading from Claude's answer, checked: { doing, new, readings: [{ what, sure }], curious, stance, answers, thread }. */
+const ANSWERS = ['straight', 'short', 'joke', 'dodge'];
 function readReading(json) {
   if (!json || typeof json !== 'object') return null;
   const text = (v, n) => clean(v).slice(0, n);
   const readings = (Array.isArray(json.readings) ? json.readings : []).map(r => ({ what: text(r?.what, 120), sure: Math.max(0, Math.min(1, Number(r?.sure) || 0)) })).filter(r => r.what).slice(0, 3);
+  const answers = ANSWERS.includes(json.answers) ? json.answers : '';
   return {
     doing: DOING.includes(json.doing) ? json.doing : 'other', new: text(json.new, 200), readings,
-    curious: text(json.curious, 160), stance: STANCES.includes(json.stance) ? json.stance : 'steady', odd: json.odd === true,
+    curious: text(json.curious, 160), stance: STANCES.includes(json.stance) ? json.stance : 'steady', odd: json.odd === true && answers !== 'joke',
+    answers, thread: json.thread === 'dead' ? 'dead' : 'alive',
     asked: (Array.isArray(json.asked) ? json.asked : []).map(x => text(x, 160)).filter(Boolean).slice(0, 3),
     promised: (Array.isArray(json.promised) ? json.promised : []).map(x => text(x, 160)).filter(Boolean).slice(0, 2),
   };

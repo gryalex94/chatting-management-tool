@@ -620,21 +620,28 @@ function parseJsonObjects(text, max = 4) {
   return out;
 }
 // A reply from one parsed answer object.
+const textsOf = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).filter(x => typeof x === 'string' || typeof x === 'number').map(clean).filter(Boolean);
 function replyFromJson(j) {
-  const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
+  const strings = textsOf;
   if (!j || !(Array.isArray(j.messages) || typeof j.messages === 'string')) return null;
   const ppv = j.ppv && typeof j.ppv === 'object' && j.ppv.item ? { item: clean(j.ppv.item), price: Number(j.ppv.price) || null } : null;
   return { messages: strings(j.messages), ppv, scene: readScene(j.scene), learned: strings(j.learned).slice(0, 10), about_me: strings(j.about_me).slice(0, 5), handover: clean(j.handover), format_ok: true };
 }
+// Candidates some writers wrap in one object ({"messages": [{…}, {…}]}, {"replies": [{…}, {…}]}): the inner answer objects.
+const WRAPS = ['replies', 'candidates', 'answers', 'messages'];
+const unwrap = (j) => (j && typeof j === 'object' ? WRAPS.map(k => j[k]).find(v => Array.isArray(v) && v.length && v.every(x => x && typeof x === 'object' && !Array.isArray(x))) : null) || null;
 /** The candidate replies in an answer (an array of answer objects), each as readReply gives it; [] when there is no array. */
 function readReplies(text) {
-  return parseJsonObjects(text).map(replyFromJson).filter(d => d && d.messages.length);
+  let list = parseJsonObjects(text);
+  if (list.length === 1 && unwrap(list[0])) list = unwrap(list[0]);
+  return list.map(replyFromJson).filter(d => d && d.messages.length);
 }
 
 // A reply as the writer sent it: { messages, learned, handover, format_ok }.
 function readReply(text) {
-  const j = parseJsonObject(text);
-  const strings = (v) => (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).map(clean).filter(Boolean);
+  let j = parseJsonObject(text);
+  if (unwrap(j)) j = unwrap(j).find(x => Array.isArray(x.messages) || typeof x.messages === 'string') || j;   // candidates wrapped in one object: the first
+  const strings = textsOf;
   if (j && (Array.isArray(j.messages) || typeof j.messages === 'string')) {
     const ppv = j.ppv && typeof j.ppv === 'object' && j.ppv.item ? { item: clean(j.ppv.item), price: Number(j.ppv.price) || null } : null;
     return { messages: strings(j.messages), ppv, scene: readScene(j.scene), learned: strings(j.learned).slice(0, 10), about_me: strings(j.about_me).slice(0, 5), handover: clean(j.handover), format_ok: true };

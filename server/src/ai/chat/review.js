@@ -136,6 +136,30 @@ async function reviewOffer({ fanTexts = [], messages = [], item }) {
 }
 
 /**
+ * A drafted reply that asks him something: does the question make sense here, the way a real
+ * girl would ask it? (A question can keep every rule and still be odd: "what's making it quiet
+ * over there?" to a man who said his afternoon is quiet.) Returns { ok, problem, declined, usage };
+ * when Claude declines, the reply goes on as it is.
+ */
+const QUESTION_SCHEMA = {
+  type: 'object',
+  properties: { ok: { type: 'boolean' }, problem: { type: 'string' } },
+  required: ['ok', 'problem'],
+  additionalProperties: false,
+};
+async function questionCheck({ chat = [], messages = [] }) {
+  const line = (m) => `${m.from_fan ? 'Him' : 'Her'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || emptyBody(m)}`;
+  const r = await ask(
+    'You check the questions in chat replies of a creator on Fanvue, a subscription site for verified adults, before they are sent. You only judge whether the question makes sense in the chat. You never rewrite it.',
+    `The chat (oldest first, the last part):\n${chat.filter(m => !m.mass).slice(-10).map(line).join('\n')}\n\n`
+      + `Her reply:\n${messages.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n')}\n\n`
+      + 'Does the question in her reply make sense as something a real girl would naturally ask him right now? ok = false only when it clearly doesn\'t: it assumes something he never said or treats something ordinary as a problem with a cause ("what\'s making it quiet?" after "quiet afternoon"); it asks what his joke meant, or takes a joke literally; it asks something he already answered, or something she already asked; it doesn\'t follow from the chat; or it is so odd he would answer it with sarcasm. A simple, ordinary question is fine: ok = true. problem: one short plain sentence saying what is wrong, or "".',
+    QUESTION_SCHEMA);
+  if (r.declined) return { ok: true, declined: true, problem: '', usage: r.usage };
+  return { ok: !!r.answer.ok, problem: String(r.answer.problem || '').trim(), usage: r.usage };
+}
+
+/**
  * Claude's watch-only check of a Practice reply (it never blocks or rewrites):
  * does she answer him, does it fit the moment and the plan, are his notes and her
  * facts used right, is the selling call right, does it repeat a mistake the
@@ -169,7 +193,8 @@ async function coachCheck({ profile = {}, fan = null, card = [], plan = null, ch
       + `What she has told fans about herself (she must stay consistent with it): ${diary.map(d => String(d.text || d)).join('; ') || 'nothing yet'}\n\n`
       + (plan ? `The plan made for this reply: ${plan.goal_text} (because ${plan.why}). PPV: ${plan.sell.allowed ? 'allowed' : `none (${plan.sell.why})`}. Questions: ${plan.ask.allowed ? 'one at most' : `none (${plan.ask.why})`}. Length: ${plan.length.text}.`
         + `${plan.tone ? ` Tone: ${plan.tone}.` : ''}${plan.callback ? ` Bring up from his notes: "${plan.callback.note}" (${plan.callback.ask}).` : ''}${plan.check ? ` Check with him: he just contradicted the note "${plan.check.note}".` : ''}`
-        + `${plan.hook ? ` Hook for next time: "${plan.hook.note}" (${plan.hook.when}).` : ''}${plan.back ? ` He's back after ${plan.back}.` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}${plan.event ? ` A moment of hers planned: ${plan.event.text}.` : ''}${plan.touch ? ` Also, in passing: ${plan.touch.text}.` : ''}\n\n` : '')
+        + `${plan.hook ? ` Hook for next time: "${plan.hook.note}" (${plan.hook.when}).` : ''}${plan.back ? ` He's back after ${plan.back}.` : ''}${plan.story ? ` Story move: "${plan.story.move}".` : ''}${plan.event ? ` A moment of hers planned: ${plan.event.text}.` : ''}${plan.touch ? ` Also, in passing: ${plan.touch.text}.` : ''}`
+        + `${plan.reading?.thread === 'dead' ? ' The topic they were on had run out (his short answers): moving on to something new is right here, not ignoring him.' : ''}${plan.reading?.answers === 'joke' ? ' He answered her last message with a joke: playing along is right; asking what he meant is not.' : ''}\n\n` : '')
       + `The chat (oldest first, the last part):\n${chat.slice(-24).map(line).join('\n')}\n\n`
       + `Her reply:\n${messages.map(t => `- ${String(t).replace(/\s+/g, ' ').trim()}`).join('\n')}${ppv ? `\n[with a PPV: "${ppv.title}", $${ppv.price}, ${ppv.what}]` : ''}\n\n`
       + `The agency's rules:\n${rules.map(x => `- ${x}`).join('\n')}\n\n`
@@ -211,4 +236,4 @@ async function draftRulesFrom(marks, { goal = null, kind = 'wording' } = {}) {
   return { rules, usage: r.usage };
 }
 
-module.exports = { reviewFan, reviewReply, reviewOffer, judgeDuel, coachCheck, draftRulesFrom, MODEL };
+module.exports = { reviewFan, reviewReply, reviewOffer, questionCheck, judgeDuel, coachCheck, draftRulesFrom, MODEL };
