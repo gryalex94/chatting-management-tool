@@ -118,3 +118,16 @@ Commits 20776a9 … 7f8fbcd. The first real browser recorded 538 messages, 60 pr
 Built: sale matching (fanslyStats.matchSales: a ledger sale ↔ the PPV message carrying that item to that fan, re-run after every batch so late-arriving chats still match; tips to the last writer in that chat within 12 h), the sold mark on PPV messages, the daily summary table fansly_daily (per account, Amsterdam day, chatter: sent, mass, fans, PPVs sent/sold, PPV net, tips, refunds, unattributed, median reply time), recount after each batch and every 6 hours on the live server, the Fansly payroll line (credited sender first, else whoever was on the Fansly roster), and a 14-day table on the dashboard.
 
 Not built: the extension fetching older history and the ledger on its own. It would have to reproduce Fansly's request signature, and the safety check stopped that step. History and sales therefore arrive the passive way: every chat a chatter opens (and scrolls) is recorded in full, and the sales ledger is recorded when someone opens Fansly's Earnings page and scrolls its list. The popup and the dashboard remind when the ledger has not been read for a day. Sales that can't be tied to a recorded chat show as "wall" until their chat is opened.
+
+## Addition of 23 Oct, late: the big side panel and the scripts library (owner's request)
+
+**Side panel (Phase 3, replaces the smaller panel described above).** While the extension runs, a wide panel sits on the right of the Fansly page (resizable, about a third of the screen, can be collapsed to a thin strip). It follows the chat that is open and shows, top to bottom:
+- **Fan card:** name, nickname, username, tier and subscription dates, joined, last seen, follows you.
+- **Metrics:** total spent with us, PPVs bought / offered and his buy rate, tips, last purchase and what it was, average price he pays, days since last purchase, his usual reply speed, the hours he is usually online.
+- **Notes:** notes from every shift (who wrote it, when), Fansly's own note on him mirrored, add / edit in place.
+- **AI summary:** what he likes, what he bought and refused, open promises, suggested next step; refreshed when the chat changes; the AI can propose a note to save.
+- **Shift strip:** who is signed in, shift timer, warnings (he is waiting N minutes, no PPV offered in the last N messages, he already owns this item).
+- **Scripts** (below).
+The panel only reads from our server and writes our notes; it never sends anything to Fansly.
+
+**Scripts library.** Ready-made message scripts per page and per stage (opener, warm-up, sexting steps, PPV pitch, after a no, re-engage, custom request, aftercare). A chatter clicks a script → it lands in the Fansly message box to edit and send by hand. Placeholders fill from the fan card ({name}, {last_bought}). Managers write and order them in the tool; each script records how often it was used and how often the PPV after it sold. **Later:** each script can be linked to vault content (an album or specific items by their Fansly media ids), so the panel shows which item goes with which script, warns when he already owns it, and shows its price and sell rate.
