@@ -100,3 +100,16 @@ Edge cases are settled by a rule the owner can change per page: a mass-message P
 - `fansly_lists`, `fansly_list_members`, `fansly_subscriptions`, `fansly_followers`: the mirrored lists.
 - `fansly_fan_summaries`: the AI summary per fan, with the message it was last built from.
 - `fansly_daily`: the per-chatter per-page daily summary that reports and payroll read.
+
+## Addition of 23 Oct, evening: the Messages dashboard (owner's request, after Phase 1 went live)
+
+A page like Infloww's message dashboard: every message sent from each page, in one list.
+- One row per message sent by the team: time, page, chatter (or "not attributed"), fan (nickname, username), the text, PPV price, sold or not (and when), delivered / read time, how long the fan had been waiting, mass or personal.
+- Filters: page, chatter, day or range, only PPVs, only sold, only unanswered, search in text.
+- Click a row → the whole conversation with that fan, as the chatter saw it.
+- Totals above the list for the current filter: messages, PPVs sent, sold, sell rate, net.
+- Export to CSV for the same filter.
+- Placed right after Phase 2 (it needs the sold mark from the ledger), before the side panel.
+
+## Phase 1 went live on 23 Oct
+Commits 20776a9 … 7f8fbcd. The first real browser recorded 538 messages, 60 priced PPVs and 43 fans of @corarossi in ten minutes; sends were credited to the signed-in owner with the right shift.
