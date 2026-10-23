@@ -120,7 +120,8 @@ router.post('/presence', async (req, res) => {
     const chatterId = await F.chatterFor(req.user);
     const account = await accountFor(req, []);
     const id = await F.heartbeat({ user: req.user, chatterId, deviceId, account, extensionVersion: req.body?.extensionVersion });
-    res.json({ ok: true, presenceId: id, account: account ? { id: account.id, username: account.username, status: account.status } : null });
+    const assigned = account ? await F.mayWork(req.user, account) : true;
+    res.json({ ok: true, presenceId: id, assigned, account: account ? { id: account.id, username: account.username, status: account.status } : null });
   } catch (e) { fail(res, e, 'record who is online'); }
 });
 
@@ -148,9 +149,18 @@ router.get('/', async (req, res) => {
     const { data: presence } = await supabaseAdmin.from('fansly_presence').select('id, account_id, user_id, chatter_id, device_id, started_at, last_seen_at, users(name), chatters(name)')
       .eq('organisation_id', orgId).is('ended_at', null).order('started_at');
     const onlineBy = new Map();
+    // who is on the roster for which page: someone in a page they are not rostered on is flagged
+    const rostered = new Map();
+    const { data: ros } = await supabaseAdmin.from('roster_assignments').select('chatter_id, creator_ids').eq('organisation_id', orgId).eq('is_active', true);
+    for (const r of ros || []) { const set = rostered.get(r.chatter_id) || new Set(); for (const id of r.creator_ids || []) set.add(id); rostered.set(r.chatter_id, set); }
+    const { data: roles } = await supabaseAdmin.from('users').select('id, role').eq('organisation_id', orgId);
+    const roleOf = new Map((roles || []).map(u => [u.id, u.role]));
+    const creatorOf = new Map((accounts || []).map(a => [a.id, a.creator_id]));
     for (const p of presence || []) {
       const list = onlineBy.get(p.account_id) || [];
-      list.push({ name: p.users?.name || p.chatters?.name || 'Someone', chatter: p.chatters?.name || null, since: p.started_at, device: p.device_id.slice(0, 8) });
+      const staff = ['manager', 'head_manager', 'admin', 'owner'].includes(roleOf.get(p.user_id));
+      const onRoster = staff || (!!p.chatter_id && !!creatorOf.get(p.account_id) && !!rostered.get(p.chatter_id)?.has(creatorOf.get(p.account_id)));
+      list.push({ name: p.users?.name || p.chatters?.name || 'Someone', chatter: p.chatters?.name || null, since: p.started_at, device: p.device_id.slice(0, 8), on_roster: onRoster });
       onlineBy.set(p.account_id, list);
     }
     const out = [];
@@ -170,18 +180,18 @@ router.get('/', async (req, res) => {
       const { count: fansTotal } = await supabaseAdmin.from('fansly_fans').select('*', { count: 'exact', head: true }).eq('account_id', a.id);
       // the last 14 days, one line per chatter, from the daily summary
       const from14 = Stats.addDays(Stats.amsDay(new Date().toISOString()), -13);
-      const { data: daily } = await supabaseAdmin.from('fansly_daily').select('day, chatter_key, sent, mass_sent, fans, ppv_sent, ppv_sold, ppv_net, tips_net, refunds_net, unattributed, median_reply_s, chatters(name)')
+      const { data: daily } = await supabaseAdmin.from('fansly_daily').select('day, chatter_key, sent, mass_sent, fans, ppv_sent, ppv_sold, ppv_net, mass_ppv_net, tips_net, refunds_net, unattributed, median_reply_s, chatters(name)')
         .eq('account_id', a.id).gte('day', from14).limit(5000);
       const per = new Map();
       for (const d of daily || []) {
         const k = d.chatter_key;
-        const p = per.get(k) || { name: d.chatters?.name || 'Not credited', days: new Set(), sent: 0, mass_sent: 0, ppv_sent: 0, ppv_sold: 0, ppv_net: 0, tips_net: 0, refunds_net: 0, unattributed: 0, replies: [] };
+        const p = per.get(k) || { name: d.chatters?.name || 'Not credited', days: new Set(), sent: 0, mass_sent: 0, ppv_sent: 0, ppv_sold: 0, ppv_net: 0, mass_ppv_net: 0, tips_net: 0, refunds_net: 0, unattributed: 0, replies: [] };
         p.days.add(d.day); p.sent += d.sent; p.mass_sent += d.mass_sent; p.ppv_sent += d.ppv_sent; p.ppv_sold += d.ppv_sold;
-        p.ppv_net += Number(d.ppv_net); p.tips_net += Number(d.tips_net); p.refunds_net += Number(d.refunds_net); p.unattributed += d.unattributed;
+        p.ppv_net += Number(d.ppv_net); p.mass_ppv_net += Number(d.mass_ppv_net || 0); p.tips_net += Number(d.tips_net); p.refunds_net += Number(d.refunds_net); p.unattributed += d.unattributed;
         if (d.median_reply_s != null) p.replies.push(d.median_reply_s);
         per.set(k, p);
       }
-      const last14 = [...per.values()].map(p => ({ ...p, days: p.days.size, ppv_net: Math.round(p.ppv_net * 100) / 100, tips_net: Math.round(p.tips_net * 100) / 100, refunds_net: Math.round(p.refunds_net * 100) / 100,
+      const last14 = [...per.values()].map(p => ({ ...p, days: p.days.size, ppv_net: Math.round(p.ppv_net * 100) / 100, mass_ppv_net: Math.round(p.mass_ppv_net * 100) / 100, tips_net: Math.round(p.tips_net * 100) / 100, refunds_net: Math.round(p.refunds_net * 100) / 100,
         median_reply_s: p.replies.length ? p.replies.sort((x, y) => x - y)[p.replies.length >> 1] : null, replies: undefined })).sort((x, y) => (y.ppv_net + y.tips_net) - (x.ppv_net + x.tips_net) || y.sent - x.sent);
       // when the sales ledger was last read (someone opened Fansly's Earnings page with the extension on)
       const { data: lastLedger } = await supabaseAdmin.from('fansly_transactions').select('updated_at').eq('account_id', a.id).eq('source', 'ledger').order('updated_at', { ascending: false }).limit(1);
@@ -340,6 +350,125 @@ router.get('/messages.csv', async (req, res) => {
 router.post('/recount', async (req, res) => {
   try { const n = await Stats.refreshAll(req.user.organisationId, 13); res.json({ ok: true, accounts: n }); }
   catch (e) { fail(res, e, 'recount the Fansly numbers'); }
+});
+
+// ---------- per page: the owner's credit rules and the AI profile that writes the suggestions ----------
+
+/** The pages that have an AI profile (Her profile in AI chat): any of them can write for a Fansly page. */
+async function aiPages(orgId) {
+  const { data } = await supabaseAdmin.from('ai_personas').select('creator_id, profile, creators(name, organisation_id)').limit(200);
+  return (data || []).filter(p => p.creators?.organisation_id === orgId && p.profile?.name).map(p => ({ creator_id: p.creator_id, page: p.creators.name, name: p.profile.name }));
+}
+
+// GET /api/fansly/accounts/:id/settings
+router.get('/accounts/:id/settings', async (req, res) => {
+  try {
+    const { data: a, error } = await supabaseAdmin.from('fansly_accounts').select('id, username, credit_rules, ai_creator_id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (error) throw error;
+    if (!a) return res.status(404).json({ error: 'No such Fansly page' });
+    res.json({ credit_rules: Stats.rulesOf(a.credit_rules), defaults: Stats.DEFAULT_RULES, ai_creator_id: a.ai_creator_id, ai_pages: await aiPages(req.user.organisationId).catch(() => []) });
+  } catch (e) { fail(res, e, 'load the settings'); }
+});
+
+// POST /api/fansly/accounts/:id/settings { credit_rules?, ai_creator_id? } — owner / admin only
+router.post('/accounts/:id/settings', requireMinRole('admin'), async (req, res) => {
+  try {
+    const { data: a } = await supabaseAdmin.from('fansly_accounts').select('id, credit_rules').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!a) return res.status(404).json({ error: 'No such Fansly page' });
+    const patch = {};
+    let rulesChanged = false;
+    if (req.body?.credit_rules) {
+      const next = Stats.rulesOf(req.body.credit_rules);
+      rulesChanged = JSON.stringify(next) !== JSON.stringify(Stats.rulesOf(a.credit_rules));
+      patch.credit_rules = next;
+    }
+    if (req.body?.ai_creator_id !== undefined) {
+      const id = req.body.ai_creator_id || null;
+      if (id && !(await aiPages(req.user.organisationId)).some(p => p.creator_id === id)) return res.status(400).json({ error: 'That page has no AI profile' });
+      patch.ai_creator_id = id;
+    }
+    if (Object.keys(patch).length) {
+      const { error } = await supabaseAdmin.from('fansly_accounts').update(patch).eq('id', a.id);
+      if (error) throw error;
+    }
+    // the new rules apply to every sale already recorded: match again and recount, in the background
+    if (rulesChanged) Stats.reapplyRules(a.id).catch(e => console.error('[fansly] reapply rules:', e.message));
+    res.json({ ok: true, recounting: rulesChanged });
+  } catch (e) { fail(res, e, 'save the settings'); }
+});
+
+// ---------- the page view: revenue by type, top fans, new paying fans, expired subscriptions, AI suggestions ----------
+
+// GET /api/fansly/revenue?account=<id>&days=30
+router.get('/revenue', async (req, res) => {
+  const orgId = req.user.organisationId;
+  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+  try {
+    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id, username, creators(name)').eq('id', String(req.query.account || '')).eq('organisation_id', orgId).maybeSingle();
+    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const page = 1000;
+    const tx = [];
+    for (let from = 0; ; from += page) {
+      const { data, error } = await supabaseAdmin.from('fansly_transactions').select('transaction_id, category, type_label, fan_account_id, net, gross, created_at_fansly, credited_rule, credited_chatter_id')
+        .eq('account_id', acc.id).gte('created_at_fansly', since).order('transaction_id').range(from, from + page - 1);
+      if (error) throw error;
+      tx.push(...(data || []));
+      if (!data || data.length < page) break;
+    }
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const byType = {}, byDay = {}, perFan = new Map();
+    for (const t of tx) {
+      const net = Math.abs(Number(t.net) || 0) * (t.category === 'refund' ? -1 : 1);
+      const mass = (t.category === 'chat_ppv' && t.credited_rule === 'sender_of_mass_message') || t.credited_rule === 'mass_message_not_credited';
+      const k = mass ? 'mass_ppv' : (t.category || 'unsorted');
+      byType[k] = r2((byType[k] || 0) + net);
+      const day = Stats.amsDay(t.created_at_fansly);
+      const d = byDay[day] || (byDay[day] = { day, net: 0 }); d.net = r2(d.net + net); d[k] = r2((d[k] || 0) + net);
+      if (t.fan_account_id) { const f = perFan.get(t.fan_account_id) || { fan: t.fan_account_id, net: 0, purchases: 0 }; f.net += net; if (t.category !== 'refund') f.purchases += 1; perFan.set(t.fan_account_id, f); }
+    }
+    // a paying fan is new when his first purchase ever (not just in the window) falls in the window
+    const fanIds = [...perFan.keys()];
+    const firstEver = new Map();
+    for (let i = 0; i < fanIds.length; i += 200) {
+      const { data } = await supabaseAdmin.from('fansly_transactions').select('fan_account_id, created_at_fansly').eq('account_id', acc.id).in('fan_account_id', fanIds.slice(i, i + 200)).neq('category', 'refund').order('created_at_fansly').limit(5000);
+      for (const t of data || []) if (!firstEver.has(t.fan_account_id)) firstEver.set(t.fan_account_id, t.created_at_fansly);
+    }
+    const names = new Map();
+    const want = [...new Set([...perFan.keys()])];
+    for (let i = 0; i < want.length; i += 200) {
+      const { data } = await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, display_name, nickname').eq('account_id', acc.id).in('fansly_account_id', want.slice(i, i + 200));
+      for (const f of data || []) names.set(f.fansly_account_id, f.nickname || f.display_name || (f.username ? `@${f.username}` : null));
+    }
+    const label = (id) => names.get(id) || `#${String(id).slice(-6)}`;
+    const top = [...perFan.values()].sort((a, b) => b.net - a.net).slice(0, 15).map(f => ({ fan_account_id: f.fan, name: label(f.fan), net: r2(f.net), purchases: f.purchases, first_purchase: firstEver.get(f.fan) || null }));
+    const newPaying = [...perFan.values()].filter(f => firstEver.get(f.fan) >= since).sort((a, b) => b.net - a.net).map(f => ({ fan_account_id: f.fan, name: label(f.fan), net: r2(f.net), first_purchase: firstEver.get(f.fan) }));
+    // subscriptions that ended in the window (from the Subscribers page, else the fan rows)
+    const now = new Date().toISOString();
+    const { data: endedSubs } = await supabaseAdmin.from('fansly_subscriptions').select('fan_account_id, tier_name, ends_at, auto_renew').eq('account_id', acc.id).gte('ends_at', since).lt('ends_at', now).order('ends_at', { ascending: false }).limit(200);
+    let expired = (endedSubs || []).map(x => ({ fan_account_id: x.fan_account_id, tier: x.tier_name, ended: x.ends_at }));
+    if (!expired.length) {
+      const { data: fans } = await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, display_name, nickname, subscription_tier_name, subscribed_until').eq('account_id', acc.id).gte('subscribed_until', since).lt('subscribed_until', now).order('subscribed_until', { ascending: false }).limit(200);
+      expired = (fans || []).map(f => ({ fan_account_id: f.fansly_account_id, tier: f.subscription_tier_name, ended: f.subscribed_until, name: f.nickname || f.display_name || (f.username ? `@${f.username}` : null) }));
+    }
+    for (const e of expired) if (!e.name) e.name = label(e.fan_account_id);
+    // the AI's suggestions in the window, per chatter
+    const { data: drafts } = await supabaseAdmin.from('fansly_ai_drafts').select('status, chatter_id, cost_usd, chatters(name)').eq('account_id', acc.id).gte('created_at', since).limit(10000);
+    const ai = new Map();
+    for (const d of drafts || []) {
+      const k = d.chatters?.name || 'Not credited';
+      const a = ai.get(k) || { name: k, shown: 0, inserted: 0, sent_as_is: 0, edited: 0, discarded: 0, failed: 0, cost: 0 };
+      a.shown += 1; if (a[d.status] != null && d.status !== 'shown') a[d.status] += 1; a.cost += Number(d.cost_usd) || 0;
+      ai.set(k, a);
+    }
+    res.json({
+      page: acc.creators?.name || acc.username, days, since,
+      totals: { net: r2(Object.values(byType).reduce((n, v) => n + v, 0)), by_type: byType, transactions: tx.length, paying_fans: perFan.size, new_paying_fans: newPaying.length },
+      by_day: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
+      top_fans: top, new_paying: newPaying.slice(0, 30), expired: expired.slice(0, 50),
+      ai: [...ai.values()].map(a => ({ ...a, cost: r2(a.cost) })),
+    });
+  } catch (e) { fail(res, e, 'load the revenue'); }
 });
 
 // POST /api/fansly/accounts/:id { status: 'active' | 'paused' } — stop or resume recording an account

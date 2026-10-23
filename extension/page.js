@@ -37,8 +37,11 @@
   });
   const slimGroup = (g) => g && ({ id: g.id, type: g.type, createdBy: g.createdBy, users: g.users, userSettings: g.userSettings, lastMessage: slimMessage(g.lastMessage) });
 
-  /** Which answers we keep, and how. Returns null for anything else. */
-  function pick(method, url, body) {
+  const listOf = (r, ...keys) => { if (Array.isArray(r)) return r; for (const k of keys) if (r && Array.isArray(r[k])) return r[k]; return []; };
+  const parseBody = (b) => { try { return typeof b === 'string' ? JSON.parse(b) : null; } catch { return null; } };
+
+  /** Which answers we keep, and how. Returns null for anything else. `sent` = the request body (POST). */
+  function pick(method, url, body, sent) {
     if (!API.test(url) || !body || body.success === false) return null;
     const p = path(url), r = body.response, q = query(url);
     if (method === 'GET') {
@@ -48,21 +51,31 @@
       if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [] } };
       if (p === '/message/unread' && r) return { kind: 'unread', data: { messageInteractions: r.messageInteractions || [] } };
       if (p === '/subscribers' && r) return { kind: 'subscribers', data: { stats: r.stats, subscriptions: r.subscriptions || [] } };
+      // Fansly's own notes on fans, the fan lists, followers, notifications, statistics: mirrored as shown
+      if (/^\/notes\/?$/.test(p) && r) return { kind: 'fnotes', data: { notes: listOf(r, 'notes', 'data'), query: q } };
+      if (p === '/lists/account' && r) return { kind: 'lists', data: { lists: listOf(r, 'lists', 'data') } };
+      if (p === '/lists/itemsnew' && r) return { kind: 'list_items', data: { listId: q.listId || null, offset: q.offset || null, items: listOf(r, 'items', 'listItems', 'data'), accounts: listOf(r && r.aggregationData || r, 'accounts').map(slimAccount) } };
+      if (/^\/account\/\d+\/followersnew$/.test(p) && r) return { kind: 'followers', data: { followers: listOf(r, 'followers', 'data'), accounts: listOf(r && r.aggregationData || r, 'accounts').map(slimAccount) } };
+      if (p === '/notifications' && r) return { kind: 'notifications', data: { notifications: listOf(r, 'notifications', 'data'), accounts: listOf(r && r.aggregationData || {}, 'accounts').map(slimAccount) } };
+      if (p === '/account/stats/summary' && r) return { kind: 'stats', data: { kind: 'summary', after: q.after || null, before: q.before || null, stats: r } };
+      if (p === '/account/stats/fans/top' && r) return { kind: 'stats', data: { kind: 'top_fans', after: q.after || null, before: q.before || null, stats: r } };
       if (p === '/account/wallets/earnings/transactions' && r) return { kind: 'ledger', data: { total: r.total, data: r.data || [], aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), accountMedia: (r.aggregationData && r.aggregationData.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.aggregationData && r.aggregationData.accountMediaBundles || []).map(slimBundle), subscriptionHistory: r.aggregationData && r.aggregationData.subscriptionHistory || [] } } };
       return null;
     }
     if (method === 'POST') {
       if (p === '/message' && r && r.id) return { kind: 'sent', data: slimMessage(r) };
       if (p === '/account/media' && Array.isArray(r)) return { kind: 'media_created', data: r.map(slimAccountMedia) };
+      if ((p === '/notes' || p === '/notes/edit') && r) return { kind: 'fnotes', data: { notes: listOf(r, 'notes', 'data').length ? listOf(r, 'notes', 'data') : (r.id ? [r] : []), saved: true } };
+      if (p === '/notes/delete') { const b = parseBody(sent) || {}; return { kind: 'fnote_deleted', data: { id: b.id || b.noteId || null, ids: b.ids || null } }; }
       return null;
     }
     return null;
   }
 
-  const handle = (method, url, text) => {
+  const handle = (method, url, text, sent) => {
     if (!API.test(url)) return;
     let body; try { body = JSON.parse(text); } catch { return; }
-    const got = pick(String(method || 'GET').toUpperCase(), url, body);
+    const got = pick(String(method || 'GET').toUpperCase(), url, body, sent);
     if (got) post(got.kind, url, got.data);
   };
 
@@ -71,19 +84,21 @@
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const method = (init && init.method) || (input && input.method) || 'GET';
+    const sent = init && typeof init.body === 'string' ? init.body : null;
     const result = realFetch.apply(this, arguments);
-    if (API.test(url)) result.then(res => { try { res.clone().text().then(t => handle(method, url, t)).catch(() => {}); } catch { /* ignore */ } }).catch(() => {});
+    if (API.test(url)) result.then(res => { try { res.clone().text().then(t => handle(method, url, t, sent)).catch(() => {}); } catch { /* ignore */ } }).catch(() => {});
     return result;
   };
 
   // ---- XMLHttpRequest (Angular's HttpClient uses it) ----
   const XO = XMLHttpRequest.prototype.open, XS = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (method, url) { this.__cmt = { method, url: String(url) }; return XO.apply(this, arguments); };
-  XMLHttpRequest.prototype.send = function () {
+  XMLHttpRequest.prototype.send = function (reqBody) {
     const info = this.__cmt;
     if (info && API.test(info.url)) {
+      const sent = typeof reqBody === 'string' ? reqBody : null;
       this.addEventListener('load', () => {
-        try { if (this.responseType === '' || this.responseType === 'text') handle(info.method, info.url, this.responseText); else if (this.responseType === 'json' && this.response) handle(info.method, info.url, JSON.stringify(this.response)); } catch { /* ignore */ }
+        try { if (this.responseType === '' || this.responseType === 'text') handle(info.method, info.url, this.responseText, sent); else if (this.responseType === 'json' && this.response) handle(info.method, info.url, JSON.stringify(this.response), sent); } catch { /* ignore */ }
       });
     }
     return XS.apply(this, arguments);

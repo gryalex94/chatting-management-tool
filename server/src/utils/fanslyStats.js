@@ -35,6 +35,30 @@ function dayStartUtc(day) {
 }
 const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
+// ---------- the owner's credit rules (per page, fansly_accounts.credit_rules) ----------
+/**
+ *  mass_ppv   'sender' (default): a PPV bought from a mass message is credited to whoever sent it; 'nobody': page revenue only
+ *  late_days  null (default): a chat PPV bought any time later is credited to its sender, on the day of purchase;
+ *             a number: bought more than that many days after it was sent → credited to nobody
+ *  tip_hours  12 (default): a tip goes to the last chatter who wrote to him within this many hours
+ * Refunds always come off the chatter the refunded sale was credited to.
+ */
+const DEFAULT_RULES = { mass_ppv: 'sender', late_days: null, tip_hours: 12 };
+function rulesOf(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const late = Number(r.late_days);
+  const tip = Number(r.tip_hours);
+  return {
+    mass_ppv: r.mass_ppv === 'nobody' ? 'nobody' : 'sender',
+    late_days: Number.isFinite(late) && late > 0 ? Math.round(late) : null,
+    tip_hours: Number.isFinite(tip) && tip > 0 && tip <= 72 ? tip : 12,
+  };
+}
+async function rulesFor(accountId) {
+  const { data } = await supabaseAdmin.from('fansly_accounts').select('credit_rules').eq('id', accountId).maybeSingle();
+  return rulesOf(data?.credit_rules);
+}
+
 // ---------- sales ↔ messages ----------
 /**
  * Match sales that have no message yet. A media or bundle sale belongs to the
@@ -43,10 +67,11 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS
  * item is "wall" (bought from a post), credited to nobody.
  */
 async function matchSales(accountId) {
+  const rules = await rulesFor(accountId);
   const open = await all(() => supabaseAdmin.from('fansly_transactions')
     .select('transaction_id, type, fan_account_id, item_id, net, created_at_fansly, category, credited_message_id')
     .eq('account_id', accountId).is('credited_message_id', null).or('category.is.null,category.not.in.(subscription,refund)').order('transaction_id'));
-  if (!open.length) return { matched: 0, open: 0 };
+  if (!open.length) { await creditRefunds(accountId); return { matched: 0, open: 0 }; }
   const fans = [...new Set(open.map(t => t.fan_account_id).filter(Boolean))];
   const msgs = [];
   for (let i = 0; i < fans.length; i += 100) {
@@ -74,13 +99,18 @@ async function matchSales(accountId) {
     if (PPV_SALE_TYPES.has(t.type) || (t.type == null && t.item_id)) {
       const m = t.item_id ? byItemFan.get(`${t.item_id}:${t.fan_account_id}`) : null;
       if (m) {
-        patch = { category: 'chat_ppv', credited_message_id: m.message_id, credited_chatter_id: m.chatter_id || null, credited_rule: m.chatter_id ? (m.type === 2 ? 'sender_of_mass_message' : 'sender_of_message') : 'message_without_chatter', message_id: m.message_id };
+        const lateDays = (Date.parse(t.created_at_fansly) - Date.parse(m.sent_at)) / DAY_MS;
+        let chatter = m.chatter_id || null;
+        let rule = chatter ? (m.type === 2 ? 'sender_of_mass_message' : 'sender_of_message') : 'message_without_chatter';
+        if (chatter && m.type === 2 && rules.mass_ppv === 'nobody') { chatter = null; rule = 'mass_message_not_credited'; }
+        else if (chatter && m.type !== 2 && rules.late_days != null && lateDays > rules.late_days) { chatter = null; rule = `bought_after_${rules.late_days}_days`; }
+        patch = { category: 'chat_ppv', credited_message_id: m.message_id, credited_chatter_id: chatter, credited_rule: rule, message_id: m.message_id };
         soldUpdates.push({ message_id: m.message_id, sold_at: t.created_at_fansly, sold_net: t.net });
       } else if (t.category !== 'wall') patch = { category: 'wall', credited_rule: 'item_not_in_any_chat' };
     } else if (TIP_TYPES.has(t.type)) {
       const onMsg = t.item_id ? byTip.get(String(t.item_id)) : null;
       // the chatter who last wrote to him (with a known sender) before the tip, within 12 hours
-      const before = (creatorByFan.get(t.fan_account_id) || []).filter(m => m.sent_at <= t.created_at_fansly && Date.parse(t.created_at_fansly) - Date.parse(m.sent_at) < 12 * 3600000);
+      const before = (creatorByFan.get(t.fan_account_id) || []).filter(m => m.sent_at <= t.created_at_fansly && Date.parse(t.created_at_fansly) - Date.parse(m.sent_at) < rules.tip_hours * 3600000);
       const last = [...before].reverse().find(m => m.chatter_id) || null;
       if (onMsg || last) patch = { category: 'chat_tip', credited_message_id: (onMsg || last).message_id, credited_chatter_id: last?.chatter_id || null, credited_rule: last ? 'last_writer_before_tip' : 'tip_without_chatter', message_id: onMsg?.message_id || null };
       else if (t.category !== 'chat_tip') patch = { category: 'chat_tip', credited_rule: 'tip_chat_not_recorded' };
@@ -94,7 +124,46 @@ async function matchSales(accountId) {
   for (const s of soldUpdates) {
     await supabaseAdmin.from('fansly_messages').update({ sold_at: s.sold_at, sold_net: s.sold_net }).eq('account_id', accountId).eq('message_id', s.message_id);
   }
+  await creditRefunds(accountId);          // after the sales, so a refund finds the chatter its sale went to
   return { matched: txUpdates.filter(u => u.credited_message_id).length, open: open.length };
+}
+
+/**
+ * A refund comes off the chatter the refunded sale was credited to: the latest
+ * credited sale to the same fan, for the same amount, before the refund.
+ */
+async function creditRefunds(accountId) {
+  const refunds = await all(() => supabaseAdmin.from('fansly_transactions').select('transaction_id, fan_account_id, net, created_at_fansly')
+    // new refunds, and ones whose sale was not credited yet (its chat may have arrived since)
+    .eq('account_id', accountId).eq('category', 'refund').or('credited_rule.is.null,credited_rule.in.(refund_sale_not_found,refund_of_uncredited_sale)').order('transaction_id'));
+  for (const r of refunds) {
+    let patch = { credited_rule: 'refund_sale_not_found' };
+    if (r.fan_account_id) {
+      const { data: sales } = await supabaseAdmin.from('fansly_transactions').select('transaction_id, net, credited_chatter_id, credited_message_id, created_at_fansly')
+        .eq('account_id', accountId).eq('fan_account_id', r.fan_account_id).in('category', ['chat_ppv', 'chat_tip', 'wall', 'subscription', 'other'])
+        .lte('created_at_fansly', r.created_at_fansly).order('created_at_fansly', { ascending: false }).limit(50);
+      const amount = Math.abs(Number(r.net) || 0);
+      const sale = (sales || []).find(x => Math.abs(Math.abs(Number(x.net) || 0) - amount) < 0.02) || null;
+      if (sale) patch = { credited_rule: sale.credited_chatter_id ? 'refund_of_credited_sale' : 'refund_of_uncredited_sale', credited_chatter_id: sale.credited_chatter_id || null, credited_message_id: sale.credited_message_id || null };
+    }
+    await supabaseAdmin.from('fansly_transactions').update({ ...patch, updated_at: new Date().toISOString() }).eq('account_id', accountId).eq('transaction_id', r.transaction_id);
+  }
+}
+
+/**
+ * The owner changed the rules: forget every chat credit and match again, then
+ * recount every day that has messages or sales.
+ */
+async function reapplyRules(accountId) {
+  await supabaseAdmin.from('fansly_transactions').update({ category: null, credited_chatter_id: null, credited_message_id: null, credited_rule: null, message_id: null })
+    .eq('account_id', accountId).in('category', ['chat_ppv', 'chat_tip', 'wall']);
+  await supabaseAdmin.from('fansly_transactions').update({ credited_chatter_id: null, credited_message_id: null, credited_rule: null }).eq('account_id', accountId).eq('category', 'refund');
+  const res = await matchSales(accountId);
+  const msgDays = await all(() => supabaseAdmin.from('fansly_messages').select('sent_at').eq('account_id', accountId).eq('from_fan', false).not('sent_at', 'is', null).order('sent_at').order('message_id'));
+  const txDays = await all(() => supabaseAdmin.from('fansly_transactions').select('created_at_fansly').eq('account_id', accountId).not('created_at_fansly', 'is', null).order('transaction_id'));
+  const days = [...new Set([...msgDays.map(m => amsDay(m.sent_at)), ...txDays.map(t => amsDay(t.created_at_fansly))])];
+  await rebuildDaily(accountId, days);
+  return { ...res, days: days.length };
 }
 
 // ---------- the daily summary ----------
@@ -110,13 +179,13 @@ async function rebuildDaily(accountId, days) {
       .select('message_id, group_id, fan_account_id, from_fan, type, price, chatter_id, attribution, sent_at, sold_at')
       .eq('account_id', accountId).gte('sent_at', new Date(start.getTime() - DAY_MS).toISOString()).lt('sent_at', end.toISOString()).order('sent_at').order('message_id'));
     const tx = await all(() => supabaseAdmin.from('fansly_transactions')
-      .select('transaction_id, category, net, credited_chatter_id, created_at_fansly')
+      .select('transaction_id, category, net, credited_chatter_id, credited_rule, created_at_fansly')
       .eq('account_id', accountId).gte('created_at_fansly', start.toISOString()).lt('created_at_fansly', end.toISOString()).order('transaction_id'));
 
     const rows = new Map();
     const row = (chatterId) => {
       const key = chatterId || 'none';
-      if (!rows.has(key)) rows.set(key, { account_id: accountId, day, chatter_key: key, chatter_id: chatterId || null, sent: 0, mass_sent: 0, fans: new Set(), ppv_sent: 0, ppv_sold: 0, ppv_net: 0, tips_net: 0, refunds_net: 0, unattributed: 0, replies: [] });
+      if (!rows.has(key)) rows.set(key, { account_id: accountId, day, chatter_key: key, chatter_id: chatterId || null, sent: 0, mass_sent: 0, fans: new Set(), ppv_sent: 0, ppv_sold: 0, ppv_net: 0, mass_ppv_net: 0, tips_net: 0, refunds_net: 0, unattributed: 0, replies: [] });
       return rows.get(key);
     };
     const inDay = (iso) => iso >= start.toISOString() && iso < end.toISOString();
@@ -137,14 +206,14 @@ async function rebuildDaily(accountId, days) {
     for (const t of tx) {
       const r = row(t.credited_chatter_id);
       const net = Math.abs(Number(t.net) || 0);
-      if (t.category === 'chat_ppv') r.ppv_net += net;
+      if (t.category === 'chat_ppv') { r.ppv_net += net; if (t.credited_rule === 'sender_of_mass_message') r.mass_ppv_net += net; }
       else if (t.category === 'chat_tip') r.tips_net += net;
       else if (t.category === 'refund') r.refunds_net += net;
     }
     const out = [...rows.values()].map(r => ({
       account_id: r.account_id, day: r.day, chatter_key: r.chatter_key, chatter_id: r.chatter_id,
       sent: r.sent, mass_sent: r.mass_sent, fans: r.fans.size, ppv_sent: r.ppv_sent, ppv_sold: r.ppv_sold,
-      ppv_net: Math.round(r.ppv_net * 100) / 100, tips_net: Math.round(r.tips_net * 100) / 100, refunds_net: Math.round(r.refunds_net * 100) / 100,
+      ppv_net: Math.round(r.ppv_net * 100) / 100, mass_ppv_net: Math.round(r.mass_ppv_net * 100) / 100, tips_net: Math.round(r.tips_net * 100) / 100, refunds_net: Math.round(r.refunds_net * 100) / 100,
       unattributed: r.unattributed, median_reply_s: median(r.replies), updated_at: new Date().toISOString(),
     })).filter(r => r.sent || r.mass_sent || r.ppv_net || r.tips_net || r.refunds_net);
     await supabaseAdmin.from('fansly_daily').delete().eq('account_id', accountId).eq('day', day);
@@ -194,4 +263,4 @@ async function refreshAll(orgId = null, back = 3) {
   return (data || []).length;
 }
 
-module.exports = { matchSales, rebuildDaily, schedule, refreshAll, amsDay, dayStartUtc, addDays };
+module.exports = { matchSales, rebuildDaily, reapplyRules, rulesOf, DEFAULT_RULES, schedule, refreshAll, amsDay, dayStartUtc, addDays };

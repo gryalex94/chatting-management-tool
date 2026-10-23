@@ -8,7 +8,8 @@
 const VERSION = chrome.runtime.getManifest().version;
 const DEFAULT_API = 'https://backend-production-bdeb.up.railway.app';   // change in the popup if the tool lives elsewhere
 const FLUSH_MS = 4000, BATCH = 60, BATCH_BYTES = 1_500_000, HEARTBEAT_MIN = 1, MAX_QUEUE = 2000;
-const KEEP = new Set(['me', 'groups', 'group', 'messages', 'sent', 'ws_message', 'ws_order', 'ws_other', 'unread', 'subscribers', 'ledger', 'media_created']);
+const KEEP = new Set(['me', 'groups', 'group', 'messages', 'sent', 'ws_message', 'ws_order', 'ws_other', 'unread', 'subscribers', 'ledger', 'media_created',
+  'fnotes', 'fnote_deleted', 'lists', 'list_items', 'followers', 'notifications', 'stats']);
 
 let queue = [];                 // events waiting to go
 let seen = new Map();           // hash → time, to drop repeats (the page asks for the same chat again and again)
@@ -131,6 +132,7 @@ async function heartbeat() {
     if (!tabs.length) return;
     const out = await api('/api/fansly/presence', { action: 'heartbeat' });
     if (out.account && out.account.username && !state.accountUsername) state.accountUsername = out.account.username;
+    state.assigned = out.assigned !== false;
     state.lastError = null; await saveState();
   } catch (e) { if (!e.noSession) { state.lastError = e.message; await saveState(); } }
 }

@@ -18,8 +18,9 @@ In AdsPower you can also add the folder once under *Extensions* and apply it to 
 
 The thread list, the fan profiles, every chat opened (including what loads on
 scroll), every message you send (under your name), messages arriving live, PPV
-items and their prices, read receipts, the subscriber list and the earnings ledger
-when those pages are opened. Media links are dropped; ids, texts, prices and times
+items and their prices, read receipts, and, when those pages are opened: the
+subscriber list, the earnings ledger, Fansly's notes, the fan lists, followers,
+notifications and the statistics summary. Media links are dropped; ids, texts, prices and times
 are kept.
 
 ## The side panel
@@ -30,6 +31,13 @@ the hours he writes), notes from every shift (add, edit, pin), an AI summary of
 the chat, the shift strip with warnings (he is waiting, no PPV offered for a while,
 his subscription ends) and the scripts library. Clicking a script types it into
 the message box; you check it and press send yourself.
+
+At the top, **Suggest a reply** asks the tool's AI for a draft from this chat
+(once a manager picked the page's AI profile). Click a suggested message to put it
+in the box, edit it, send it yourself. The tool notes whether it was sent as it
+was, edited or dropped.
+
+The panel opens only on pages you are on the roster for (Shifts page in the tool).
 
 Drag its left edge to resize, `›` collapses it to a strip, `⇤` switches between
 making room for it and laying it over the page. The popup has a switch to hide it.

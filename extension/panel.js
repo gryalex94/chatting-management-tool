@@ -32,7 +32,8 @@
     summary: null, summaryBusy: false, summaryError: '', summaryAskedAt: 0,
     scripts: null, scriptsFor: null, openStages: new Set(['opener', 'ppv_pitch']), scriptFilter: '',
     noteDraft: '', editing: null, editDraft: '', toast: '',
-    width: 420, collapsed: false, push: true, open: { card: true, metrics: true, notes: true, summary: true, scripts: true },
+    suggest: null, suggestBusy: false, suggestError: '',   // { draft_id, messages, goal, why, inserted, group }
+    width: 420, collapsed: false, push: true, open: { suggest: true, card: true, metrics: true, notes: true, summary: true, scripts: true },
   };
 
   // ---------- the host element and its shadow root ----------
@@ -208,6 +209,7 @@
   function groupFromUrl() { const m = location.pathname.match(/^\/messages\/(\d{5,25})/); return m ? m[1] : null; }
   function setGroup(g) {
     if (g === st.groupId) return;
+    dropSuggestion();
     st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null;
     loadFan(false);
   }
@@ -220,6 +222,11 @@
     const { kind, data } = ev.data;
     if (kind === 'messages' && data && data.groupId && !groupFromUrl()) setGroup(String(data.groupId));
     const g = data && (data.groupId || (data.message && data.message.groupId));
+    if (kind === 'sent' && g && st.suggest && st.suggest.inserted && String(g) === st.suggest.group) {
+      const sug = st.suggest; st.suggest = null;
+      call('POST', `/api/fansly/panel/drafts/${sug.draft_id}/sent`, { text: (data && data.content) || '' }).catch(() => {});
+      render();
+    }
     if ((kind === 'ws_message' || kind === 'sent') && g && String(g) === st.groupId) {
       // our server has it a few seconds later (the worker batches every 4 s)
       clearTimeout(bumpTimer); bumpTimer = setTimeout(() => loadFan(true), 7000);
@@ -256,6 +263,35 @@
     if (where) call('POST', `/api/fansly/panel/scripts/${s.id}/use`, { account: st.accountId, fan: st.fanId }).catch(() => {});
   }
 
+  // ---------- suggested replies (phase 4) ----------
+  function dropSuggestion() {
+    const sug = st.suggest;
+    if (sug && sug.draft_id) call('POST', `/api/fansly/panel/drafts/${sug.draft_id}`, { status: 'discarded' }).catch(() => {});
+    st.suggest = null; st.suggestError = '';
+  }
+  async function suggest() {
+    if (!st.fanId || st.suggestBusy) return;
+    dropSuggestion();
+    const fan = st.fanId, group = st.groupId;
+    st.suggestBusy = true; render();
+    try {
+      const r = await call('POST', '/api/fansly/panel/suggest', { account: st.accountId, fan });
+      if (fan !== st.fanId) return;
+      if (r.stopped) st.suggestError = `The AI stays out of this chat: ${(r.reasons || []).join(' ')}`;
+      else if (r.quiet) st.suggestError = `The AI suggests not answering now. ${r.text || ''}`;
+      else if (r.error) st.suggestError = r.error;
+      else st.suggest = { ...r, group, inserted: false };
+    } catch (e) { if (fan === st.fanId) st.suggestError = e.message; }
+    finally { st.suggestBusy = false; render(); }
+  }
+  async function useSuggestion(text) {
+    const sug = st.suggest; if (!sug) return;
+    const where = await insertText(text);
+    flash(where === 'box' ? 'In the message box: edit it if you like and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box');
+    if (where && !sug.inserted) { sug.inserted = true; call('POST', `/api/fansly/panel/drafts/${sug.draft_id}`, { status: 'inserted' }).catch(() => {}); }
+    render();
+  }
+
   // ---------- drawing ----------
   function section(key, title, content, extra) {
     const open = st.open[key];
@@ -274,6 +310,25 @@
       ...((d.warnings || []).map(w => h('div', { class: `warn ${w.level}` }, w.text))));
   }
 
+  function suggestion(d) {
+    if (!d.page || !d.page.ai) return section('suggest', 'Suggested reply', h('div', { class: 'muted small' }, 'No AI profile is picked for this page yet. A manager picks it on the Fansly dashboard: Pages, Settings.'));
+    const sug = st.suggest;
+    const content = [];
+    if (st.suggestBusy) content.push(h('div', { class: 'muted small' }, 'Reading the chat and writing… (10–30 s)'));
+    else if (sug) {
+      if (sug.goal) content.push(h('div', { class: 'small muted' }, `Aim: ${sug.goal}`));
+      for (const m of sug.messages) content.push(h('div', { class: 'script', title: 'Click: put it in the message box', onclick: () => useSuggestion(m) }, h('div', { class: 'tx', style: 'max-height:none;color:#e7e7ea' }, m)));
+      if (sug.messages.length > 1) content.push(h('div', { class: 'small muted' }, 'She would send these as separate messages: put in one, send it, then the next.'));
+      if (sug.coach) content.push(h('div', { class: 'small muted' }, `Check: ${sug.coach}`));
+      content.push(h('div', { class: 'row', style: 'margin-top:6px' },
+        h('button', { onclick: suggest }, 'Another one'),
+        h('button', { onclick: () => { dropSuggestion(); render(); } }, 'Discard'),
+        sug.inserted ? h('span', { class: 'small muted', style: 'margin-left:auto' }, 'in the box') : null));
+    } else content.push(h('button', { class: 'primary', onclick: suggest }, 'Suggest a reply'));
+    if (st.suggestError) content.push(h('div', { class: 'warn mid', style: 'margin-top:6px' }, st.suggestError));
+    return section('suggest', 'Suggested reply', content);
+  }
+
   function fanCard(d) {
     const f = d.fan;
     const sub = f.subscription_tier_name ? `${f.subscription_tier_name}${f.subscribed_until ? ` until ${date(f.subscribed_until)}` : ''}` : (f.subscribed_until ? `subscribed until ${date(f.subscribed_until)}` : 'not subscribed');
@@ -282,6 +337,7 @@
       h('div', { class: 'muted' }, [f.username && `@${f.username}`, f.nickname && f.display_name && f.display_name !== f.nickname ? f.display_name : null].filter(Boolean).join(' · ')),
       h('div', { class: 'small', style: 'margin-top:4px' }, sub),
       h('div', { class: 'small muted' }, `Joined Fansly ${date(f.joined_fansly_at)} · last seen ${ago(f.last_seen_at)}${f.follows_you ? ' · follows you' : ''}`),
+      f.lists && f.lists.length ? h('div', { style: 'margin-top:4px' }, f.lists.map(l => h('span', { class: 'pill', style: 'margin:0 4px 0 0' }, l))) : null,
     ]);
   }
 
@@ -306,7 +362,9 @@
   function notes(d) {
     const list = d.notes || [];
     const add = h('textarea', { placeholder: 'Add a note for every shift (stays in our tool, never on Fansly)', value: st.noteDraft, oninput: (e) => { st.noteDraft = e.target.value; } });
+    const theirs = (d.fansly_notes || []).map(n => h('div', { class: 'note' }, h('div', { class: 'txt' }, [n.title, n.note].filter(Boolean).join(': ')), h('div', { class: 'small muted' }, `Fansly's own note · ${date(n.at)}`)));
     return section('notes', 'Notes', [
+      theirs.length ? h('div', { style: 'margin-bottom:6px' }, theirs) : null,
       h('div', null, list.length ? list.map(n => st.editing === n.id
         ? h('div', { class: 'note' },
           h('textarea', { placeholder: 'Edit the note', value: st.editDraft, oninput: (e) => { st.editDraft = e.target.value; } }),
@@ -374,8 +432,9 @@
     if (st.error) parts.push(h('div', { class: 'warn high' }, st.error));
     if (!st.groupId) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, 'Open a chat to see the fan here.'));
     else if (!d) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, st.loading ? 'Loading the fan…' : ''));
+    else if (!d.found && d.reason === 'not_assigned') { parts.push(h('div', { class: 'warn high' }, d.message || 'You are not on the roster for this page.')); return h('div', { class: 'body' }, parts); }
     else if (!d.found) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, d.reason === 'page' ? 'This Fansly page is not in the tool yet; it appears after the first messages are recorded.' : 'This chat is not recorded yet. It will be in a few seconds; scroll up in it to record older messages.'));
-    else parts.push(fanCard(d), metrics(d), notes(d), summary());
+    else parts.push(suggestion(d), fanCard(d), metrics(d), notes(d), summary());
     parts.push(scripts());
     return h('div', { class: 'body' }, parts);
   }

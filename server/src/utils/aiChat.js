@@ -908,9 +908,12 @@ async function pageMonthly(accountId) {
  * { type (a made-up fan's type), tier, mood, his (0–3), budget: 'used' }. `planOnly`:
  * decide but don't write (no writer is called).
  */
-async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [], session: sentSession = null, outcome = null }) {
+// `fansly` = { accountId }: a suggestion for a Fansly chat (utils/fanslyAi.js): the chat, his money and notes come
+// from the Fansly tables; `creatorId` is then the page whose AI profile writes for that Fansly page.
+async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [], session: sentSession = null, outcome = null, fansly = null }) {
   libraryRows(orgId).catch(() => {});                       // the example library loads while the reader reads
-  const { account } = await pageAccount(orgId, creatorId);
+  const FX = fansly ? require('./fanslyAi') : null;
+  const { account } = fansly ? await FX.page(orgId, fansly.accountId) : await pageAccount(orgId, creatorId);
   // what he did after her previous reply (Practice: as you played him): the outcomes log (B7)
   if (outcome && typeof outcome === 'object' && clean(outcome.happened) && !whatIf && !planOnly) {
     supabaseAdmin.from('ai_outcomes').insert({
@@ -927,7 +930,12 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
 
   const timeZone = persona.settings?.timezone || P.DEFAULT_TZ;
   let chat = [], card = [], story = '', money = null, fan = {}, long = false, type = null, bond = null;
-  if (fanUuid) {
+  if (fanUuid && fansly) {
+    const [person, mem, loaded] = await Promise.all([FX.fanRow(account.id, fanUuid), FX.memory(account.id, fanUuid), FX.loadChat(account.id, fanUuid)]);
+    chat = loaded.chat; money = moneyOf(loaded.earnings, null, chat.find(m => !m.mass)?.at);
+    fan = { name: fanName(person), registered_at: person?.registered_at || null };
+    card = mem.facts; story = mem.story; bond = mem.bond;
+  } else if (fanUuid) {
     const [person, mem, loaded] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid)]);
     chat = loaded.chat; money = loaded.money;
     fan = { name: fanName(person), registered_at: person?.registered_at || null };
@@ -964,7 +972,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     return m;
   }).filter(t => t.text || t.media || t.tip);
   // a real fan's photos and videos not looked at yet, in his latest messages (C1): seen now
-  if (fanUuid && chat.slice(-12).some(m => m.from_fan && m.media?.unseen?.length)) await describeFanMedia(orgId, creatorId, account.id, fanUuid, chat.slice(-12));
+  if (fanUuid && !fansly && chat.slice(-12).some(m => m.from_fan && m.media?.unseen?.length)) await describeFanMedia(orgId, creatorId, account.id, fanUuid, chat.slice(-12));
   const convo = [...chat, ...typed];
   let lastHer = -1;
   convo.forEach((m, i) => { if (!m.from_fan && !m.mass) lastHer = i; });
@@ -1007,7 +1015,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   if (waiting && offered.length) offered[offered.length - 1].open = waiting.open;
   // who he is, first from his numbers and notes alone (the planner's read comes next), then his state
   // from his history and the plan for this conversation (session.js), kept by the practice room
-  const pageUsd = await pageMonthly(account.id);
+  const pageUsd = fansly ? await FX.monthly(account.id) : await pageMonthly(account.id);
   const first = Plan.fanProfile({ money, type, chat: convo, ids: [], mood: '', pageMonthly: pageUsd, offered, card, bond, from: talk.start, override: whatIf || {}, latest, now });
   const state = fanUuid ? S.fanStateOf({ chat, profile: first, away: talk.away, timeZone, now }) : S.madeUpState(type, first);
   // she writes first (B2–B4): of what kind. Practice names it; for a real fan the schedule says what's due
@@ -1144,7 +1152,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   let requestRow = null;
   const noteRequest = async (kind, text, status) => {
     try {
-      const { data } = await supabaseAdmin.from('ai_requests').insert({ organisation_id: orgId, creator_id: creatorId, fan_uuid: fanUuid, source: 'practice', kind, text: clean(text).slice(0, 500), status }).select('id').single();
+      const { data } = await supabaseAdmin.from('ai_requests').insert({ organisation_id: orgId, creator_id: creatorId, fan_uuid: fanUuid, source: fansly ? 'fansly' : 'practice', kind, text: clean(text).slice(0, 500), status }).select('id').single();
       return data?.id || null;
     } catch { return null; }
   };
@@ -1342,10 +1350,11 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       r.cost += c.usage.cost || 0;
       r.coach = { overall: c.overall, summary: c.summary, points: c.points };
       r.trace = [...(r.trace || []), T.coachStep(r.label, r.coach)];
-      const saveCheck = (cc, her, fixed = false) => supabaseAdmin.from('ai_checks').insert({
+      // the daily score is for Practice and the AI's own chats: a Fansly suggestion (a chatter's draft) isn't saved into it
+      const saveCheck = (cc, her, fixed = false) => (fansly ? Promise.resolve() : supabaseAdmin.from('ai_checks').insert({
         organisation_id: orgId, creator_id: creatorId, writer: r.model, overall: cc.overall, points: { ...cc.points, ...(fixed ? { fixed: true } : {}) },
         his: latest.join('\n') || null, her, goal: replyPlan.goal, cost_usd: cc.usage.cost || 0,
-      }).then(({ error }) => { if (error && !/ai_checks/.test(error.message)) console.error('[ai-chat] check save:', error.message); });
+      }).then(({ error }) => { if (error && !/ai_checks/.test(error.message)) console.error('[ai-chat] check save:', error.message); }));
       saveCheck(c, r.replies.map(x => x.creator_message));
       // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it
       // once more; not in selling moments (fix 9): Claude's taste disagrees with the proven answers there

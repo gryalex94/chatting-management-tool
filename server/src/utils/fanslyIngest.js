@@ -90,6 +90,38 @@ async function chatterFor(user) {
   return id;
 }
 
+/**
+ * The pages (creator ids) a person may work on Fansly: everything for managers and
+ * up (null), else the pages of their active roster rows (and old page assignments).
+ */
+const ROLE_RANK = { chatter: 0, va: 1, manager: 2, head_manager: 3, admin: 4, owner: 5 };
+const pagesCache = new Map();
+async function pagesFor(user) {
+  if ((ROLE_RANK[user?.role] ?? -1) >= ROLE_RANK.manager) return null;
+  const hit = pagesCache.get(user.id);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return hit.set;
+  const chatterId = await chatterFor(user).catch(() => null);
+  const set = new Set();
+  if (chatterId) {
+    const { data: ros } = await supabaseAdmin.from('roster_assignments').select('creator_ids').eq('chatter_id', chatterId).eq('is_active', true);
+    for (const r of ros || []) for (const id of r.creator_ids || []) set.add(id);
+    const { data: old } = await supabaseAdmin.from('chatter_creator_assignments').select('creator_id').eq('chatter_id', chatterId).eq('is_active', true);
+    for (const r of old || []) if (r.creator_id) set.add(r.creator_id);
+    // a page in a group (merged pages) counts for the whole group
+    if (set.size) {
+      const { data: grp } = await supabaseAdmin.from('creators').select('id, merged_into').eq('organisation_id', user.organisationId);
+      for (const c of grp || []) if ((c.merged_into && set.has(c.merged_into)) || set.has(c.id)) { set.add(c.id); if (c.merged_into) set.add(c.merged_into); }
+    }
+  }
+  pagesCache.set(user.id, { at: Date.now(), set });
+  return set;
+}
+/** May this person work this Fansly account? */
+async function mayWork(user, account) {
+  const pages = await pagesFor(user);
+  return pages === null || (!!account?.creator_id && pages.has(account.creator_id));
+}
+
 const shiftCache = new Map();              // org → { at, rows }
 async function shiftsFor(orgId) {
   const hit = shiftCache.get(orgId);
@@ -199,6 +231,9 @@ async function applyEvents(ctx, events) {
   const transactions = new Map();
   const prices = new Map();          // item id → dollars, from this batch
   const accountPatch = {};
+  // mirrors of other Fansly pages (database change 056)
+  const pnotes = new Map(), pnotesGone = new Set(), lists = new Map(), listMembers = new Map(), subs = new Map(), followers = new Set(), notifs = new Map(), snapshots = [];
+  const ts = (v) => (v == null || v === 0 ? null : Number(v) > 1e12 ? tsMs(v) : tsSec(v));
 
   const putMessage = (row) => {
     const prev = messages.get(row.message_id);
@@ -287,10 +322,66 @@ async function applyEvents(ctx, events) {
           bump('receipts'); break;
         }
         case 'subscribers': {
-          for (const s of d.subscriptions || []) putFan({ account_id: ctx.account.id, fansly_account_id: str(s.subscriberId),
-            subscription_tier_id: str(s.subscriptionTierId), subscription_tier_name: s.subscriptionTierName || null, subscription_status: s.status ?? null,
-            subscribed_until: s.endsAt ? tsMs(s.endsAt) : null, updated_at: new Date().toISOString() });
+          for (const s of d.subscriptions || []) {
+            putFan({ account_id: ctx.account.id, fansly_account_id: str(s.subscriberId),
+              subscription_tier_id: str(s.subscriptionTierId), subscription_tier_name: s.subscriptionTierName || null, subscription_status: s.status ?? null,
+              subscribed_until: s.endsAt ? tsMs(s.endsAt) : null, updated_at: new Date().toISOString() });
+            const id = str(s.id || `${s.subscriberId}:${s.subscriptionTierId}:${s.createdAt}`);
+            subs.set(id, { account_id: ctx.account.id, subscription_id: id, fan_account_id: str(s.subscriberId), tier_id: str(s.subscriptionTierId),
+              tier_name: s.subscriptionTierName || null, status: s.status ?? null, price: dollars(s.price), renew_price: dollars(s.renewPrice),
+              auto_renew: s.autoRenew ?? null, billing_cycle: s.billingCycle ?? null, created_at_fansly: ts(s.createdAt), renew_at: ts(s.renewDate),
+              ends_at: ts(s.endsAt), updated_at: new Date().toISOString(), raw: s });
+          }
           bump('subscribers', (d.subscriptions || []).length); break;
+        }
+        case 'fnotes': {                                   // Fansly's own notes on fans
+          for (const n of d.notes || []) {
+            if (!n || n.id == null) continue;
+            pnotes.set(str(n.id), { account_id: ctx.account.id, note_id: str(n.id), fan_account_id: str(n.contentId ?? n.accountId ?? n.targetId), content_type: n.contentType ?? null,
+              title: n.title || null, note: n.note ?? n.content ?? n.text ?? null, created_at_fansly: ts(n.createdAt), updated_at: new Date().toISOString(), raw: n });
+          }
+          bump('fansly_notes', (d.notes || []).length); break;
+        }
+        case 'fnote_deleted': { for (const id of [d.id, ...(d.ids || [])].filter(Boolean)) pnotesGone.add(str(id)); bump('fansly_notes_deleted'); break; }
+        case 'lists': {
+          for (const l of d.lists || []) if (l && l.id != null) lists.set(str(l.id), { account_id: ctx.account.id, list_id: str(l.id), label: l.label || l.name || null, type: l.type ?? null, item_count: l.itemCount ?? null, updated_at: new Date().toISOString(), raw: l });
+          bump('lists', (d.lists || []).length); break;
+        }
+        case 'list_items': {
+          if (!d.listId) break;
+          for (const it of d.items || []) {
+            const fan = str(it?.accountId ?? it?.targetId ?? it?.itemId ?? it?.id);
+            if (fan && fan !== ctx.creatorId) listMembers.set(`${d.listId}:${fan}`, { account_id: ctx.account.id, list_id: str(d.listId), fan_account_id: fan, last_seen_at: new Date().toISOString() });
+          }
+          for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
+          bump('list_items', (d.items || []).length); break;
+        }
+        case 'followers': {
+          for (const f of d.followers || []) { const id = str(f?.followerId ?? f?.accountId); if (id && id !== ctx.creatorId) followers.add(id); }
+          for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, { ...a, followsYou: true }));
+          bump('followers', (d.followers || []).length); break;
+        }
+        case 'notifications': {
+          for (const n of d.notifications || []) {
+            if (!n || n.id == null) continue;
+            let meta = n.metadata; if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { /* keep text */ } }
+            notifs.set(str(n.id), { account_id: ctx.account.id, notification_id: str(n.id), type: n.type ?? null, correlation_id: str(n.correlationId), correlation_group_id: str(n.correlationGroupId),
+              created_at_fansly: ts(n.createdAt), metadata: meta ?? null, raw: n });
+            // a media or bundle purchase (2007 / 2008): a sale seen before the ledger is read; the ledger row replaces it later
+            if ((n.type === 2007 || n.type === 2008) && n.correlationId && n.correlationGroupId) {
+              const gross = dollars(meta && (meta.accountMediaPrice ?? meta.accountMediaBundlePrice ?? meta.price));
+              const id = `n${n.id}`;
+              transactions.set(id, { account_id: ctx.account.id, transaction_id: id, type: n.type === 2008 ? 2116 : 2110, type_label: n.type === 2008 ? 'Media Sets (notification)' : 'Media (notification)',
+                fan_account_id: str(n.correlationGroupId), item_id: str(n.correlationId), gross, net: gross != null ? Math.round(gross * 80) / 100 : null, status: null,
+                created_at_fansly: ts(n.createdAt), category: null, source: 'notification', updated_at: new Date().toISOString(), raw: n });
+            }
+          }
+          for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
+          bump('notifications', (d.notifications || []).length); break;
+        }
+        case 'stats': {
+          snapshots.push({ account_id: ctx.account.id, kind: String(d.kind || 'summary').slice(0, 20), after_at: ts(d.after), before_at: ts(d.before), data: d.stats || {} });
+          bump(`stats_${d.kind}`); break;
         }
         case 'ws_order': {                                 // a fan bought something, live (shape best-effort until seen)
           const o = d || {};
@@ -378,9 +469,20 @@ async function applyEvents(ctx, events) {
     counts.transactions_written = rows.length;
     // a purchase seen live first, then in the ledger: the ledger row is the one that counts
     const ledger = rows.filter(r => r.source === 'ledger' && r.item_id && r.fan_account_id);
-    for (const r of ledger) await supabaseAdmin.from('fansly_transactions').delete().eq('account_id', ctx.account.id).eq('source', 'live').eq('item_id', r.item_id).eq('fan_account_id', r.fan_account_id);
+    for (const r of ledger) await supabaseAdmin.from('fansly_transactions').delete().eq('account_id', ctx.account.id).in('source', ['live', 'notification']).eq('item_id', r.item_id).eq('fan_account_id', r.fan_account_id);
     for (const r of rows) touched.push(r.created_at_fansly);
   }
+  // the mirrors
+  const nowIso = new Date().toISOString();
+  if (pnotes.size) { await upsert('fansly_platform_notes', [...pnotes.values()], 'account_id,note_id'); counts.fansly_notes_written = pnotes.size; }
+  if (pnotesGone.size) await supabaseAdmin.from('fansly_platform_notes').delete().eq('account_id', ctx.account.id).in('note_id', [...pnotesGone]);
+  if (lists.size) await upsert('fansly_lists', [...lists.values()], 'account_id,list_id');
+  if (listMembers.size) await upsert('fansly_list_members', [...listMembers.values()], 'account_id,list_id,fan_account_id');
+  if (subs.size) await upsert('fansly_subscriptions', [...subs.values()], 'account_id,subscription_id');
+  if (followers.size) await upsert('fansly_followers', [...followers].map(id => ({ account_id: ctx.account.id, fan_account_id: id, last_seen_at: nowIso })), 'account_id,fan_account_id');
+  if (notifs.size) await upsert('fansly_notifications', [...notifs.values()], 'account_id,notification_id');
+  if (snapshots.length) { const { error } = await supabaseAdmin.from('fansly_stats_snapshots').insert(snapshots); if (error) errors.push(`stats: ${error.message}`); }
+
   const patch = Object.fromEntries(Object.entries(accountPatch).filter(([, v]) => v !== undefined));
   await supabaseAdmin.from('fansly_accounts').update({ ...patch, last_seen_at: now }).eq('id', ctx.account.id);
   if (Object.keys(patch).length) forgetAccount(ctx.user.organisationId, ctx.creatorId);
@@ -442,4 +544,4 @@ async function sweepPresence(orgId) {
   if (data?.length) await supabaseAdmin.from('fansly_presence').update({ ended_at: new Date().toISOString(), ended_reason: 'timeout' }).in('id', data.map(r => r.id));
 }
 
-module.exports = { applyEvents, inferAccountId, ensureAccount, forgetAccount, chatterFor, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };
+module.exports = { applyEvents, inferAccountId, ensureAccount, forgetAccount, chatterFor, pagesFor, mayWork, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };

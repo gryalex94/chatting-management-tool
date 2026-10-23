@@ -26,7 +26,8 @@ async function render() {
   $('ledgerHint').hidden = !!(s.lastLedgerAt && Date.now() - s.lastLedgerAt < 24 * 3600 * 1000);
   const { panelOff } = await chrome.storage.local.get('panelOff');
   $('panelOn').checked = !panelOff;
-  $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '');
+  $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '')
+    || (s.assigned === false ? 'You are not on the roster for this page. Your messages are still recorded under your name, but the side panel stays closed. Ask a manager to add you on the Shifts page.' : '');
 }
 
 $('signin').addEventListener('click', async () => {

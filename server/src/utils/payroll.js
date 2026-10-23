@@ -356,10 +356,12 @@ async function fanslyLines(orgId, period, paidByChatter) {
   let earned = []; const sentAt = {};
   if (accIds.length) {
     const from = Date.parse(`${period.start}T00:00:00Z`), to = Date.parse(`${R.addDays(period.end, 1)}T00:00:00Z`);
-    const tx = await all(() => supabaseAdmin.from('fansly_transactions').select('account_id, transaction_id, category, created_at_fansly, gross, net, credited_message_id, credited_chatter_id')
+    const tx = await all(() => supabaseAdmin.from('fansly_transactions').select('account_id, transaction_id, category, created_at_fansly, gross, net, credited_message_id, credited_chatter_id, credited_rule')
       .in('account_id', accIds).in('category', ['chat_ppv', 'chat_tip', 'refund']).gte('created_at_fansly', new Date(from - 3 * H).toISOString()).lt('created_at_fansly', new Date(to + 3 * H).toISOString())
       .order('created_at_fansly').order('transaction_id'));
-    earned = tx.filter(x => { const t = amsClock(x.created_at_fansly); return t >= from && t < to; }).map(x => ({
+    // the owner's rules can leave a sale to nobody on purpose (a mass message's PPV, one bought long after): page revenue only
+    const NO_CREDIT = /^(mass_message_not_credited|bought_after_\d+_days|refund_of_uncredited_sale)$/;
+    earned = tx.filter(x => { const t = amsClock(x.created_at_fansly); return t >= from && t < to && !NO_CREDIT.test(x.credited_rule || ''); }).map(x => ({
       account_id: x.account_id, transaction_order_id: x.transaction_id, paid_at: x.created_at_fansly,
       source: x.category === 'chat_ppv' ? 'message' : x.category === 'chat_tip' ? 'tip' : 'refund',
       gross_cents: Math.round(Number(x.gross || x.net || 0) * 100), net_cents: Math.round(Number(x.net || 0) * 100),

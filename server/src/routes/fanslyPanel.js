@@ -32,13 +32,25 @@ const fail = (res, e, what) => {
 const amsHour = (iso) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', hour12: false }).format(new Date(iso))) % 24;
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[s.length >> 1]; };
 
-/** The page from the Fansly account id the extension knows (only within the caller's organisation). */
+/**
+ * The page from the Fansly account id the extension knows (only within the caller's
+ * organisation). `assigned`: a chatter works only the pages they are on the roster for.
+ */
 async function accountOf(req, fanslyAccountId) {
   const id = String(fanslyAccountId || '');
   if (!/^\d{5,25}$/.test(id)) return null;
-  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, creators(name)')
+  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, ai_creator_id, creators(name)')
     .eq('organisation_id', req.user.organisationId).eq('fansly_account_id', id).maybeSingle();
-  return data || null;
+  if (!data) return null;
+  return { ...data, assigned: await F.mayWork(req.user, data) };
+}
+const NOT_ASSIGNED = 'You are not on the roster for this page. Ask a manager to add you on the Shifts page.';
+/** The same, for routes that change or cost something: refuses pages the caller may not work. */
+async function workable(req, res, fanslyAccountId) {
+  const account = await accountOf(req, fanslyAccountId);
+  if (!account) { res.status(404).json({ error: 'No such Fansly page' }); return null; }
+  if (!account.assigned) { res.status(403).json({ error: NOT_ASSIGNED }); return null; }
+  return account;
 }
 
 /** The fan in this chat: by his account id, else by the chat (group) id. */
@@ -141,7 +153,8 @@ panel.get('/fan', async (req, res) => {
       since = pres?.[0]?.started_at || null;
     }
     const shift = { user: req.user.name || req.user.email, since, shift: nowShift ? { start: nowShift.start_time, end: nowShift.end_time, timezone: nowShift.timezone } : null };
-    const page = { id: account.id, username: account.username, name: account.creators?.name || account.username };
+    const page = { id: account.id, username: account.username, name: account.creators?.name || account.username, ai: !!account.ai_creator_id };
+    if (!account.assigned) return res.json({ found: false, reason: 'not_assigned', message: NOT_ASSIGNED, page, shift });
     if (!fan) return res.json({ found: false, reason: 'fan', page, shift });
 
     const fanId = fan.fansly_account_id;
@@ -155,12 +168,21 @@ panel.get('/fan', async (req, res) => {
       .eq('account_id', account.id).eq('fan_account_id', fanId).order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(100);
     const { data: summary } = await supabaseAdmin.from('fansly_fan_summaries').select('summary, last_message_id, built_at, messages_used')
       .eq('account_id', account.id).eq('fan_account_id', fanId).maybeSingle();
+    const { data: fanslyNotes } = await supabaseAdmin.from('fansly_platform_notes').select('note_id, title, note, created_at_fansly').eq('account_id', account.id).eq('fan_account_id', fanId)
+      .order('created_at_fansly', { ascending: false }).limit(10);
+    const { data: lists } = await supabaseAdmin.from('fansly_list_members').select('list_id').eq('account_id', account.id).eq('fan_account_id', fanId);
+    let listNames = [];
+    if (lists?.length) {
+      const { data: ls } = await supabaseAdmin.from('fansly_lists').select('list_id, label').eq('account_id', account.id).in('list_id', lists.map(l => l.list_id));
+      listNames = (ls || []).map(l => l.label).filter(Boolean);
+    }
     const lastId = msgs[msgs.length - 1]?.message_id || null;
     // items he already owns: what he bought (for "he already owns this" next to scripts with vault items)
     const owned = [...new Set((tx || []).filter(t => t.item_id && t.category !== 'refund').map(t => String(t.item_id)))];
     res.json({
       found: true, page, shift,
-      fan: { ...fan, name: fan.nickname || fan.display_name || fan.username || null },
+      fan: { ...fan, name: fan.nickname || fan.display_name || fan.username || null, lists: listNames },
+      fansly_notes: (fanslyNotes || []).filter(n => n.note || n.title).map(n => ({ id: n.note_id, title: n.title, note: n.note, at: n.created_at_fansly })),
       metrics: metricsOf(msgs, tx || []),
       warnings: warningsOf(msgs, fan),
       notes: (notes || []).map(n => ({ id: n.id, text: n.text, pinned: n.pinned, created_at: n.created_at, updated_at: n.updated_at, author: n.users?.name || 'Someone', mine: n.user_id === req.user.id, can_edit: n.user_id === req.user.id || isManager(req.user) })),
@@ -175,9 +197,10 @@ panel.post('/notes', async (req, res) => {
   const text = String(req.body?.text || '').trim().slice(0, 2000);
   if (!text) return res.status(400).json({ error: 'Write something first' });
   try {
-    const account = await accountOf(req, req.body?.account);
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
     const fan = String(req.body?.fan || '');
-    if (!account || !/^\d{5,25}$/.test(fan)) return res.status(404).json({ error: 'No such fan on this page' });
+    if (!/^\d{5,25}$/.test(fan)) return res.status(404).json({ error: 'No such fan on this page' });
     const { data, error } = await supabaseAdmin.from('fansly_notes').insert({ account_id: account.id, fan_account_id: fan, user_id: req.user.id, text }).select('id').single();
     if (error) throw error;
     res.json({ ok: true, id: data.id });
@@ -238,9 +261,10 @@ const building = new Set();           // one build per fan at a time
 // POST /api/fansly/panel/summary { account, fan, force? } → the stored summary, rebuilt if his chat moved on
 panel.post('/summary', async (req, res) => {
   try {
-    const account = await accountOf(req, req.body?.account);
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
     const fanId = String(req.body?.fan || '');
-    if (!account || !/^\d{5,25}$/.test(fanId)) return res.status(404).json({ error: 'No such fan on this page' });
+    if (!/^\d{5,25}$/.test(fanId)) return res.status(404).json({ error: 'No such fan on this page' });
     const { data: have } = await supabaseAdmin.from('fansly_fan_summaries').select('summary, last_message_id, built_at, messages_used').eq('account_id', account.id).eq('fan_account_id', fanId).maybeSingle();
     const { data: recent } = await supabaseAdmin.from('fansly_messages').select('message_id, from_fan, type, text, sent_at, price, sold_at, tip_amount')
       .eq('account_id', account.id).eq('fan_account_id', fanId).order('sent_at', { ascending: false }).limit(250);
@@ -284,6 +308,7 @@ panel.post('/summary', async (req, res) => {
 panel.get('/scripts', async (req, res) => {
   try {
     const account = await accountOf(req, req.query.account);
+    if (account && !account.assigned) return res.json({ stages: STAGES, scripts: [], not_assigned: true });
     let q = supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, item_ids').eq('organisation_id', req.user.organisationId).eq('active', true);
     q = account ? q.or(`account_id.is.null,account_id.eq.${account.id}`) : q.is('account_id', null);
     const { data, error } = await q.order('position').order('created_at');
@@ -304,6 +329,90 @@ panel.post('/scripts/:id/use', async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (e) { fail(res, e, 'record the script'); }
+});
+
+// ---------- phase 4: suggested replies ----------
+const FX = require('../utils/fanslyAi');
+const SAME_CONVERSATION_MS = 6 * 3600 * 1000;      // the engine's plan for a fan carries over within one conversation
+
+// POST /api/fansly/panel/suggest { account, fan } → { draft_id, messages[], goal, why } or { stopped | quiet }
+panel.post('/suggest', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fanId = String(req.body?.fan || '');
+    if (!/^\d{5,25}$/.test(fanId)) return res.status(404).json({ error: 'No such fan on this page' });
+    if (!account.ai_creator_id) return res.status(409).json({ error: 'No AI profile is picked for this page yet. A manager picks it on the Fansly dashboard (Pages, Settings).' });
+    const AI = require('../utils/aiChat');
+    // the last suggestion for him in this conversation carries the engine's plan forward
+    const { data: prev } = await supabaseAdmin.from('fansly_ai_drafts').select('id, session, status, created_at').eq('account_id', account.id).eq('fan_account_id', fanId)
+      .order('created_at', { ascending: false }).limit(1);
+    const last = prev?.[0];
+    const session = last?.session && Date.now() - Date.parse(last.created_at) < SAME_CONVERSATION_MS ? last.session : null;
+    // an unsent earlier suggestion counts as not used
+    if (last && ['shown', 'inserted'].includes(last.status)) await supabaseAdmin.from('fansly_ai_drafts').update({ status: 'discarded', decided_at: new Date().toISOString() }).eq('id', last.id);
+    const opts = { fanUuid: fanId, fansly: { accountId: account.id }, session };
+    let out;
+    try { out = await AI.reply(req.user.organisationId, account.ai_creator_id, opts); }
+    catch (e) {
+      // he hasn't written since our last message: she writes first (a nudge)
+      if (/no message from him/i.test(e.message)) out = await AI.reply(req.user.organisationId, account.ai_creator_id, { ...opts, followUp: true });
+      else throw e;
+    }
+    const chatterId = await F.chatterFor(req.user).catch(() => null);
+    const base = { organisation_id: req.user.organisationId, account_id: account.id, fan_account_id: fanId, user_id: req.user.id, chatter_id: chatterId, his: (out.used?.said || []).join('\n').slice(0, 2000) || null };
+    if (out.screen?.action === 'stop' || out.screen?.action === 'handover') {
+      await supabaseAdmin.from('fansly_ai_drafts').insert({ ...base, status: 'failed', goal: 'stopped', draft: null });
+      return res.json({ stopped: true, reasons: out.screen.reasons || [] });
+    }
+    if (out.quiet) return res.json({ quiet: true, text: out.quiet.text, why: out.quiet.why });
+    const r = (out.results || []).find(x => ['ok', 'check'].includes(x.status) && x.replies?.length);
+    if (!r) {
+      await supabaseAdmin.from('fansly_ai_drafts').insert({ ...base, status: 'failed', goal: out.used?.plan?.goal || null, model: out.results?.[0]?.model || null, session: out.used?.session || null });
+      return res.json({ error: (out.results?.[0]?.problems || [])[0] || 'The AI could not write a reply this time. Try again.' });
+    }
+    const messages = r.replies.map(x => String(x.creator_message || '').trim()).filter(Boolean);
+    const { data: row, error } = await supabaseAdmin.from('fansly_ai_drafts').insert({ ...base, draft: messages.join('\n'), model: r.model, goal: out.used?.plan?.goal || null,
+      session: out.used?.session || null, cost_usd: r.cost != null ? Math.round(r.cost * 1e6) / 1e6 : null, status: 'shown' }).select('id').single();
+    if (error) throw error;
+    res.json({ draft_id: row.id, messages, goal: out.used?.plan?.goal_text || out.used?.plan?.goal || null, why: out.used?.plan?.why || null, coach: r.coach?.summary || null, ppv_idea: r.ppv ? true : false });
+  } catch (e) {
+    if (e.status && e.status < 500) return res.status(e.status).json({ error: e.message });
+    fail(res, e, 'suggest a reply');
+  }
+});
+
+/** A suggestion of the caller's own. */
+async function ownDraft(req) {
+  const { data } = await supabaseAdmin.from('fansly_ai_drafts').select('id, draft, status, user_id, organisation_id').eq('id', req.params.id).maybeSingle();
+  return data && data.organisation_id === req.user.organisationId && data.user_id === req.user.id ? data : null;
+}
+
+// POST /api/fansly/panel/drafts/:id { status: 'inserted' | 'discarded' }
+panel.post('/drafts/:id', async (req, res) => {
+  try {
+    const d = await ownDraft(req);
+    if (!d) return res.status(404).json({ error: 'No such suggestion' });
+    const status = req.body?.status === 'inserted' ? 'inserted' : 'discarded';
+    if (['sent_as_is', 'edited'].includes(d.status)) return res.json({ ok: true, status: d.status });
+    await supabaseAdmin.from('fansly_ai_drafts').update({ status, decided_at: new Date().toISOString() }).eq('id', d.id);
+    res.json({ ok: true, status });
+  } catch (e) { fail(res, e, 'record the suggestion'); }
+});
+
+// POST /api/fansly/panel/drafts/:id/sent { text } → sent as it was, or edited
+panel.post('/drafts/:id/sent', async (req, res) => {
+  try {
+    const d = await ownDraft(req);
+    if (!d) return res.status(404).json({ error: 'No such suggestion' });
+    const text = String(req.body?.text || '').slice(0, 4000);
+    // the draft may be several messages: the sent one is compared with the closest of them
+    const parts = String(d.draft || '').split('\n').filter(Boolean);
+    const sim = Math.max(FX.similarity(d.draft, text), ...parts.map(p => FX.similarity(p, text)));
+    const status = sim >= 0.9 ? 'sent_as_is' : 'edited';
+    await supabaseAdmin.from('fansly_ai_drafts').update({ status, final_text: text, similarity: sim, decided_at: new Date().toISOString() }).eq('id', d.id);
+    res.json({ ok: true, status, similarity: sim });
+  } catch (e) { fail(res, e, 'record the suggestion'); }
 });
 
 // ======================= managers: the scripts library =======================

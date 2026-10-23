@@ -11,6 +11,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { num } from '@/utils/numbers';
 import FanslyMessages from './FanslyMessages';
 import FanslyScripts from './FanslyScripts';
+import FanslyRevenue from './FanslyRevenue';
+import FanslySettings from './FanslySettings';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
 const since = (iso) => {
@@ -35,10 +37,12 @@ export default function FanslyDashboard() {
       <TabsList>
         <TabsTrigger value='overview'>Pages</TabsTrigger>
         <TabsTrigger value='messages'>Messages</TabsTrigger>
+        <TabsTrigger value='revenue'>Revenue</TabsTrigger>
         <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
       <TabsContent value='overview'><FanslyOverview /></TabsContent>
       <TabsContent value='messages'><FanslyMessages /></TabsContent>
+      <TabsContent value='revenue'><FanslyRevenue /></TabsContent>
       <TabsContent value='scripts'><FanslyScripts /></TabsContent>
     </Tabs>
   );
@@ -48,6 +52,7 @@ function FanslyOverview() {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
   const [recounting, setRecounting] = useState(false);
+  const [settingsFor, setSettingsFor] = useState(null);
   const load = () => api.get('/api/fansly').then(r => setInfo(r.data)).catch(e => setInfo({ error: e?.response?.data?.error || 'Could not load the Fansly pages.' }));
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
 
@@ -86,6 +91,7 @@ function FanslyOverview() {
               {a.status === 'paused' ? <Badge variant='outline'>Recording paused</Badge> : a.online.length
                 ? <Badge className='gap-1 bg-emerald-600 text-white hover:bg-emerald-600'><Radio className='size-3' /> {a.online.length} online</Badge>
                 : <Badge variant='secondary'>Nobody in it now</Badge>}
+              <Button size='sm' variant='outline' onClick={() => setSettingsFor(a)}>Settings</Button>
               {isAdmin && <Button size='sm' variant='outline' onClick={() => pause(a)}>{a.status === 'paused' ? 'Resume' : 'Pause'}</Button>}
             </div>
           </header>
@@ -95,7 +101,7 @@ function FanslyOverview() {
               <p className='mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>In the account now</p>
               {a.online.length ? (
                 <ul className='space-y-1 text-sm'>
-                  {a.online.map(p => <li key={p.device + p.since} className='flex items-center gap-2'><MonitorSmartphone className='size-3.5 text-muted-foreground' />{p.name}{p.chatter && p.chatter !== p.name ? ` (${p.chatter})` : ''}<span className='text-muted-foreground'>· {since(p.since)}</span></li>)}
+                  {a.online.map(p => <li key={p.device + p.since} className='flex items-center gap-2'><MonitorSmartphone className='size-3.5 text-muted-foreground' />{p.name}{p.chatter && p.chatter !== p.name ? ` (${p.chatter})` : ''}<span className='text-muted-foreground'>· {since(p.since)}</span>{p.on_roster === false && <span className='text-xs text-amber-600'>not on the roster for this page</span>}</li>)}
                 </ul>
               ) : <p className='text-sm text-muted-foreground'>No browser with the extension is on this account.</p>}
               {a.online.length > 1 && <p className='mt-2 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> Two people are logged in at once. Sends are credited to whoever&apos;s browser sent them.</p>}
@@ -125,7 +131,7 @@ function FanslyOverview() {
                 <TableHeader><TableRow>
                   <TableHead>Chatter</TableHead><TableHead className='text-right'>Days</TableHead><TableHead className='text-right'>Sent</TableHead><TableHead className='text-right'>Mass</TableHead>
                   <TableHead className='text-right'>PPVs sent</TableHead><TableHead className='text-right'>Sold</TableHead><TableHead className='text-right'>Sell rate</TableHead>
-                  <TableHead className='text-right'>PPV net</TableHead><TableHead className='text-right'>Tips net</TableHead><TableHead className='text-right'>Reply time</TableHead>
+                  <TableHead className='text-right'>PPV net</TableHead><TableHead className='text-right'>of it mass</TableHead><TableHead className='text-right'>Tips net</TableHead><TableHead className='text-right'>Reply time</TableHead>
                 </TableRow></TableHeader>
                 <TableBody>
                   {a.last14.map(c => (
@@ -133,7 +139,7 @@ function FanslyOverview() {
                       <TableCell>{c.name}{c.unattributed > 0 && <span className='ml-1 text-xs text-amber-600'>({c.unattributed} not attributed)</span>}</TableCell>
                       <TableCell className='text-right'>{num(c.days)}</TableCell><TableCell className='text-right'>{num(c.sent)}</TableCell><TableCell className='text-right'>{num(c.mass_sent)}</TableCell>
                       <TableCell className='text-right'>{num(c.ppv_sent)}</TableCell><TableCell className='text-right'>{num(c.ppv_sold)}</TableCell><TableCell className='text-right'>{pct(c.ppv_sold, c.ppv_sent)}</TableCell>
-                      <TableCell className='text-right'>{money(c.ppv_net)}</TableCell><TableCell className='text-right'>{money(c.tips_net)}</TableCell><TableCell className='text-right'>{secs(c.median_reply_s)}</TableCell>
+                      <TableCell className='text-right'>{money(c.ppv_net)}</TableCell><TableCell className='text-right'>{money(c.mass_ppv_net)}</TableCell><TableCell className='text-right'>{money(c.tips_net)}</TableCell><TableCell className='text-right'>{secs(c.median_reply_s)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -153,6 +159,8 @@ function FanslyOverview() {
           )}
         </section>
       ))}
+
+      {settingsFor && <FanslySettings account={settingsFor} canEdit={isAdmin} onClose={(saved) => { setSettingsFor(null); if (saved) load(); }} />}
 
       <div className='flex justify-end'>
         <Button size='sm' variant='outline' disabled={recounting} onClick={recount}>{recounting ? 'Recounting…' : 'Match sales and recount 14 days'}</Button>

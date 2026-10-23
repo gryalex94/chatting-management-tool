@@ -71,7 +71,7 @@ app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/daily-check/
 // The Fansly extension posts a small batch every few seconds from every chatter's
 // browser, often from one office address: its own roomy limit, outside the general one.
 app.use(['/api/fansly/ingest', '/api/fansly/presence', '/api/fansly/panel'], limiter(15, 20000, 'extension requests'));
-app.use('/api/fansly/panel/summary', limiter(15, 300, 'AI summaries'));
+app.use(['/api/fansly/panel/summary', '/api/fansly/panel/suggest'], limiter(15, 300, 'AI requests'));
 app.use('/api/fansly/login', limiter(15, 60, 'sign-in attempts'));
 const generalLimiter = limiter(15, 3000, 'requests');
 app.use('/api', (req, res, next) => (/^\/fansly\/(ingest|presence|panel)/.test(req.path) ? next() : generalLimiter(req, res, next)));
