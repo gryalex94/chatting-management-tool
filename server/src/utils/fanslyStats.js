@@ -122,7 +122,7 @@ async function matchSales(accountId) {
     await supabaseAdmin.from('fansly_transactions').update({ ...patch, updated_at: new Date().toISOString() }).eq('account_id', accountId).eq('transaction_id', transaction_id);
   }
   for (const s of soldUpdates) {
-    await supabaseAdmin.from('fansly_messages').update({ sold_at: s.sold_at, sold_net: s.sold_net }).eq('account_id', accountId).eq('message_id', s.message_id);
+    await supabaseAdmin.from('fansly_messages').update({ sold_at: s.sold_at, sold_net: s.sold_net, sold_source: 'ledger' }).eq('account_id', accountId).eq('message_id', s.message_id);
   }
   await creditRefunds(accountId);          // after the sales, so a refund finds the chatter its sale went to
   return { matched: txUpdates.filter(u => u.credited_message_id).length, open: open.length };

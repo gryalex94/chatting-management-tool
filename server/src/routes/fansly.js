@@ -165,11 +165,11 @@ router.get('/', async (req, res) => {
     }
     const out = [];
     for (const a of accounts || []) {
-      const { data: msgs } = await supabaseAdmin.from('fansly_messages').select('fan_account_id, from_fan, price, attribution, chatter_id, chatters(name)')
+      const { data: msgs } = await supabaseAdmin.from('fansly_messages').select('fan_account_id, from_fan, type, price, attribution, chatter_id, chatters(name)')
         .eq('account_id', a.id).gte('sent_at', since).limit(5000);
       const rows = msgs || [];
       const byChatter = new Map();
-      for (const m of rows.filter(r => !r.from_fan)) {
+      for (const m of rows.filter(r => !r.from_fan && r.type !== 2)) {
         const k = m.chatters?.name || (m.attribution === 'unattributed' ? 'Not attributed' : 'History');
         const c = byChatter.get(k) || { name: k, sent: 0, ppv: 0, fans: new Set() };
         c.sent += 1; if (m.price != null) c.ppv += 1; if (m.fan_account_id) c.fans.add(m.fan_account_id);
@@ -202,9 +202,9 @@ router.get('/', async (req, res) => {
         followers_count: a.followers_count, subscribers_count: a.subscribers_count, status: a.status, first_seen_at: a.first_seen_at, last_seen_at: a.last_seen_at,
         online: onlineBy.get(a.id) || [], totals: { fans: fansTotal || 0, messages: msgTotal || 0 }, ledger_read_at, ledger_stale: !ledger_read_at || Date.now() - Date.parse(ledger_read_at) > 36 * 3600 * 1000, last14,
         today: {
-          sent: rows.filter(r => !r.from_fan).length, received: rows.filter(r => r.from_fan).length,
+          sent: rows.filter(r => !r.from_fan && r.type !== 2).length, mass: rows.filter(r => !r.from_fan && r.type === 2).length, received: rows.filter(r => r.from_fan).length,
           fans: new Set(rows.map(r => r.fan_account_id).filter(Boolean)).size,
-          ppv_sent: rows.filter(r => !r.from_fan && r.price != null).length,
+          ppv_sent: rows.filter(r => !r.from_fan && r.type !== 2 && r.price != null).length,
           unattributed: rows.filter(r => r.attribution === 'unattributed').length,
           net, by_chatter: [...byChatter.values()].map(c => ({ ...c, fans: c.fans.size })).sort((x, y) => y.sent - x.sent),
         },
@@ -230,8 +230,10 @@ function messageFilters(req) {
     p_from: from ? Stats.dayStartUtc(from).toISOString() : null,
     p_to: to ? Stats.dayStartUtc(Stats.addDays(to, 1)).toISOString() : null,
     p_ppv: q.ppv === '1', p_sold: q.sold === '1', p_unreplied: q.unreplied === '1',
-    p_kind: ['mass', 'personal'].includes(q.kind) ? q.kind : 'all',
+    // mass messages have their own list (GET /messages/mass): this one is chat messages unless asked otherwise
+    p_kind: ['mass', 'all'].includes(q.kind) ? q.kind : 'personal',
     p_q: String(q.q || '').trim().slice(0, 100) || null,
+    p_unsent: q.unsent === '1',
   };
 }
 
@@ -260,6 +262,7 @@ async function decorate(orgId, rows) {
       price: r.price != null ? Number(r.price) : null, sold_at: r.sold_at, sold_net: r.sold_net != null ? Number(r.sold_net) : null,
       delivered_at: r.delivered_at, read_at: r.read_at, replied_at: r.replied_at, waited_s: r.waited_s,
       chatter_id: r.chatter_id, chatter: r.chatter_id ? chatter.get(r.chatter_id) || 'Unknown' : null, attribution: r.attribution,
+      unsent_at: r.deleted_at || null,
     };
   });
 }
@@ -292,6 +295,27 @@ router.get('/messages', async (req, res) => {
   } catch (e) { fail(res, e, 'load the messages'); }
 });
 
+// GET /api/fansly/messages/mass?account&chatter&from&to&q&unsent → mass messages, one row each, with totals
+router.get('/messages/mass', async (req, res) => {
+  try {
+    const f = messageFilters(req);
+    const { data, error } = await supabaseAdmin.rpc('fansly_mass_messages', { p_org: f.p_org, p_account: f.p_account, p_chatter: f.p_chatter, p_from: f.p_from, p_to: f.p_to, p_q: f.p_q, p_unsent: f.p_unsent, p_limit: 500 });
+    if (error) throw error;
+    const rows = data || [];
+    const accIds = [...new Set(rows.map(r => r.account_id))];
+    const { data: accs } = accIds.length ? await supabaseAdmin.from('fansly_accounts').select('id, username, creators(name)').eq('organisation_id', req.user.organisationId).in('id', accIds) : { data: [] };
+    const page = new Map((accs || []).map(a => [a.id, a.creators?.name || a.username || 'Fansly page']));
+    const chIds = [...new Set(rows.map(r => r.chatter_id).filter(Boolean))];
+    const { data: chs } = chIds.length ? await supabaseAdmin.from('chatters').select('id, name').in('id', chIds) : { data: [] };
+    const chatter = new Map((chs || []).map(c => [c.id, c.name]));
+    const out = rows.map(r => ({ ...r, page: page.get(r.account_id) || null, chatter: r.chatter_id ? chatter.get(r.chatter_id) || 'Unknown' : null,
+      recipients: Number(r.recipients), read: Number(r.read), ppv_sold: Number(r.ppv_sold), price: r.price != null ? Number(r.price) : null, sold_net: Number(r.sold_net || 0), unsent_at: r.deleted_at || null }));
+    const sum = (k) => out.reduce((n, r) => n + (Number(r[k]) || 0), 0);
+    res.json({ rows: out, totals: { mass_messages: out.length, recipients: sum('recipients'), read: sum('read'), with_ppv: out.filter(r => r.price > 0).length,
+      ppv_sold: sum('ppv_sold'), sold_net: Math.round(sum('sold_net') * 100) / 100, unsent: out.filter(r => r.unsent_at).length }, truncated: out.length >= 500 });
+  } catch (e) { fail(res, e, 'load the mass messages'); }
+});
+
 // GET /api/fansly/messages/totals → the same filters, counted
 router.get('/messages/totals', async (req, res) => {
   try {
@@ -299,7 +323,7 @@ router.get('/messages/totals', async (req, res) => {
     if (error) throw error;
     const t = (data || [])[0] || {};
     res.json({ messages: Number(t.messages || 0), fans: Number(t.fans || 0), ppv_sent: Number(t.ppv_sent || 0), ppv_sold: Number(t.ppv_sold || 0),
-      sold_net: Number(t.sold_net || 0), replied: Number(t.replied || 0), median_waited_s: t.median_waited_s ?? null });
+      sold_net: Number(t.sold_net || 0), replied: Number(t.replied || 0), median_waited_s: t.median_waited_s ?? null, unsent: Number(t.unsent || 0) });
   } catch (e) { fail(res, e, 'count the messages'); }
 });
 
@@ -311,7 +335,7 @@ router.get('/messages/conversation', async (req, res) => {
     if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
     const { data: fan } = await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, display_name, nickname, joined_fansly_at, last_seen_at, follows_you, subscription_tier_name, subscribed_until')
       .eq('account_id', accountId).eq('fansly_account_id', fanId).maybeSingle();
-    const { data: msgs, error } = await supabaseAdmin.from('fansly_messages').select('message_id, from_fan, type, text, sent_at, price, sold_at, sold_net, tip_amount, read_at, chatter_id, attribution')
+    const { data: msgs, error } = await supabaseAdmin.from('fansly_messages').select('message_id, from_fan, type, text, sent_at, price, sold_at, sold_net, tip_amount, read_at, chatter_id, attribution, deleted_at')
       .eq('account_id', accountId).eq('fan_account_id', fanId).order('sent_at', { ascending: false }).limit(1000);
     if (error) throw error;
     const chIds = [...new Set((msgs || []).map(m => m.chatter_id).filter(Boolean))];
@@ -324,7 +348,7 @@ router.get('/messages/conversation', async (req, res) => {
       fan: fan ? { ...fan, username: fan.username, spent_net: Math.round(spent * 100) / 100, purchases: (tx || []).filter(t => t.category !== 'refund').length } : { fansly_account_id: fanId },
       messages: (msgs || []).reverse().map(m => ({ message_id: m.message_id, from_fan: m.from_fan, kind: m.type === 2 ? 'mass' : m.type === 0 ? 'tip' : 'personal', message: m.text, sent_at: m.sent_at,
         price: m.price != null ? Number(m.price) : null, sold_at: m.sold_at, sold_net: m.sold_net != null ? Number(m.sold_net) : null, tip_amount: m.tip_amount != null ? Number(m.tip_amount) : null,
-        read_at: m.read_at, chatter: m.chatter_id ? chatter.get(m.chatter_id) || 'Unknown' : null, attribution: m.attribution })),
+        read_at: m.read_at, chatter: m.chatter_id ? chatter.get(m.chatter_id) || 'Unknown' : null, attribution: m.attribution, unsent_at: m.deleted_at || null })),
       truncated: (msgs || []).length >= 1000,
     });
   } catch (e) { fail(res, e, 'load the conversation'); }
@@ -338,7 +362,7 @@ router.get('/messages.csv', async (req, res) => {
     if (error) throw error;
     const rows = await decorate(req.user.organisationId, data || []);
     const cell = (v) => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const cols = ['sent_at', 'page', 'chatter', 'attribution', 'kind', 'fan_username', 'fan_nickname', 'display_name', 'message', 'price', 'sold_at', 'sold_net', 'delivered_at', 'read_at', 'replied_at', 'waited_s'];
+    const cols = ['sent_at', 'page', 'chatter', 'attribution', 'kind', 'fan_username', 'fan_nickname', 'display_name', 'message', 'price', 'sold_at', 'sold_net', 'delivered_at', 'read_at', 'replied_at', 'waited_s', 'unsent_at'];
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="fansly-messages-${new Date().toISOString().slice(0, 10)}.csv"`);

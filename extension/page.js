@@ -33,11 +33,14 @@
   });
   const slimMessage = (m) => m && ({
     id: m.id, type: m.type, content: m.content, groupId: m.groupId, senderId: m.senderId, inReplyTo: m.inReplyTo, createdAt: m.createdAt,
+    correlationId: m.correlationId, deletedAt: m.deletedAt,     // the mass message it belongs to · when it was unsent
     attachments: m.attachments, interactions: m.interactions, totalTipAmount: m.totalTipAmount, likes: m.likes && m.likes.length,
   });
   const slimGroup = (g) => g && ({ id: g.id, type: g.type, createdBy: g.createdBy, users: g.users, userSettings: g.userSettings, lastMessage: slimMessage(g.lastMessage) });
 
   const listOf = (r, ...keys) => { if (Array.isArray(r)) return r; for (const k of keys) if (r && Array.isArray(r[k])) return r[k]; return []; };
+  // the first list of objects in an answer whose shape is not known yet
+  const firstList = (r) => { if (Array.isArray(r)) return r; for (const v of Object.values(r || {})) if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v; return []; };
   const parseBody = (b) => { try { return typeof b === 'string' ? JSON.parse(b) : null; } catch { return null; } };
 
   /** Which answers we keep, and how. Returns null for anything else. `sent` = the request body (POST). */
@@ -48,7 +51,9 @@
       if (p === '/account/me' && r && r.account) return { kind: 'me', data: slimAccount(r.account) };
       if (p === '/messaging/groups' && r) return { kind: 'groups', data: { data: r.data, aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), groups: (r.aggregationData && r.aggregationData.groups || []).map(slimGroup) } } };
       if (/^\/group\/\d+\/?$/.test(p) && r) return { kind: 'group', data: slimGroup(r) };
-      if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [] } };
+      // accountMediaOrders: what the fan in this chat bought (Fansly's "This user has purchased this media")
+      if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [], accountMediaOrders: r.accountMediaOrders || [] } };
+      if (/^\/message\/broadcast\/stats(\/deleted)?$/.test(p) && r) return { kind: 'broadcasts', data: { deleted: /deleted$/.test(p), items: firstList(r) } };
       if (p === '/message/unread' && r) return { kind: 'unread', data: { messageInteractions: r.messageInteractions || [] } };
       if (p === '/subscribers' && r) return { kind: 'subscribers', data: { stats: r.stats, subscriptions: r.subscriptions || [] } };
       // Fansly's own notes on fans, the fan lists, followers, notifications, statistics: mirrored as shown
@@ -66,6 +71,7 @@
       if (p === '/message' && r && r.id) return { kind: 'sent', data: slimMessage(r) };
       if (p === '/account/media' && Array.isArray(r)) return { kind: 'media_created', data: r.map(slimAccountMedia) };
       if ((p === '/notes' || p === '/notes/edit') && r) return { kind: 'fnotes', data: { notes: listOf(r, 'notes', 'data').length ? listOf(r, 'notes', 'data') : (r.id ? [r] : []), saved: true } };
+      if (p === '/message/delete') { const b = parseBody(sent) || {}; return { kind: 'msg_deleted', data: { messageId: b.messageId || b.id || null } }; }
       if (p === '/notes/delete') { const b = parseBody(sent) || {}; return { kind: 'fnote_deleted', data: { id: b.id || b.noteId || null, ids: b.ids || null } }; }
       return null;
     }
@@ -77,6 +83,9 @@
     let body; try { body = JSON.parse(text); } catch { return; }
     const got = pick(String(method || 'GET').toUpperCase(), url, body, sent);
     if (got) post(got.kind, url, got.data);
+    // purchases riding along on any other answer (the app caches them from aggregationData too)
+    const extra = body && body.response && body.response.aggregationData && body.response.aggregationData.accountMediaOrders;
+    if (Array.isArray(extra) && extra.length) post('orders', url, { accountMediaOrders: extra });
   };
 
   // ---- fetch ----

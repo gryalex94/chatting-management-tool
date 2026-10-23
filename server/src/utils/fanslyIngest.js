@@ -182,6 +182,8 @@ function messageRow(ctx, m, { source, attribution, prices }) {
     chatter_id: att === 'logged_in' ? ctx.chatterId : null,
     shift_id: !fromFan ? shiftAt(ctx.shifts, ctx.account.creator_id, createdAt)?.id || null : null,
     attribution: att, device_id: att === 'logged_in' ? ctx.deviceId : null, source,
+    correlation_id: m.correlationId && String(m.correlationId) !== '0' && String(m.correlationId) !== String(m.id) ? str(m.correlationId) : null,
+    deleted_at: m.deletedAt ? (Number(m.deletedAt) > 1e12 ? tsMs(m.deletedAt) : tsSec(m.deletedAt)) : null,
     updated_at: new Date().toISOString(), raw: slimMessage(m),
   };
 }
@@ -234,6 +236,15 @@ async function applyEvents(ctx, events) {
   // mirrors of other Fansly pages (database change 056)
   const pnotes = new Map(), pnotesGone = new Set(), lists = new Map(), listMembers = new Map(), subs = new Map(), followers = new Set(), notifs = new Map(), snapshots = [];
   const ts = (v) => (v == null || v === 0 ? null : Number(v) > 1e12 ? tsMs(v) : tsSec(v));
+  const orders = new Map();            // `${fan}:${item}` → { fan, item, at, id }: what a fan bought, as the chat shows it
+  const takeOrders = (list) => {
+    for (const o of list || []) {
+      const fan = str(o?.accountId), item = str(o?.accountMediaId || o?.accountMediaBundleId);
+      if (!fan || !item || fan === ctx.creatorId) continue;
+      orders.set(`${fan}:${item}`, { fan, item, at: ts(o.createdAt), id: str(o.id) });
+    }
+  };
+  const unsent = new Set(), broadcasts = new Map();
 
   const putMessage = (row) => {
     const prev = messages.get(row.message_id);
@@ -263,6 +274,8 @@ async function applyEvents(ctx, events) {
   // a sent PPV references an item made moments earlier (maybe in an earlier batch): fetch those prices
   const wanted = new Set();
   for (const e of events) for (const a of (e.kind === 'sent' || e.kind === 'ws_message' ? e.data?.attachments : []) || []) if (!prices.has(str(a.contentId))) wanted.add(str(a.contentId));
+  // a chat page whose items came in an earlier batch
+  for (const e of events) if (e.kind === 'messages') for (const m of e.data?.messages || []) for (const a of m.attachments || []) if (a.contentType !== 7 && !prices.has(str(a.contentId))) wanted.add(str(a.contentId));
   if (wanted.size) {
     const { data } = await supabaseAdmin.from('fansly_items').select('item_id, price').eq('account_id', ctx.account.id).in('item_id', [...wanted]);
     for (const r of data || []) if (r.price != null) prices.set(r.item_id, Number(r.price));
@@ -302,6 +315,7 @@ async function applyEvents(ctx, events) {
         }
         case 'messages': {                                 // a chat page (25 messages) the chatter opened or scrolled
           for (const m of d.messages || []) putMessage(messageRow(ctx, m, { source: d.before ? 'history' : 'page', attribution: 'history', prices }));
+          takeOrders(d.accountMediaOrders);
           for (const t of d.tips || []) bump('tips_seen');
           bump('messages', (d.messages || []).length); break;
         }
@@ -379,6 +393,18 @@ async function applyEvents(ctx, events) {
           for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
           bump('notifications', (d.notifications || []).length); break;
         }
+        case 'orders': { takeOrders(d.accountMediaOrders); bump('orders_seen', (d.accountMediaOrders || []).length); break; }
+        case 'msg_deleted': { if (d.messageId) unsent.add(str(d.messageId)); bump('unsent'); break; }
+        case 'broadcasts': {                               // the mass message history (and its "deleted" tab)
+          for (const b of d.items || []) {
+            if (!b || b.id == null) continue;
+            const deletedAt = ts(b.deletedAt) || (d.deleted ? new Date().toISOString() : null);
+            broadcasts.set(str(b.id), { account_id: ctx.account.id, broadcast_id: str(b.id), text: b.content ?? b.text ?? null, sent_at: ts(b.createdAt),
+              deleted_at: deletedAt, recipients: b.recipientCount ?? b.sentCount ?? b.deliveredCount ?? b.recipients ?? null, raw: b, updated_at: new Date().toISOString() });
+            if (deletedAt) unsent.add(str(b.id));
+          }
+          bump('broadcasts', (d.items || []).length); break;
+        }
         case 'stats': {
           snapshots.push({ account_id: ctx.account.id, kind: String(d.kind || 'summary').slice(0, 20), after_at: ts(d.after), before_at: ts(d.before), data: d.stats || {} });
           bump(`stats_${d.kind}`); break;
@@ -392,6 +418,7 @@ async function applyEvents(ctx, events) {
           transactions.set(id, { account_id: ctx.account.id, transaction_id: id, type: null, type_label: 'Media order (live)', fan_account_id: fanId, item_id: itemId,
             gross, net: gross != null ? Math.round(gross * 80) / 100 : null, status: null, created_at_fansly: o.createdAt ? (o.createdAt > 1e12 ? tsMs(o.createdAt) : tsSec(o.createdAt)) : new Date(e.at || Date.now()).toISOString(),
             category: null, source: 'live', updated_at: new Date().toISOString(), raw: o });
+          if (fanId && itemId) orders.set(`${fanId}:${itemId}`, { fan: fanId, item: itemId, at: o.createdAt ? ts(o.createdAt) : new Date(e.at || Date.now()).toISOString(), id: str(o.id), live: true });
           bump('orders'); break;
         }
         case 'media_created': bump('items_created', Array.isArray(d) ? d.length : 0); break;
@@ -420,14 +447,15 @@ async function applyEvents(ctx, events) {
     const ids = [...messages.keys()];
     const existing = new Map();
     for (let i = 0; i < ids.length; i += 500) {
-      const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, attribution, chatter_id, user_id, shift_id, device_id, source, first_seen_at, sold_at, sold_net')
+      const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, attribution, chatter_id, user_id, shift_id, device_id, source, first_seen_at, sold_at, sold_net, sold_source, deleted_at, correlation_id')
         .eq('account_id', ctx.account.id).in('message_id', ids.slice(i, i + 500));
       for (const r of data || []) existing.set(r.message_id, r);
     }
     const rows = [];
     for (const row of messages.values()) {
       const old = existing.get(row.message_id);
-      const sold = old ? { sold_at: old.sold_at, sold_net: old.sold_net } : {};
+      // what we learned before stays: the sold mark, when it was unsent, its mass message (a later copy may lack them)
+      const sold = old ? { sold_at: old.sold_at, sold_net: old.sold_net, sold_source: old.sold_source, deleted_at: row.deleted_at || old.deleted_at, correlation_id: row.correlation_id || old.correlation_id } : {};
       if (old && RANK[old.attribution] > RANK[row.attribution]) {
         rows.push({ ...row, ...sold, attribution: old.attribution, chatter_id: old.chatter_id, user_id: old.user_id, shift_id: old.shift_id, device_id: old.device_id, source: old.source, first_seen_at: old.first_seen_at });
       } else rows.push(old ? { ...row, ...sold, first_seen_at: old.first_seen_at } : row);
@@ -469,9 +497,20 @@ async function applyEvents(ctx, events) {
     counts.transactions_written = rows.length;
     // a purchase seen live first, then in the ledger: the ledger row is the one that counts
     const ledger = rows.filter(r => r.source === 'ledger' && r.item_id && r.fan_account_id);
-    for (const r of ledger) await supabaseAdmin.from('fansly_transactions').delete().eq('account_id', ctx.account.id).in('source', ['live', 'notification']).eq('item_id', r.item_id).eq('fan_account_id', r.fan_account_id);
+    for (const r of ledger) await supabaseAdmin.from('fansly_transactions').delete().eq('account_id', ctx.account.id).in('source', ['live', 'notification', 'order']).eq('item_id', r.item_id).eq('fan_account_id', r.fan_account_id);
     for (const r of rows) touched.push(r.created_at_fansly);
   }
+  // purchases the chat shows: mark the PPV message sold, and keep a sale when Fansly says when (the ledger replaces it later)
+  if (orders.size) counts.orders_marked = await applyOrders(ctx, [...orders.values()], touched);
+  if (broadcasts.size) await upsert('fansly_broadcasts', [...broadcasts.values()], 'account_id,broadcast_id');
+  if (unsent.size) {
+    const ids = [...unsent], at = new Date().toISOString();
+    await supabaseAdmin.from('fansly_messages').update({ deleted_at: at }).eq('account_id', ctx.account.id).in('message_id', ids).is('deleted_at', null);
+    await supabaseAdmin.from('fansly_messages').update({ deleted_at: at }).eq('account_id', ctx.account.id).in('correlation_id', ids).is('deleted_at', null);
+    await supabaseAdmin.from('fansly_broadcasts').update({ deleted_at: at }).eq('account_id', ctx.account.id).in('broadcast_id', ids).is('deleted_at', null);
+    counts.unsent_marked = ids.length;
+  }
+
   // the mirrors
   const nowIso = new Date().toISOString();
   if (pnotes.size) { await upsert('fansly_platform_notes', [...pnotes.values()], 'account_id,note_id'); counts.fansly_notes_written = pnotes.size; }
@@ -487,6 +526,42 @@ async function applyEvents(ctx, events) {
   await supabaseAdmin.from('fansly_accounts').update({ ...patch, last_seen_at: now }).eq('id', ctx.account.id);
   if (Object.keys(patch).length) forgetAccount(ctx.user.organisationId, ctx.creatorId);
   return { counts, errors, touched };
+}
+
+/**
+ * Purchases as the chat shows them (accountMediaOrders: fan + item). Each marks the
+ * PPV message to that fan carrying that item as sold (sold_source 'chat'); one with a
+ * time also becomes a sale (source 'order', net = 80% of the price) unless a sale for
+ * that item and fan is already recorded. The Earnings ledger replaces it when read.
+ */
+async function applyOrders(ctx, list, touched) {
+  let marked = 0;
+  const sales = [];
+  for (const o of list) {
+    const { data: msgs } = await supabaseAdmin.from('fansly_messages').select('message_id, sent_at, sold_at, price, type')
+      .eq('account_id', ctx.account.id).eq('fan_account_id', o.fan).eq('from_fan', false).filter('attachments', 'cs', JSON.stringify([{ content_id: o.item }])).order('sent_at').limit(1);
+    const m = msgs?.[0];
+    if (m && !m.sold_at) {
+      await supabaseAdmin.from('fansly_messages').update({ sold_at: o.at || m.sent_at, sold_source: 'chat' }).eq('account_id', ctx.account.id).eq('message_id', m.message_id);
+      marked += 1;
+      if (m.sent_at) touched.push(m.sent_at);
+    }
+    if (o.at && !o.live) {
+      const { data: have } = await supabaseAdmin.from('fansly_transactions').select('transaction_id').eq('account_id', ctx.account.id).eq('fan_account_id', o.fan).eq('item_id', o.item).limit(1);
+      if (!have?.length) {
+        let gross = m?.price != null ? Number(m.price) : null;
+        if (gross == null) {
+          const { data: it } = await supabaseAdmin.from('fansly_items').select('price').eq('account_id', ctx.account.id).eq('item_id', o.item).maybeSingle();
+          gross = it?.price != null ? Number(it.price) : null;
+        }
+        sales.push({ account_id: ctx.account.id, transaction_id: `o${o.id || `${o.fan}:${o.item}`}`, type: null, type_label: 'Media (from the chat)', fan_account_id: o.fan, item_id: o.item,
+          gross, net: gross != null ? Math.round(gross * 80) / 100 : null, status: null, created_at_fansly: o.at, category: null, source: 'order', updated_at: new Date().toISOString(), raw: o });
+        touched.push(o.at);
+      }
+    }
+  }
+  if (sales.length) await upsert('fansly_transactions', sales, 'account_id,transaction_id');
+  return marked;
 }
 
 /**

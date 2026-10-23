@@ -105,8 +105,10 @@ async function agencySpend(orgId, fanId, { username = null, thisAccountId = null
         return ids.length ? supabaseAdmin.from('fanvue_fans').select('fan_uuid, handle').in('account_id', ids).ilike('handle', esc(u)).limit(3) : { data: [] };
       })(),
     ]);
-    for (const o of ofs || []) if (!linked.some(l => l.platform === 'onlyfans' && l.ref_id === String(o.of_user_id))) linked.push({ id: null, platform: 'onlyfans', ref_id: String(o.of_user_id), ref_name: o.username, match: 'username' });
-    for (const f of fvs || []) if (!linked.some(l => l.platform === 'fanvue' && l.ref_id === f.fan_uuid)) linked.push({ id: null, platform: 'fanvue', ref_id: f.fan_uuid, ref_name: f.handle, match: 'username' });
+    // a fan has one account per platform: a suggestion only where nothing is linked yet, and only the first
+    const o = (ofs || [])[0], f = (fvs || [])[0];
+    if (o && !linked.some(l => l.platform === 'onlyfans')) linked.push({ id: null, platform: 'onlyfans', ref_id: String(o.of_user_id), ref_name: o.username, match: 'username' });
+    if (f && !linked.some(l => l.platform === 'fanvue')) linked.push({ id: null, platform: 'fanvue', ref_id: f.fan_uuid, ref_name: f.handle, match: 'username' });
   }
   const other = [];
   for (const l of linked) {
@@ -116,7 +118,16 @@ async function agencySpend(orgId, fanId, { username = null, thisAccountId = null
     for (const p of pages) other.push({ ...p, ...base });
   }
   const all = [...fansly, ...other];
+  // the same view per platform: his one account there, its total, and its pages
+  const byPlatform = ['fansly', 'onlyfans', 'fanvue'].map(pl => {
+    const pages = all.filter(p => p.platform === pl);
+    if (!pages.length) return null;
+    const link = pages.find(p => p.match !== 'same_account') || null;
+    return { platform: pl, account: link ? { ref_id: link.ref_id, name: link.ref_name, match: link.match, link_id: link.link_id } : null,
+      spent_net: r2(pages.reduce((n, p) => n + (p.spent_net || 0), 0)), purchases: pages.reduce((n, p) => n + (p.purchases || 0), 0), pages: pages.filter(p => p.page) };
+  }).filter(Boolean);
   return {
+    platforms_detail: byPlatform,
     pages: all,
     total_net: r2(all.reduce((n, p) => n + (p.spent_net || 0), 0)),
     fansly_pages: fansly.length,

@@ -358,7 +358,7 @@ panel.post('/links', async (req, res) => {
     const fan = String(req.body?.fan || ''), platform = String(req.body?.platform || ''), refId = String(req.body?.ref_id || '').slice(0, 80);
     if (!/^\d{5,25}$/.test(fan) || !['onlyfans', 'fanvue'].includes(platform) || !refId) return res.status(400).json({ error: 'Pick a fan to link' });
     const { error } = await supabaseAdmin.from('fan_links').upsert({ organisation_id: req.user.organisationId, fansly_fan_id: fan, platform, ref_id: refId,
-      ref_name: String(req.body?.ref_name || '').slice(0, 120) || null, created_by: req.user.id }, { onConflict: 'organisation_id,fansly_fan_id,platform,ref_id' });
+      ref_name: String(req.body?.ref_name || '').slice(0, 120) || null, created_by: req.user.id, created_at: new Date().toISOString() }, { onConflict: 'organisation_id,fansly_fan_id,platform' });   // one account per platform: a new link replaces the old one
     if (error) throw error;
     res.json({ ok: true });
   } catch (e) { fail(res, e, 'link the fan'); }

@@ -109,7 +109,7 @@ function FanslyOverview() {
             <div>
               <p className='mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>Today</p>
               <div className='grid grid-cols-3 gap-2 text-sm'>
-                <Stat label='Sent' value={num(a.today.sent)} />
+                <Stat label='Sent in chats' value={`${num(a.today.sent)}${a.today.mass ? ` + ${num(a.today.mass)} mass` : ''}`} />
                 <Stat label='Received' value={num(a.today.received)} />
                 <Stat label='Fans' value={num(a.today.fans)} />
                 <Stat label='PPVs sent' value={num(a.today.ppv_sent)} />

@@ -32,7 +32,9 @@ const RANGES = [
  */
 export default function FanslyMessages() {
   const [opts, setOpts] = useState({ accounts: [], chatters: [] });
-  const [f, setF] = useState({ account: 'all', chatter: 'all', range: '7', kind: 'all', ppv: false, sold: false, unreplied: false, q: '' });
+  // view: chat messages (the default) or mass messages, which have their own list
+  const [f, setF] = useState({ account: 'all', chatter: 'all', range: '7', view: 'chat', ppv: false, sold: false, unreplied: false, unsent: false, q: '' });
+  const [mass, setMass] = useState(null);       // { rows, totals, truncated } in the mass view
   const [search, setSearch] = useState('');
   const [rows, setRows] = useState(null);
   const [next, setNext] = useState(null);
@@ -53,7 +55,7 @@ export default function FanslyMessages() {
     if (f.chatter !== 'all') p.set('chatter', f.chatter);
     const r = RANGES.find(x => x.v === f.range);
     if (r && r.days != null) { const now = new Date(); p.set('from', ymd(new Date(now.getTime() - r.days * 86400000))); p.set('to', ymd(now)); }
-    if (f.kind !== 'all') p.set('kind', f.kind);
+    if (f.unsent) p.set('unsent', '1');
     if (f.ppv) p.set('ppv', '1');
     if (f.sold) p.set('sold', '1');
     if (f.unreplied) p.set('unreplied', '1');
@@ -63,14 +65,20 @@ export default function FanslyMessages() {
 
   const load = useCallback(() => {
     const id = ++reqId.current;
-    setRows(null); setTotals(null); setError('');
+    setRows(null); setTotals(null); setMass(null); setError('');
+    if (f.view === 'mass') {
+      api.get(`/api/fansly/messages/mass?${params}`)
+        .then(r => { if (id === reqId.current) setMass(r.data); })
+        .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the mass messages'); });
+      return;
+    }
     api.get(`/api/fansly/messages?${params}`)
       .then(r => { if (id === reqId.current) { setRows(r.data.rows || []); setNext(r.data.next); } })
       .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the messages'); });
     api.get(`/api/fansly/messages/totals?${params}`)
       .then(r => { if (id === reqId.current) setTotals(r.data); })
       .catch(() => {});
-  }, [params]);
+  }, [params, f.view]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
@@ -106,6 +114,10 @@ export default function FanslyMessages() {
   return (
     <div className='grid gap-4'>
       <div className='flex flex-wrap items-center gap-2'>
+        <div className='inline-flex rounded-md border p-0.5'>
+          <Button size='sm' variant={f.view === 'chat' ? 'default' : 'ghost'} onClick={() => set('view')('chat')}>Chat messages</Button>
+          <Button size='sm' variant={f.view === 'mass' ? 'default' : 'ghost'} onClick={() => set('view')('mass')}>Mass messages</Button>
+        </div>
         {opts.accounts.length > 1 && (
           <Select value={f.account} onValueChange={set('account')}>
             <SelectTrigger className='w-44'><SelectValue /></SelectTrigger>
@@ -127,27 +139,23 @@ export default function FanslyMessages() {
           <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
           <SelectContent>{RANGES.map(r => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
         </Select>
-        <Select value={f.kind} onValueChange={set('kind')}>
-          <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value='all'>Chats and mass</SelectItem>
-            <SelectItem value='personal'>Chat messages</SelectItem>
-            <SelectItem value='mass'>Mass messages</SelectItem>
-          </SelectContent>
-        </Select>
-        <Toggle on={f.ppv} onClick={() => toggle('ppv')}>Only PPVs</Toggle>
-        <Toggle on={f.sold} onClick={() => toggle('sold')}>Only sold</Toggle>
-        <Toggle on={f.unreplied} onClick={() => toggle('unreplied')}>No reply yet</Toggle>
+        {f.view === 'chat' && <>
+          <Toggle on={f.ppv} onClick={() => toggle('ppv')}>Only PPVs</Toggle>
+          <Toggle on={f.sold} onClick={() => toggle('sold')}>Only sold</Toggle>
+          <Toggle on={f.unreplied} onClick={() => toggle('unreplied')}>No reply yet</Toggle>
+        </>}
+        <Toggle on={f.unsent} onClick={() => toggle('unsent')}>Unsent</Toggle>
         <div className='relative min-w-48 flex-1'>
           <Search className='absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder='Search in the text' className='pl-8' />
         </div>
-        <Button size='sm' variant='outline' onClick={exportCsv} disabled={exporting}>
+        {f.view === 'chat' && <Button size='sm' variant='outline' onClick={exportCsv} disabled={exporting}>
           {exporting ? <Loader2 className='size-3.5 animate-spin' /> : <Download className='size-3.5' />} CSV
-        </Button>
+        </Button>}
       </div>
 
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7'>
+      {f.view === 'mass' ? <MassList data={mass} error={error} showPage={showPage} /> : <>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8'>
         <Total label='Messages' value={totals && num(totals.messages)} />
         <Total label='Fans' value={totals && num(totals.fans)} />
         <Total label='PPVs sent' value={totals && num(totals.ppv_sent)} />
@@ -155,6 +163,7 @@ export default function FanslyMessages() {
         <Total label='Sell rate' value={totals && (totals.ppv_sent ? `${Math.round((totals.ppv_sold / totals.ppv_sent) * 100)}%` : '·')} />
         <Total label='Net from sold' value={totals && money(totals.sold_net)} />
         <Total label='Median wait' value={totals && (totals.median_waited_s == null ? '·' : wait(totals.median_waited_s))} />
+        <Total label='Unsent' value={totals && num(totals.unsent)} />
       </div>
 
       {error ? <p className='text-sm text-muted-foreground'>{error}</p> : !rows ? <Skeleton className='h-80 w-full' /> : !rows.length ? (
@@ -179,10 +188,13 @@ export default function FanslyMessages() {
                     {fanName(r)}
                     {r.kind === 'mass' && <Badge variant='outline' className='ml-1 px-1 py-0 text-[10px]'>mass</Badge>}
                   </TableCell>
-                  <TableCell className='max-w-md'><p className='line-clamp-2 text-sm'>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p></TableCell>
+                  <TableCell className='max-w-md'>
+                    <p className={cn('line-clamp-2 text-sm', r.unsent_at && 'line-through opacity-60')}>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p>
+                    {r.unsent_at && <Badge variant='outline' className='mt-0.5 px-1 py-0 text-[10px] text-red-600'>unsent {when(r.unsent_at)}</Badge>}
+                  </TableCell>
                   <TableCell className='text-right text-sm tabular-nums'>{money(r.price)}</TableCell>
                   <TableCell className='whitespace-nowrap text-xs'>
-                    {r.sold_at ? <span className='text-emerald-600'>{money(r.sold_net)} · {when(r.sold_at)}</span> : r.price > 0 ? <span className='text-muted-foreground'>not yet</span> : ''}
+                    {r.sold_at ? <span className='text-emerald-600'>{r.sold_net != null ? money(r.sold_net) : 'bought'} · {when(r.sold_at)}</span> : r.price > 0 ? <span className='text-muted-foreground'>not yet</span> : ''}
                   </TableCell>
                   <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{r.read_at ? when(r.read_at) : r.kind === 'mass' ? '' : 'unread'}</TableCell>
                   <TableCell className='text-right text-xs tabular-nums'>{wait(r.waited_s)}</TableCell>
@@ -198,8 +210,61 @@ export default function FanslyMessages() {
         </div>
       )}
 
+      </>}
+
       {open && <Conversation open={open} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+/** Mass messages, one row each: how many got it, read it, bought its PPV, and whether it was unsent. */
+function MassList({ data, error, showPage }) {
+  if (error) return <p className='text-sm text-muted-foreground'>{error}</p>;
+  if (!data) return <Skeleton className='h-80 w-full' />;
+  const t = data.totals;
+  return (
+    <>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7'>
+        <Total label='Mass messages' value={num(t.mass_messages)} />
+        <Total label='Delivered to' value={num(t.recipients)} />
+        <Total label='Read' value={t.recipients ? `${Math.round((t.read / t.recipients) * 100)}%` : '·'} />
+        <Total label='With a PPV' value={num(t.with_ppv)} />
+        <Total label='PPVs bought' value={num(t.ppv_sold)} />
+        <Total label='Net from sold' value={money(t.sold_net)} />
+        <Total label='Unsent' value={num(t.unsent)} />
+      </div>
+      {!data.rows.length ? <p className='rounded-lg border bg-card px-4 py-8 text-center text-sm text-muted-foreground'>No mass messages for this filter.</p> : (
+        <div className='rounded-lg border bg-card'>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead className='w-28'>Sent</TableHead>
+              {showPage && <TableHead>Page</TableHead>}
+              <TableHead>Sent by</TableHead><TableHead>Message</TableHead>
+              <TableHead className='text-right'>Fans</TableHead><TableHead className='text-right'>Read</TableHead>
+              <TableHead className='text-right'>PPV</TableHead><TableHead className='text-right'>Bought</TableHead><TableHead className='text-right'>Net</TableHead><TableHead>Unsent</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {data.rows.map(r => (
+                <TableRow key={`${r.account_id}:${r.mass_key}`} className={cn(r.unsent_at && 'opacity-60')}>
+                  <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{when(r.sent_at)}</TableCell>
+                  {showPage && <TableCell className='text-xs'>{r.page}</TableCell>}
+                  <TableCell className='whitespace-nowrap text-xs'>{r.chatter || <span className='text-amber-600'>Not attributed</span>}</TableCell>
+                  <TableCell className='max-w-md'><p className='line-clamp-2 text-sm'>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p></TableCell>
+                  <TableCell className='text-right text-sm tabular-nums'>{num(r.recipients)}</TableCell>
+                  <TableCell className='text-right text-xs tabular-nums'>{r.recipients ? `${Math.round((r.read / r.recipients) * 100)}%` : ''}</TableCell>
+                  <TableCell className='text-right text-sm tabular-nums'>{money(r.price)}</TableCell>
+                  <TableCell className='text-right text-sm tabular-nums'>{r.price > 0 ? num(r.ppv_sold) : ''}</TableCell>
+                  <TableCell className='text-right text-sm tabular-nums'>{r.sold_net ? money(r.sold_net) : ''}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs'>{r.unsent_at ? <Badge variant='outline' className='text-red-600'>unsent {when(r.unsent_at)}</Badge> : ''}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          {data.truncated && <p className='border-t px-4 py-2 text-xs text-muted-foreground'>Showing the latest 500. Narrow the dates to see older ones.</p>}
+        </div>
+      )}
+      <p className='text-xs text-muted-foreground'>A mass message counts once here, however many fans got it. Unsent marks come from the browser that unsent it, or from Fansly&apos;s mass message history (Messages, mass message history, Deleted) opened with the extension on.</p>
+    </>
   );
 }
 
@@ -253,7 +318,8 @@ function Conversation({ open, onClose }) {
                   {m.message ? <p className='whitespace-pre-wrap break-words'>{m.message}</p> : <p className='text-muted-foreground'>(media only)</p>}
                   <p className='mt-1 text-[11px] text-muted-foreground'>
                     {[when(m.sent_at), !m.from_fan && (m.chatter || (m.attribution === 'unattributed' ? 'not attributed' : null)), m.kind === 'mass' && 'mass',
-                      m.price != null && `PPV ${money(m.price)}${m.sold_at ? ` · sold ${money(m.sold_net)}` : ' · not sold'}`, m.tip_amount != null && `tip ${money(m.tip_amount)}`].filter(Boolean).join(' · ')}
+                      m.price != null && `PPV ${money(m.price)}${m.sold_at ? ` · sold${m.sold_net != null ? ` ${money(m.sold_net)}` : ''}` : ' · not sold'}`, m.tip_amount != null && `tip ${money(m.tip_amount)}`,
+                      m.unsent_at && `unsent ${when(m.unsent_at)}`].filter(Boolean).join(' · ')}
                   </p>
                 </div>
               ))}

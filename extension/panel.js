@@ -368,29 +368,34 @@
   function agency(d) {
     const a = d.agency;
     if (!a) return null;
-    const rows = a.pages || [];
+    const groups = a.platforms_detail || [];
+    const pageCount = groups.reduce((n, g) => n + g.pages.length, 0);
+    const pageLine = (p) => h('div', { style: 'padding:3px 0 3px 10px;border-left:2px solid #2c2c33;margin:3px 0' },
+      h('div', { class: 'row' }, h('span', null, p.page), p.this_page ? h('span', { class: 'small muted' }, 'this chat') : null, h('span', { style: 'margin-left:auto' }, money(p.spent_net))),
+      h('div', { class: 'small muted' }, [
+        `${p.purchases} purchase${p.purchases === 1 ? '' : 's'}`,
+        p.last_purchase_at ? `last ${date(p.last_purchase_at)}` : null,
+        p.platform === 'fansly' ? (p.tier ? `${p.tier}${p.subscribed_until ? ` until ${date(p.subscribed_until)}` : ''}` : (p.subscribed_until ? `subscribed until ${date(p.subscribed_until)}` : null)) : null,
+        p.platform === 'fansly' && p.last_message_at && !p.this_page ? `chatted ${ago(p.last_message_at)}` : null,
+      ].filter(Boolean).join(' · ')));
     const content = [
-      h('div', { class: 'row' }, h('span', { class: 'name', style: 'font-size:14px' }, money(a.total_net)), h('span', { class: 'muted small' }, `spent with the agency on ${rows.filter(p => p.page).length} page${rows.filter(p => p.page).length === 1 ? '' : 's'}`)),
-      ...rows.map(p => h('div', { class: 'note' },
+      h('div', { class: 'row' }, h('span', { class: 'name', style: 'font-size:14px' }, money(a.total_net)), h('span', { class: 'muted small' }, `with the agency, ${pageCount} page${pageCount === 1 ? '' : 's'}`)),
+      ...groups.map(g => h('div', { class: 'note' },
         h('div', { class: 'row' },
-          h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[p.platform] || p.platform),
-          h('b', null, p.page || (p.ref_name ? `@${p.ref_name}` : 'no purchases')),
-          p.this_page ? h('span', { class: 'small muted' }, 'this chat') : null,
-          h('span', { style: 'margin-left:auto;font-weight:600' }, money(p.spent_net))),
-        h('div', { class: 'small muted' }, [
-          `${p.purchases} purchase${p.purchases === 1 ? '' : 's'}`,
-          p.last_purchase_at ? `last ${date(p.last_purchase_at)}` : null,
-          p.platform === 'fansly' ? (p.tier ? `${p.tier}${p.subscribed_until ? ` until ${date(p.subscribed_until)}` : ''}` : (p.subscribed_until ? `subscribed until ${date(p.subscribed_until)}` : null)) : null,
-          p.platform === 'fansly' && p.last_message_at && !p.this_page ? `chatted ${ago(p.last_message_at)}` : null,
-        ].filter(Boolean).join(' · ')),
-        p.match === 'username' ? h('div', { class: 'small', style: 'color:#fcd34d' }, `Same username (@${p.ref_name}): probably him. `, h('button', { class: 'link', onclick: () => linkFan(p) }, 'yes, link')) : null,
-        p.match === 'linked' && p.link_id ? h('div', { class: 'small muted' }, `Linked to @${p.ref_name || p.ref_id} by hand. `, h('button', { class: 'link', onclick: () => unlinkFan(p.link_id) }, 'not him')) : null)),
-      h('div', { class: 'lbl' }, 'Same person on OnlyFans or Fanvue?'),
+          h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[g.platform] || g.platform),
+          g.account ? h('span', { class: 'small' }, `@${g.account.name || g.account.ref_id}`) : null,
+          h('b', { style: 'margin-left:auto' }, money(g.spent_net))),
+        g.account && g.account.match === 'username' ? h('div', { class: 'small', style: 'color:#fcd34d' }, 'Same username: probably him. ', h('button', { class: 'link', onclick: () => linkFan({ platform: g.platform, ref_id: g.account.ref_id, name: g.account.name }) }, 'yes, link')) : null,
+        g.account && g.account.match === 'linked' && g.account.link_id ? h('div', { class: 'small muted' }, 'Linked by hand. ', h('button', { class: 'link', onclick: () => unlinkFan(g.account.link_id) }, 'not him')) : null,
+        g.pages.length ? g.pages.map(pageLine) : h('div', { class: 'small muted' }, 'No purchases there yet.'))),
+      h('div', { class: 'lbl' }, 'His OnlyFans or Fanvue account (one per platform)'),
       h('input', { placeholder: 'Search his username there', value: st.linkQ, oninput: (e) => searchLinks(e.target.value) }),
       st.linkBusy ? h('div', { class: 'muted small' }, 'Searching…') : null,
-      st.linkResults ? (st.linkResults.length ? h('div', null, st.linkResults.map(x => h('div', { class: 'row', style: 'padding:3px 0' }, h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[x.platform]), h('span', null, x.name || x.ref_id), h('button', { class: 'link', style: 'margin-left:auto', onclick: () => linkFan(x) }, 'link')))) : h('div', { class: 'muted small' }, 'Nobody found.')) : null,
+      st.linkResults ? (st.linkResults.length ? h('div', null, st.linkResults.map(x => h('div', { class: 'row', style: 'padding:3px 0' },
+        h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[x.platform]), h('span', null, x.name || x.ref_id),
+        h('button', { class: 'link', style: 'margin-left:auto', onclick: () => linkFan(x) }, groups.some(g => g.platform === x.platform && g.account && g.account.match === 'linked') ? 'link instead' : 'link')))) : h('div', { class: 'muted small' }, 'Nobody found.')) : null,
     ];
-    return section('agency', 'Across the agency', content, rows.length > 1 ? h('span', { class: 'pill' }, String(rows.length)) : null);
+    return section('agency', 'Across the agency', content, groups.length > 1 ? h('span', { class: 'pill' }, `${groups.length} platforms`) : null);
   }
 
   function metrics(d) {
