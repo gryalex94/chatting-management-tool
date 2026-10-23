@@ -387,7 +387,7 @@
   }
 
   function suggestion(d) {
-    if (!d.page || !d.page.ai) return section('suggest', 'Suggested reply', h('div', { class: 'muted small' }, 'No AI profile is picked for this page yet. A manager picks it on the Fansly dashboard: Pages, Settings.'));
+    if (!d.page || !d.page.ai) return section('suggest', 'Suggested reply', h('div', { class: 'muted small' }, 'This page has no creator profile yet. A manager fills it in: AI chat, with Fansly picked and this page chosen, then Her profile.'));
     const sug = st.suggest;
     const content = [];
     if (st.suggestBusy) content.push(h('div', { class: 'muted small' }, 'Reading the chat and writing… (10–30 s)'));

@@ -499,6 +499,8 @@ async function applyEvents(ctx, events) {
       const o = old.get(f.fansly_account_id) || {};
       const merged = { ...o, ...Object.fromEntries(Object.entries(f).filter(([, v]) => v != null)) };
       if (o.raw && f.raw) merged.raw = { ...o.raw, ...f.raw };
+      // a not-null column one row of the write carries must be on every row (uniform() would fill it with null)
+      merged.history_complete = merged.history_complete === true;
       return merged;
     });
     await upsert('fansly_fans', rows, 'account_id,fansly_account_id');
