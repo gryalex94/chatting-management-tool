@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Chatting Manager</title>
+  <style>
+    :root { color-scheme: light dark; --fg: #1b1b1f; --muted: #6b6b76; --bg: #ffffff; --line: #e4e4ea; --ok: #1f9d55; --bad: #c62828; --accent: #2f6fed; }
+    @media (prefers-color-scheme: dark) { :root { --fg: #ececf1; --muted: #9a9aa6; --bg: #1c1c21; --line: #33333b; } }
+    body { margin: 0; width: 320px; font: 13px/1.45 -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--fg); background: var(--bg); }
+    .wrap { padding: 14px 16px 16px; }
+    h1 { font-size: 14px; margin: 0 0 10px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--fg); font: inherit; }
+    button { margin-top: 12px; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    button.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); font-weight: 500; }
+    .row { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+    .row:last-child { border-bottom: 0; }
+    .k { color: var(--muted); }
+    .ok { color: var(--ok); } .bad { color: var(--bad); }
+    .muted { color: var(--muted); font-size: 12px; }
+    details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+    .err { margin-top: 8px; color: var(--bad); font-size: 12px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Chatting Manager · Fansly</h1>
+    <div id="login" hidden>
+      <p class="muted">Sign in with your account from the tool. Everything you do in the Fansly chats is recorded under your name.</p>
+      <label>Email</label><input id="email" type="email" autocomplete="username">
+      <label>Password</label><input id="password" type="password" autocomplete="current-password">
+      <details><summary>Tool address</summary><label>API address</label><input id="apiUrl" type="url" placeholder="https://…"></details>
+      <button id="signin">Sign in</button>
+      <div id="loginError" class="err"></div>
+    </div>
+    <div id="status" hidden>
+      <div class="row"><span class="k">Signed in as</span><span id="who"></span></div>
+      <div class="row"><span class="k">Fansly account</span><span id="account"></span></div>
+      <div class="row"><span class="k">Recording</span><span id="recording"></span></div>
+      <div class="row"><span class="k">Waiting to send</span><span id="queue"></span></div>
+      <div class="row"><span class="k">Last sent</span><span id="lastSent"></span></div>
+      <div class="row"><span class="k">Sent in total</span><span id="total"></span></div>
+      <div id="statusError" class="err"></div>
+      <button id="flush" class="secondary">Send now</button>
+      <button id="signout" class="secondary">Sign out</button>
+      <p class="muted" id="version"></p>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

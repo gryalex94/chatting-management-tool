@@ -15,8 +15,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { yesterday } from '@/utils/dates';
 import { usePlatform } from '@/context/PlatformContext';
-import { FanslyNotice } from '@/components/shared/PlatformNotice';
 import FanvueDashboard from './FanvueDashboard';
+import FanslyDashboard from './FanslyDashboard';
 
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
@@ -404,6 +404,6 @@ function OnlyFansDashboard() {
 export default function DashboardPage() {
   const { platform } = usePlatform();
   if (platform === 'fanvue') return <FanvueDashboard />;
-  if (platform === 'fansly') return <FanslyNotice />;
+  if (platform === 'fansly') return <FanslyDashboard />;
   return <OnlyFansDashboard />;
 }

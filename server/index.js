@@ -20,8 +20,10 @@ app.use(express.json({ limit: '8mb' }));   // a saved practice conversation carr
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // CORS - allow frontend to talk to backend
+// The Fansly browser extension calls the API from its own origin (chrome-extension://…).
+const CLIENT_ORIGIN = process.env.CLIENT_URL || 'http://localhost:5173';
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: (origin, cb) => cb(null, !origin || origin === CLIENT_ORIGIN || origin.startsWith('chrome-extension://')),
   credentials: true,
 }));
 
@@ -66,7 +68,12 @@ app.use(['/api/auth/setup', '/api/auth/invite', '/api/auth/create-member', '/api
   limiter(15, 30, 'account requests'));
 app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/daily-check/review', '/api/review-tasks/rebuild'],
   limiter(15, 150, 'AI requests'));
-app.use('/api', limiter(15, 3000, 'requests'));
+// The Fansly extension posts a small batch every few seconds from every chatter's
+// browser, often from one office address: its own roomy limit, outside the general one.
+app.use(['/api/fansly/ingest', '/api/fansly/presence'], limiter(15, 20000, 'extension requests'));
+app.use('/api/fansly/login', limiter(15, 60, 'sign-in attempts'));
+const generalLimiter = limiter(15, 3000, 'requests');
+app.use('/api', (req, res, next) => (/^\/fansly\/(ingest|presence)/.test(req.path) ? next() : generalLimiter(req, res, next)));
 
 // ---------------------
 // AUTH MIDDLEWARE
@@ -140,6 +147,11 @@ app.use('/api/payroll', staffOnly, payrollRoutes);
 // Fanvue connection: the router itself is admins only.
 const fanvueRoutes = require('./src/routes/fanvue');
 app.use('/api/fanvue', staffOnly, fanvueRoutes);
+
+// Fansly: the browser extension's door (login, ingest, presence) and the dashboard.
+// Login is public; the route checks the session itself for everything else.
+const fanslyRoutes = require('./src/routes/fansly');
+app.use('/api/fansly', fanslyRoutes);
 
 // AI chat for the Fanvue AI creator: her profile, fan memory, the practice room
 // (managers only, inside the route; nothing is sent to Fanvue)

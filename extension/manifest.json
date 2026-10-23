@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Chatting Manager for Fansly",
+  "description": "Records the Fansly chats a chatter works in and sends them to the Chatting Management Tool. Reads only; never sends anything to Fansly.",
+  "version": "0.1.0",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": ["https://fansly.com/*"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Chatting Manager" },
+  "content_scripts": [
+    { "matches": ["https://fansly.com/*"], "js": ["page.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://fansly.com/*"], "js": ["bridge.js"], "run_at": "document_start" }
+  ]
+}
