@@ -24,8 +24,12 @@ async function render() {
   $('total').textContent = String(s.sentTotal || 0);
   $('ledger').textContent = ago(s.lastLedgerAt);
   $('ledgerHint').hidden = !!(s.lastLedgerAt && Date.now() - s.lastLedgerAt < 24 * 3600 * 1000);
-  const { panelOff } = await chrome.storage.local.get('panelOff');
-  $('panelOn').checked = !panelOff;
+  const { panelOff, panelMode } = await chrome.storage.local.get(['panelOff', 'panelMode']);
+  const mode = !hasSide && (panelMode || 'side') === 'side' ? 'page' : (panelMode || (panelOff ? 'off' : 'side'));
+  if (document.activeElement !== $('panelMode')) $('panelMode').value = mode;
+  $('openSide').hidden = mode !== 'side';
+  $('sideHint').hidden = hasSide;
+  $('panelMode').querySelector('option[value="side"]').disabled = !hasSide;
   $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '')
     || (s.assigned === false ? 'You are not on the roster for this page. Your messages are still recorded under your name, but the side panel stays closed. Ask a manager to add you on the Shifts page.' : '');
 }
@@ -41,7 +45,17 @@ $('signin').addEventListener('click', async () => {
 });
 $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('signin').click(); });
 $('signout').addEventListener('click', async () => { await send({ type: 'popup-logout' }); render(); });
-$('panelOn').addEventListener('change', (e) => chrome.storage.local.set({ panelOff: !e.target.checked }));
+// Chrome's side panel narrows the page instead of covering it (Chrome 116+; AdsPower's browser too when it is that new)
+const hasSide = !!(chrome.sidePanel && chrome.sidePanel.open);
+let windowId = null;
+chrome.windows.getCurrent((w) => { windowId = w && w.id; });
+$('panelMode').addEventListener('change', (e) => { chrome.storage.local.set({ panelMode: e.target.value, panelOff: e.target.value === 'off' }); render(); });
+$('openSide').addEventListener('click', () => {
+  // opened straight from the click (Chrome only allows it in answer to one)
+  if (!hasSide || windowId == null) return;
+  chrome.sidePanel.open({ windowId }).then(() => window.close()).catch((e) => { $('statusError').textContent = 'Could not open the side panel: ' + e.message; });
+});
+if (!hasSide) chrome.storage.local.get('panelMode', ({ panelMode }) => { if (!panelMode || panelMode === 'side') chrome.storage.local.set({ panelMode: 'page' }); });
 $('flush').addEventListener('click', async () => { await send({ type: 'popup-flush' }); render(); });
 
 render();

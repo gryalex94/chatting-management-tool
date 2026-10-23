@@ -9,7 +9,9 @@
  * chatter edits it and presses send.
  */
 (() => {
-  if (window.top !== window || document.getElementById('cmt-panel-host')) return;
+  // two homes: Chrome's own side panel next to the page (sidepanel.html, the default), or drawn inside the Fansly page
+  const SIDE = location.protocol === 'chrome-extension:' || window.__cmtSideTest === true;   // (the flag: a test page acting as the side panel)
+  if (!SIDE && (window.top !== window || document.getElementById('cmt-panel-host'))) return;
   const TAG = 'cmt-fansly';
   const MIN_W = 300, MAX_W = 760, STRIP_W = 30, REFRESH_MS = 20000;
   const STAGE_LABEL = { opener: 'Opener', warmup: 'Warm-up', sexting: 'Sexting', ppv_pitch: 'PPV pitch', after_no: 'After a no', reengage: 'Re-engage', custom: 'Custom request', aftercare: 'Aftercare', other: 'Other' };
@@ -99,6 +101,9 @@
     .pill { display: inline-block; font-size: 10px; border: 1px solid #3a3a44; border-radius: 999px; padding: 0 6px; margin-left: 4px; color: #b9b9c2; }
   `;
 
+  // in Chrome's side panel the panel fills it; Chrome sets the width and narrows the page
+  const SIDE_CSS = `.wrap { position: static !important; width: 100% !important; height: 100vh; } .panel { border-left: none; box-shadow: none; } .grip { display: none; }`;
+
   // ---------- tiny DOM helper: never innerHTML with data ----------
   function h(tag, attrs, ...kids) {
     const el = document.createElement(tag);
@@ -126,6 +131,7 @@
 
   // ---------- the page layout: make room for the panel ----------
   function applyLayout() {
+    if (SIDE) return;
     const w = st.signedIn ? (st.collapsed ? STRIP_W : st.width) : STRIP_W;
     pushStyle.textContent = st.push && !st.collapsed && st.signedIn
       ? `html { margin-right: ${w}px !important; } body { width: auto !important; }`
@@ -141,6 +147,12 @@
     return boxes.sort((a, b) => b.getBoundingClientRect().bottom - a.getBoundingClientRect().bottom)[0] || null;
   }
   async function insertText(text) {
+    if (SIDE) {
+      // the Fansly tab types it (bridge.js); the side panel can't reach the page itself
+      const r = st.tabId != null ? await new Promise((res) => { try { chrome.tabs.sendMessage(st.tabId, { type: 'cmt-insert', text }, (x) => { void chrome.runtime.lastError; res(x || null); }); } catch { res(null); } }) : null;
+      if (r && r.ok) return 'box';
+      try { await navigator.clipboard.writeText(text); return 'clipboard'; } catch { return null; }
+    }
     const box = messageBox();
     if (box) {
       box.focus();
@@ -208,20 +220,53 @@
   }
 
   // ---------- following the open chat ----------
-  function groupFromUrl() { const m = location.pathname.match(/^\/messages\/(\d{5,25})/); return m ? m[1] : null; }
+  // the page whose chat is followed: this page, or (side panel) the active Fansly tab of this window
+  const currentPath = () => (SIDE ? st.tabPath || '' : location.pathname);
+  function groupFromUrl() { const m = currentPath().match(/^\/messages\/(\d{5,25})/); return m ? m[1] : null; }
   function setGroup(g) {
     if (g === st.groupId) return;
     dropSuggestion();
     st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null; st.linkQ = ''; st.linkResults = null;
     loadFan(false);
   }
-  let lastHref = location.href;
-  setInterval(() => { if (location.href !== lastHref) { lastHref = location.href; const g = groupFromUrl(); if (g) setGroup(g); else if (!/^\/messages/.test(location.pathname)) setGroup(null); } }, 700);
+  let lastHref = SIDE ? '' : location.href;
+  const onHref = (href) => {
+    if (href === lastHref) return;
+    lastHref = href;
+    const g = groupFromUrl();
+    if (g) setGroup(g); else if (!/^\/messages/.test(currentPath())) setGroup(null);
+  };
+  if (SIDE) {
+    const follow = () => {
+      try {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+          void chrome.runtime.lastError;
+          const t = tabs && tabs[0];
+          const fansly = t && /^https:\/\/fansly\.com\//.test(t.url || '');
+          const wasOn = st.onFansly;
+          st.onFansly = !!fansly; st.tabId = fansly ? t.id : null;
+          st.tabPath = fansly ? new URL(t.url).pathname : '';
+          if (wasOn !== st.onFansly) render();
+          onHref(fansly ? t.url : '');
+        });
+      } catch { /* the panel is closing */ }
+    };
+    follow(); setInterval(follow, 700);
+    // what the Fansly tab's page script copies reaches the side panel too (bridge.js → runtime message)
+    chrome.runtime.onMessage.addListener((msg, sender) => {
+      if (msg && msg.type === 'fansly-event' && sender.tab && sender.tab.id === st.tabId) onPageEvent(msg.kind, msg.data);
+      return false;
+    });
+  } else {
+    setInterval(() => onHref(location.href), 700);
+    window.addEventListener('message', (ev) => {
+      if (ev.source !== window || !ev.data || ev.data[TAG] !== 1) return;
+      onPageEvent(ev.data.kind, ev.data.data);
+    });
+  }
   // the page script's copies: a chat loading, a new message in it
   let bumpTimer = null;
-  window.addEventListener('message', (ev) => {
-    if (ev.source !== window || !ev.data || ev.data[TAG] !== 1) return;
-    const { kind, data } = ev.data;
+  function onPageEvent(kind, data) {
     if (kind === 'messages' && data && data.groupId && !groupFromUrl()) setGroup(String(data.groupId));
     const g = data && (data.groupId || (data.message && data.message.groupId));
     if (kind === 'sent' && g && st.suggest && st.suggest.inserted && String(g) === st.suggest.group) {
@@ -233,7 +278,7 @@
       // our server has it a few seconds later (the worker batches every 4 s)
       clearTimeout(bumpTimer); bumpTimer = setTimeout(() => loadFan(true), 7000);
     }
-  });
+  }
 
   async function refreshStatus() {
     const s = await send({ type: 'panel-status' });
@@ -266,17 +311,6 @@
   }
 
   // ---------- one fan across the agency: link him to his OnlyFans / Fanvue account ----------
-  let linkTimer = null;
-  function searchLinks(q) {
-    st.linkQ = q; clearTimeout(linkTimer);
-    if (q.trim().length < 2) { st.linkResults = null; renderSoon(); return; }
-    linkTimer = setTimeout(async () => {
-      st.linkBusy = true; renderSoon();
-      try { const r = await call('GET', `/api/fansly/panel/link-search?account=${encodeURIComponent(st.accountId)}&q=${encodeURIComponent(q.trim())}`); if (st.linkQ === q) st.linkResults = r.results || []; }
-      catch (e) { flash(e.message); }
-      finally { st.linkBusy = false; render(); }
-    }, 400);
-  }
   async function linkFan(x) {
     try { await call('POST', '/api/fansly/panel/links', { account: st.accountId, fan: st.fanId, platform: x.platform, ref_id: x.ref_id, ref_name: x.name || x.ref_name }); st.linkQ = ''; st.linkResults = null; flash('Linked: his spending there now counts here'); await loadFan(true); }
     catch (e) { flash(e.message); }
@@ -388,12 +422,6 @@
         g.account && g.account.match === 'username' ? h('div', { class: 'small', style: 'color:#fcd34d' }, 'Same username: probably him. ', h('button', { class: 'link', onclick: () => linkFan({ platform: g.platform, ref_id: g.account.ref_id, name: g.account.name }) }, 'yes, link')) : null,
         g.account && g.account.match === 'linked' && g.account.link_id ? h('div', { class: 'small muted' }, 'Linked by hand. ', h('button', { class: 'link', onclick: () => unlinkFan(g.account.link_id) }, 'not him')) : null,
         g.pages.length ? g.pages.map(pageLine) : h('div', { class: 'small muted' }, 'No purchases there yet.'))),
-      h('div', { class: 'lbl' }, 'His OnlyFans or Fanvue account (one per platform)'),
-      h('input', { placeholder: 'Search his username there', value: st.linkQ, oninput: (e) => searchLinks(e.target.value) }),
-      st.linkBusy ? h('div', { class: 'muted small' }, 'Searching…') : null,
-      st.linkResults ? (st.linkResults.length ? h('div', null, st.linkResults.map(x => h('div', { class: 'row', style: 'padding:3px 0' },
-        h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[x.platform]), h('span', null, x.name || x.ref_id),
-        h('button', { class: 'link', style: 'margin-left:auto', onclick: () => linkFan(x) }, groups.some(g => g.platform === x.platform && g.account && g.account.match === 'linked') ? 'link instead' : 'link')))) : h('div', { class: 'muted small' }, 'Nobody found.')) : null,
     ];
     return section('agency', 'Across the agency', content, groups.length > 1 ? h('span', { class: 'pill' }, `${groups.length} platforms`) : null);
   }
@@ -484,6 +512,7 @@
 
   function body() {
     if (!st.signedIn) return h('div', { class: 'muted', style: 'padding:12px' }, 'Sign in to the extension (its icon in the toolbar) with your account from the tool. The panel and the recording start after that.');
+    if (SIDE && !st.onFansly) return h('div', { class: 'muted', style: 'padding:12px' }, 'Open fansly.com/messages in this window. The panel follows the chat that is open there.');
     if (!st.accountId) return h('div', { class: 'muted', style: 'padding:12px' }, 'Open the Messages page once so the extension learns which Fansly page this is.');
     const d = st.data;
     const parts = [];
@@ -515,8 +544,8 @@
     const oldBody = root.querySelector('.body');
     const scrollTop = oldBody ? oldBody.scrollTop : 0;
     root.replaceChildren();
-    root.append(h('style', null, CSS));
-    if (st.collapsed) {
+    root.append(h('style', null, CSS + (SIDE ? SIDE_CSS : '')));
+    if (st.collapsed && !SIDE) {
       root.append(h('div', { class: 'wrap' }, h('div', { class: 'strip', title: 'Open the panel', onclick: () => { st.collapsed = false; save(); applyLayout(); render(); } }, h('span', null, 'Chatting Manager'))));
       return;
     }
@@ -525,13 +554,13 @@
     const panel = h('div', { class: 'panel' },
       h('header', null,
         h('span', { class: 't' }, 'Chatting Manager', st.accountUsername ? h('span', { class: 'muted' }, ` · @${st.accountUsername}`) : null),
-        h('button', { class: 'icon', title: st.push ? 'The page makes room for the panel. Click to lay the panel over the page instead.' : 'The panel lies over the page. Click to make room for it.', onclick: () => { st.push = !st.push; save(); applyLayout(); render(); } }, st.push ? '⇤' : '⇥'),
+        SIDE ? null : h('button', { class: 'icon', title: st.push ? 'The page makes room for the panel. Click to lay the panel over the page instead.' : 'The panel lies over the page. Click to make room for it.', onclick: () => { st.push = !st.push; save(); applyLayout(); render(); } }, st.push ? '⇤' : '⇥'),
         st.groupId && st.signedIn ? h('button', { class: 'icon', title: 'Reload', onclick: () => loadFan(false) }, '↻') : null,
-        h('button', { class: 'icon', title: 'Collapse', onclick: () => { st.collapsed = true; save(); applyLayout(); render(); } }, '›')),
+        SIDE ? null : h('button', { class: 'icon', title: 'Collapse', onclick: () => { st.collapsed = true; save(); applyLayout(); render(); } }, '›')),
       st.signedIn && st.accountId ? shiftStrip() : null,
       body(),
       st.toast ? h('div', { class: 'toast' }, st.toast) : null);
-    root.append(h('div', { class: 'wrap', style: `width:${st.width}px` }, grip, panel));
+    root.append(h('div', { class: 'wrap', style: SIDE ? '' : `width:${st.width}px` }, grip, panel));
     const newBody = root.querySelector('.body');
     if (newBody && scrollTop) newBody.scrollTop = scrollTop;      // a refresh keeps the chatter's place
   }
@@ -551,7 +580,7 @@
   function restore() {
     return new Promise((resolve) => {
       try {
-        chrome.storage.local.get(['panelPrefs', 'panelOff'], (s) => {
+        chrome.storage.local.get(['panelPrefs', 'panelOff', 'panelMode'], (s) => {
           const p = s.panelPrefs || {};
           if (p.width) st.width = Math.max(MIN_W, Math.min(MAX_W, p.width));
           else st.width = Math.max(MIN_W, Math.min(MAX_W, Math.round(innerWidth / 3)));
@@ -559,7 +588,9 @@
           if (p.push != null) st.push = !!p.push;
           if (p.open) st.open = { ...st.open, ...p.open };
           if (Array.isArray(p.openStages)) st.openStages = new Set(p.openStages);
-          resolve(!!s.panelOff);
+          // where the panel shows: 'side' (Chrome's side panel, the default), 'page' (inside Fansly), 'off'
+          const mode = s.panelMode || (s.panelOff ? 'off' : 'side');
+          resolve(SIDE ? false : mode !== 'page');
         });
       } catch { resolve(false); }
     });
@@ -567,7 +598,7 @@
 
   // ---------- start ----------
   function mount() {
-    if (!host.isConnected) document.documentElement.append(host);
+    if (!host.isConnected) (SIDE ? document.body : document.documentElement).append(host);
     applyLayout();
     render();
   }
@@ -577,16 +608,16 @@
     const off = await restore();
     const start = () => {
       if (!off) mount();
-      st.groupId = groupFromUrl();
+      if (!SIDE) st.groupId = groupFromUrl();
       refreshStatus();
       setInterval(refreshStatus, 5000);
       setInterval(() => { if (!document.hidden && host.isConnected) loadFan(true); }, REFRESH_MS);
       setInterval(() => { if (host.isConnected && st.data) render(); }, 60000);    // the timers on the shift strip
     };
     if (document.body) start(); else document.addEventListener('DOMContentLoaded', start, { once: true });
-    // the popup's "Show the side panel" switch
+    // the popup's choice of where the panel shows: inside the page only in 'page' mode
     chrome.storage.onChanged.addListener((ch) => {
-      if (ch.panelOff) { if (ch.panelOff.newValue) unmount(); else { mount(); loadFan(false); } }
+      if (ch.panelMode && !SIDE) { if (ch.panelMode.newValue === 'page') { mount(); loadFan(false); } else unmount(); }
       if (ch.session) refreshStatus();
     });
   })();

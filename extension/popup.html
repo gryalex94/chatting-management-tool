@@ -42,7 +42,14 @@
       <div class="row"><span class="k">Sent in total</span><span id="total"></span></div>
       <div class="row"><span class="k">Sales ledger read</span><span id="ledger"></span></div>
       <p class="muted" id="ledgerHint" hidden>Open Fansly's Earnings page once a day and scroll its list: that is how the sales reach the tool.</p>
-      <div class="row"><span class="k">Side panel on the chat</span><label style="margin:0;color:var(--fg)"><input id="panelOn" type="checkbox" style="width:auto;margin-right:4px">show</label></div>
+      <label>Where the panel shows</label>
+      <select id="panelMode" style="width:100%;padding:7px 9px;border:1px solid var(--line);border-radius:6px;background:transparent;color:var(--fg);font:inherit">
+        <option value="side">Next to the page (Chrome's side panel)</option>
+        <option value="page">Inside the Fansly page</option>
+        <option value="off">Hidden</option>
+      </select>
+      <button id="openSide">Open the panel next to the page</button>
+      <p class="muted" id="sideHint" hidden>This browser has no side panel (it needs Chrome 116 or newer), so the panel shows inside the page.</p>
       <div id="statusError" class="err"></div>
       <button id="flush" class="secondary">Send now</button>
       <button id="signout" class="secondary">Sign out</button>

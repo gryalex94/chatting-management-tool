@@ -155,3 +155,7 @@ The panel only reads from our server and writes our notes; it never sends anythi
 - **Unsent.** The extension notes an unsend (POST /message/delete) and Fansly's deletedAt on messages; a mass message's unsend marks every copy (they share its correlationId). Fansly's mass message history (and its Deleted tab) is mirrored into fansly_broadcasts.
 - **Mass messages apart.** The Messages page lists chat messages only; a "Mass messages" button shows each mass message once (fans reached, read share, PPV, bought, net, unsent). Older copies without Fansly's id are grouped by text and price sent within 30 minutes of each other. An "Unsent" filter works in both views.
 - **One account per platform.** A fan is linked to at most one OnlyFans and one Fanvue account; a new link replaces the old. The panel shows one block per platform with its pages underneath.
+
+## 24 Oct, evening: the panel next to the page (extension 0.5.0)
+- The panel now opens in Chrome's own side panel (popup: "Open the panel next to the page"), so Chrome narrows the Fansly page instead of the panel covering it. It follows the active Fansly tab's chat; a clicked script or suggestion is typed into that tab's message box by bridge.js. Needs Chrome 116+; older browsers fall back to the panel inside the page (popup: "Where the panel shows").
+- The search for linking a fan to his OnlyFans / Fanvue account by hand is gone from the panel; a same-username match is still offered.
