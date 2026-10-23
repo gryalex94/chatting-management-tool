@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -145,6 +145,27 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   check('a reason is a reason', !!audit.GIVES_REASON && audit.GIVES_REASON.test('Honestly? It\'s my way of making something pretty') && !audit.GIVES_REASON.test('My sister always steals my brushes though, drives me nuts'));
   check('a compliment received is seen', !!audit.RECEIVES && audit.RECEIVES.test('aww you\'re sweet') && audit.RECEIVES.test('stop, you\'ll make me blush') && !audit.RECEIVES.test('Now I\'m hungry... You\'re making me jealous over here'));
   check('"when I\'m feeling off" is a reason, not her mood', !audit.MOOD_TALK.test('It\'s my way of making something pretty when I\'m feeling off') && audit.MOOD_TALK.test('oh just feeling a little slow today'));
+
+  // round 4 (AI_CHAT_FIX_PLAN_23_OCT.md), Group F: the Bob chat
+  const Sl = req('./server/src/ai/chat/selling');
+  const Sf = req('./server/src/ai/chat/safety');
+  check('F1 "just talk" is a no, "show me" a yes', audit.TALK_ONLY.test("I'd be glad to talk to you a bit, I came here just to talk to you") && !audit.TALK_ONLY.test('yes show me') && audit.HANDS_OVER.test('surprise me'));
+  check('F1 his no ends the path, a yes gets the offer, unclear waits', Sl.firstSaleStage({ herHere: 14, asked: true, declined: true }).stage === 'declined' && Sl.firstSaleStage({ herHere: 14, asked: true, answer: 'wants' }).stage === 'offer' && Sl.firstSaleStage({ herHere: 14, asked: true, answer: 'unclear' }).stage === 'asked');
+  check('F2 the ask waits for him to flirt back, then for a moment that fits', Sl.firstSaleStage({ herHere: 12, warm: false }).stage === 'flirt' && Sl.firstSaleStage({ herHere: 19, herTurns: 19, warm: false }).stage === 'no_ask'
+    && Sl.firstSaleStage({ herHere: 12, warm: true, fits: false, unfit: 'he just asked you something' }).waits && Sl.firstSaleStage({ herHere: 12, warm: true, fits: false, waited: 6 }).stage === 'no_ask' && Sl.firstSaleStage({ herHere: 12, warm: true }).stage === 'ask');
+  let bob = await A.reply('org', 'creator', { madeUp: { name: 'Bob', type: 'new_sub' }, test: [{ from: 'fan', text: 'Hey there' }], selling: false, planOnly: true });
+  const askedS = { ...bob.used.session, first_sale: { ...(bob.used.session.first_sale || {}), asked: true, warm: true } };
+  bob = await A.reply('org', 'creator', { madeUp: { name: 'Bob', type: 'new_sub' }, test: [{ from: 'fan', text: 'Hey there' }, { from: 'her', text: 'What would you want to see of me then?' }, { from: 'fan', text: "I'd be glad to talk to you a bit, I came here just to talk to you" }], selling: false, planOnly: true, session: askedS });
+  check('F1 run 11 reply 15: no offer after "I came here just to talk to you"', bob.used.stage?.stage === 'declined' && !['first_offer', 'offer'].includes(bob.used.plan.goal), { stage: bob.used.stage, goal: bob.used.plan.goal });
+  const voice = (extra) => Sf.voiceProblems(["Bob, love that name. You're making me feel all kinds of special already."], { recent: ['a', 'b', 'c'], his: 'Got ya, my pleasure!', closeness: 'new', ...extra });
+  check('F3 a feeling he did not cause is flagged, an earned one passes', voice({}).some(x => /didn't cause/.test(x)) && !Sf.voiceProblems(["aww you're making me blush"], { recent: ['a', 'b', 'c'], closeness: 'new', earned: true }).some(x => /didn't cause/.test(x)));
+  check('F4 his name is found, a late name comment and a bare "you" are caught', audit.nameIn('My name is Bob, and you?') === 'Bob' && audit.nameIn("I'm good, you?") === '' && audit.LATE_NAME.test('Bob, love that name.') && !audit.DOOR.test("Bob, love that name. You're making me feel all kinds of special already."));
+  const closing = Plan.planReply({ level: { his: 1, max: 1, mood: 'chatty' }, latest: ['Got ya, my pleasure!'], profile, herReplies: 3, reading: { ...reading, answers: 'closing' }, rand: () => 0 });
+  const named = Plan.planReply({ level: { his: 0, max: 1, mood: 'chatty' }, latest: ['My name is Bob, and you?'], profile, herReplies: 2, reading: { ...reading, doing: 'sharing', asked: ['and you?'] }, nameGiven: 'Bob', rand: () => 0 });
+  check('F4 a pleasantry makes her lead; his name is said back', closing.closing && closing.beats.some(b => /^lead:/.test(b)) && named.beats.some(b => /nice to meet you, Bob/.test(b)), { closing: closing.beats, named: named.beats });
+  const over = makePlan('What do you mean?', { herLast: "Bob, love that name. You're making me feel all kinds of special already.", reading: { ...reading, doing: 'asking', asked: ['What do you mean?'] } });
+  check('F5 repairing an overclaim takes it down', over.clarify_kind === 'overclaim' && /down a notch/.test(over.answer_first), { kind: over.clarify_kind, first: over.answer_first });
+  check('F5 no pet name in a repair, none with a new fan who has not flirted back', P.tidyMessages(["I just meant you're making me blush, babe"], { emojis: 'none', noPet: true })[0] === "I just meant you're making me blush" && P.tidyMessages(['haha love it babe'], { emojis: 'none', recent: ['a', 'b', 'c', 'd'], closeness: 'new', warm: false })[0] === 'haha love it');
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);

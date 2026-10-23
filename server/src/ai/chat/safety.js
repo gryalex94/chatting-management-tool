@@ -232,7 +232,9 @@ function questionsIn(list, his = '') {
 // warmth declared ("I care about you so much") is taxed under an AI label; warmth shown by understanding isn't (research round 2)
 const DECLARED = /\b(?:i\s+(?:really\s+|truly\s+|so\s+)?(?:care\s+(?:about|for)|miss|adore|love|need)\s+(?:you|u)\b|you\s+mean\s+(?:so\s+much|a\s+lot|the\s+world|everything)\s+to\s+me|i\s+feel\s+(?:the\s+same|it\s+too|so\s+close\s+to\s+you)|(?:i'?m|i\s+am)\s+(?:so\s+)?(?:lucky|grateful)\s+to\s+have\s+you|(?:thinking|think)\s+(?:about|of)\s+you\s+(?:all|every|constantly|non)|my\s+favou?rite\s+(?:person|fan|guy|man)|can'?t\s+stop\s+thinking\s+about\s+you)\b/i;
 const COMPLIMENT = /\b(?:you'?re|you\s+are|ur)\s+(?:so\s+|really\s+|such\s+a\s+|honestly\s+|actually\s+)?(?:sweet|cute|hot|handsome|amazing|gorgeous|special|the\s+best|adorable|a\s+catch|funny|smart|kind|lovely|charming|a\s+sweetheart)\b|\bi\s+(?:like|love)\s+(?:your|ur)\s+(?:smile|eyes|voice|style|energy|vibe)\b/i;
-function voiceProblems(list, { recent = [], his = '', noQuestion = '', length = null, closeness = 'new', lately = null } = {}) {
+// a feeling she says he caused ("you're making me blush", "you made my day"): only when his message gave a reason (round 4, F3)
+const FELT_FROM_HIM = /\b(?:(?:you(?:'re|\s+are)?|you'?ve)\s+(?:already\s+)?(?:making|got(?:ten)?|made)\s+me\s+(?:feel|blush|smile|melt|giggle|blushing|smiling|giggling)|you\s+make\s+me\s+(?:feel|blush|smile|melt|giggle)|(?:making|made)\s+my\s+(?:day|night|evening|week)|feel(?:ing)?\s+(?:all\s+kinds\s+of\s+|so\s+|really\s+|extra\s+)?special|butterflies|(?:i'?m|im)\s+(?:blushing|melting))\b/i;
+function voiceProblems(list, { recent = [], his = '', noQuestion = '', length = null, closeness = 'new', lately = null, earned = false } = {}) {
   const all = straight(list.join('\n'));
   const out = [];
   // the warmth dial (research round 2): a declared feeling at most once in ten replies, only once they are close; a compliment at most once in ten
@@ -241,6 +243,8 @@ function voiceProblems(list, { recent = [], his = '', noQuestion = '', length = 
     if (['new', 'friendly'].includes(closeness)) out.push('It says how she feels about him ("I care about you", "I miss you") too early: show warmth by understanding what he said, don\'t declare it.');
     else if (window.slice(-10).some(r => DECLARED.test(r))) out.push('It says how she feels about him again; she said so recently. This time show it by understanding what he said.');
   }
+  if (FELT_FROM_HIM.test(all) && ['new', 'friendly'].includes(closeness) && !earned) out.push('It says he makes you feel something (special, blushing, your day made) that his message didn\'t cause: react to what he actually said.');
+  else if (FELT_FROM_HIM.test(all) && window.slice(-10).some(r => FELT_FROM_HIM.test(r))) out.push('It says again that he makes you feel something; you said so recently. React to what he actually said instead.');
   if (COMPLIMENT.test(all) && window.slice(-10).some(r => COMPLIMENT.test(r))) out.push('It compliments him again; she did that recently. React to what he said instead.');
   else if (COMPLIMENT.test(all) && closeness === 'new' && window.length < 3) out.push('It compliments him in her first replies to a man she barely knows ("you\'re cute"): too early; be warm and curious instead.');
   if (list.some(m => wordsOf(m).length > 15)) out.push('One message is over 15 words: cut it, or split it into two short ones.');
@@ -280,4 +284,4 @@ function personaProblems(text) {
     : [];
 }
 
-module.exports = { screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, STORY_MOVE, personaProblems, replyLevel, SEXUAL_INTENT, MAX_MESSAGES };
+module.exports = { FELT_FROM_HIM, DECLARED, COMPLIMENT, screenFan, checkReply, voiceProblems, questionsIn, isEcho, sentences, COMMENTS_EAGER, GUESSES_TIME, SAYS_TIME, PROMISES_SHOW, STORY_MOVE, personaProblems, replyLevel, SEXUAL_INTENT, MAX_MESSAGES };

@@ -20,6 +20,7 @@ const fv = require('../integrations/fanvue');
 const V = require('../ai/chat/vision');
 const Sv = require('../ai/chat/services');
 const { screenFan, checkReply, personaProblems, replyLevel, questionsIn, isEcho, sentences, STORY_MOVE, SEXUAL_INTENT } = require('../ai/chat/safety');
+const Sf = require('../ai/chat/safety');
 const P = require('../ai/chat/prompts');
 const { reviewFan, reviewReply, reviewOffer, questionCheck, coachCheck, draftRulesFrom, MODEL: CHECK_MODEL } = require('../ai/chat/review');
 const { RULES } = require('../ai/chat/rules');
@@ -1084,7 +1085,38 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // he hands her the lead: that is the sexy vibe's answer, so a new subscriber's direct ask may come now
   const invited = INVITES_LEAD.test(saidNow);
   const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0, invited && level.his >= 2 ? 3 : 0);
-  let stage = session.aim === 'first_sale' ? Sl.firstSaleStage({ herHere: progress, direct, hisLevel: reading?.odd ? Math.min(level.his, 1) : level.his, since: sinceHot, asked: !!session.first_sale?.asked, offered: attempts.here > 0 }) : null;
+  // round 4, F1: his answer to the direct ask is read, not assumed; "I just want to talk", a no or "I'm broke" ends the path for
+  // this conversation (A1: warm, no pushing); a second unclear answer counts as a no; he lifts it by asking or getting sexual himself
+  let askAnswer = '';
+  if (session.aim === 'first_sale' && !taste.bought && !attempts.here && latest.length) {
+    const fsNow = { ...(session.first_sale || {}) };
+    const declineRead = (reading?.readings || []).some(r => r.sure >= 0.5 && DECLINE_READ.test(r.what || '')) || reading?.wishes?.buy === '-';
+    const declines = !asksNow && (TALK_ONLY.test(saidNow) || S.BROKE.test(saidNow) || declineRead);
+    const wants = asksNow || !!askedHere?.full?.length || level.his >= 2 || HANDS_OVER.test(saidNow);
+    if (fsNow.declined && (asksNow || level.his >= 2)) fsNow.declined = false;
+    if (fsNow.asked) askAnswer = declines ? 'decline' : wants ? 'wants' : 'unclear';
+    else if (declines) askAnswer = 'decline';
+    if (askAnswer === 'decline') fsNow.declined = true;
+    if (askAnswer === 'unclear') { fsNow.unclear = (fsNow.unclear || 0) + 1; if (fsNow.unclear >= 2) fsNow.declined = true; }
+    // F2: he went along with the flirting at least once (flirty or more, or the reader saw him flirting)
+    if (level.his >= 1 || ['flirting', 'sexting'].includes(reading?.doing)) fsNow.warm = true;
+    session = { ...session, first_sale: fsNow };
+  }
+  // F2: the direct ask waits for a moment that fits: not while he cools, not right after he asked her something, not in a repair
+  const cooling = !!level.pulled_back || ['annoyed', 'sad'].includes(level.mood) || (session.gauges?.mood ?? 60) < 45 || (session.gauges?.doubt ?? 0) >= 50
+    || (reading?.readings || []).some(r => r.sure >= 0.5 && COOLING_READ.test(r.what || '')) || reading?.wishes?.buy === '-' || reading?.wishes?.talk === '-';
+  const unfit = cooling ? 'he is cooling off right now' : (reading?.asked?.length || Plan.DIRECT_Q.test(saidNow)) ? 'he just asked you something: answer him first'
+    : (Plan.CONFUSED.test(saidNow.trim()) || Plan.PUSHBACK.test(saidNow.trim())) ? 'he is unsure what you meant: clear that up first' : '';
+  const fsCur = session.first_sale || {};
+  let stage = session.aim === 'first_sale' ? Sl.firstSaleStage({
+    herHere: progress, direct, hisLevel: reading?.odd ? Math.min(level.his, 1) : level.his, since: sinceHot, asked: !!fsCur.asked, offered: attempts.here > 0,
+    declined: !!fsCur.declined, answer: askAnswer, warm: !!fsCur.warm, fits: !unfit, unfit, waited: fsCur.waited || 0, noAsk: !!fsCur.no_ask, herTurns,
+  }) : null;
+  if (stage && session.aim === 'first_sale' && !whatIf) {
+    if (stage.waits) session = { ...session, first_sale: { ...session.first_sale, waited: (session.first_sale?.waited || 0) + 1 } };
+    if (stage.stage === 'no_ask') session = { ...session, first_sale: { ...session.first_sale, no_ask: true } };
+  }
+  if (askAnswer && stage) stage = { ...stage, why: `${stage.why}; his answer read as: ${askAnswer === 'decline' ? 'a no or just talk' : askAnswer === 'wants' ? 'a yes or what he wants' : 'not clear yet'}` };
   // selling is off (practice): the vibe, flirt and sexy stages still pace her, but the direct ask and the offer are skipped
   let skippedStage = '';
   if (stage && !sell && ['ask', 'offer'].includes(stage.stage)) { skippedStage = `selling is off: the first-sale ${stage.stage === 'ask' ? 'direct ask' : 'offer'} is skipped; she follows him`; stage = null; }
@@ -1176,7 +1208,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // the meters (engine v2, step 3): moved by the numbers and the reading, kept in the session
   const gauged = G.updateGauges(session.gauges || G.startGauges({ profile: first }), {
     level, reading, profile: first, session, dry, asks: asksNow, tip: latestTip > 0, nWords, question: /\?/.test(saidNow), media: latestSeen.length > 0, cools,
-    suspicious: first.suspicious, broke: S.BROKE.test(saidNow), objection: Sl.priceObjection(saidNow), bought: waiting?.p?.status === 'bought' && !waiting.herAfter,
+    suspicious: first.suspicious, declined: askAnswer === 'decline', broke: S.BROKE.test(saidNow), objection: Sl.priceObjection(saidNow), bought: waiting?.p?.status === 'bought' && !waiting.herAfter,
     notBought: waiting?.p?.status === 'not_bought' && !waiting.herAfter, followUp: !!followUp, leaving: Plan.GOODBYE.test(saidNow),
   });
   session = { ...session, gauges: gauged.gauges };
@@ -1186,9 +1218,15 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
     content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
-    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited,
+    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited, nameGiven: nameIn(saidNow),
     subDays: fanUuid ? (fan.registered_at ? Math.floor((now.getTime() - Date.parse(fan.registered_at)) / 86400_000) : null) : (type?.id === 'new_sub' ? 0 : null),
   });
+  // round 4, F3: a feeling she says he caused is only earned by a compliment or a flirt of his in this message
+  voice.earned = !!replyPlan.complimented || (level.his >= 1 && reading?.doing === 'flirting');
+  // F5 / G1: his no this turn (no pet name, no name of his), her first reply after he passed on a PPV, and whether he has flirted back yet
+  replyPlan.declined_now = askAnswer === 'decline';
+  replyPlan.after_no = waiting?.p?.status === 'not_bought' && !waiting.herAfter;
+  voice.warm = !!session.first_sale?.warm || level.his >= 1 || /\b(?:babe|baby|beautiful|gorgeous|sexy|cutie|honey|sweetheart|darling|hottie)\b/i.test(hisHere);
   // how long she'd wait before her first message (B7): shown, used by sending later
   const firstWait = Sc.sendDelay({ tier: profile.tier, aim: session.aim });
   replyPlan.first_wait = firstWait;
@@ -1760,7 +1798,18 @@ const echoQ = (s, his) => /\?/.test(s) && isEcho(s.replace(/\?[\s\S]*$/, ''), hi
 const realQuestions = (list, his = '') => list.flatMap(m => sentences(String(m))).filter(s => /\?/.test(s) && !echoQ(s, his));
 const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))).filter(s => !echoQ(s, his)).join(' ');
 // A door: something he can pick up (a question, a word to him, a guess about him, an invitation).
-const DOOR = /\?|\b(?:you|your|yours|u|ya)\b|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|don'?t you|aren'?t you)\b/i;
+// round 4, F4: a door is something he can pick up (a question, a guess about him, a dare, an invitation); a bare "you" isn't
+const DOOR = /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i;
+const NAME_GIVEN = /\b(?:[Mm]y\s+name(?:'?s|\s+is)|[Nn]ame'?s|[Cc]all\s+me)\s+([A-Za-z]{2,15})\b|\bI'?m\s+([A-Z][a-z]{1,14})\b/;
+const LATE_NAME = /\b(?:love|like|cute|nice|great|lovely|cool|sexy)\s+(?:that\s+|the\s+|your\s+)?name\b|\bname\s+suits\s+you\b/i;
+const NICE_TO_MEET = /\b(?:nice|pleasure|lovely|good|great)\s+to\s+meet\b|\bpleasure'?s\s+(?:all\s+)?mine\b/i;
+/** The name he gives in his message ("my name is Bob", "I'm Abeba"), or ''. */
+function nameIn(text) {
+  const m = String(text || '').match(NAME_GIVEN);
+  const w = m && (m[1] || m[2]);
+  if (!w || NOT_NAMES.has(w.toLowerCase())) return '';
+  return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+}
 // A bubble that only says his words back ("South Africa…"): three words at most, all of them his, ending in "…" or nothing.
 // A bubble of short words only ("oh ok…") isn't an echo, and neither is an echo that goes on ("Abeba… that's a beautiful name").
 function echoOnly(bubble, his = '') {
@@ -1781,7 +1830,15 @@ const WHY_Q = /\bwhy\b[^.!]*\?|^\W*why\W*$/i;
 const GIVES_REASON = /\b(?:because|cause|cuz|'?cos|since|so (?:i|that)|it'?s|it is|it'?s like|it makes|makes me|it helps|helps me|lets me|i can|i get to|my way|the way|love|calm|relax|free|feel|feels|zone out|switch off|escape|reminds me|i just)\b/i;
 const RECEIVES = /\b(?:thank|thanks|thx|ty|aww*|aw|you'?re (?:so |too )?(?:sweet|kind|cute|nice)|that'?s (?:so |really )?(?:sweet|nice|kind|cute|lovely)|sweet of you|made me (?:smile|blush)|blush\w*|flatter\w*|stop it|stoppp*|you'?re making me (?:blush|smile|melt|shy|all)|takes one to know|i'?ll take (?:it|that)|right back at (?:you|u)|you too|appreciate|means a lot|you'?re not so bad yourself|charmer|smooth)\b/i;
 // style problems that are about meaning, not sound: a second rewrite, and "check" if they remain
-const SERIOUS_STYLE = /subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+// round 4 (F1, F2): his answer to the direct ask, and signs the moment doesn't fit (scripts/probes/round4-patterns.cjs)
+const TALK_ONLY = /\b(?:(?:just|only)\s+(?:(?:want(?:ed)?|wanna|came|here)\s+(?:to\s+)?)?(?:talk|chat)(?:ting)?|came\s+(?:here\s+)?(?:just\s+|only\s+)?(?:to|for)\s+(?:talk|chat|a\s+chat|the\s+conversation)|(?:i'?m|am)\s+(?:just\s+)?here\s+(?:to|for)\s+(?:talk|chat|the\s+company|your\s+company)|not\s+(?:here\s+)?(?:for|about)\s+(?:that|pics|content|nudes|buying|the\s+pics)|not\s+(?:looking|here)\s+to\s+(?:buy|pay|spend)|i'?m\s+good(?:\s*,?\s*thanks?)?(?=\s*[.!]*\s*$)|no\s+thanks|not\s+(?:right\s+)?now|maybe\s+(?:later|another\s+time|some\s+other\s+time)|i\s+don'?t\s+(?:want|need)\s+(?:anything|to\s+(?:see|buy))|let'?s\s+(?:just\s+)?(?:talk|chat))\b/i;
+const HANDS_OVER = /^\W*(?:yes|yeah|yep|sure|ok(?:ay)?|surprise me|show me|anything|whatever you (?:want|like)|you choose|up to you)\b/i;
+const DECLINE_READ = /\b(?:real conversation|just (?:to )?talk|not (?:here )?for (?:content|pics|buying)|not interested in (?:buying|content|pics))\b/i;
+const COOLING_READ = /\b(?:dull|boring|bored|too much|annoyed|irritated|pushing back|not interested|losing interest|real conversation|not content|uncomfortable|put off)\b/i;
+// round 4: replies with no pet name (F5) and replies with no name of his (G1: the ask, the price, right after a no)
+const NO_PET_GOALS = new Set(['comfort', 'reassure', 'calm', 'ease_off', 'honest_no', 'why_not', 'goodbye', 'dry_bye']);
+const NO_NAME_GOALS = new Set(['offer', 'first_offer', 'cheaper', 'steer_to_sale', 'direct_ask', 'readiness_check', 'point_to_ppv', 'why_not', 'answer_ppv']);
+const SERIOUS_STYLE = /says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2458,7 +2515,8 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // turned into statements or left out; long messages split into bubbles like a person's
       const prep = (d) => {
         if (noPpv) d.ppv = null;
-        d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [], closeness: voice?.closeness || null });
+        d.messages = P.tidyMessages(d.messages, { emojis, maxLevel, recent, names: voice?.names || [], closeness: voice?.closeness || null,
+          noPet: !!(base.plan?.clarify || base.plan?.repair || NO_PET_GOALS.has(goalNow) || base.plan?.declined_now), noName: !!(NO_NAME_GOALS.has(goalNow) || base.plan?.declined_now || base.plan?.after_no), warm: voice?.warm !== false });
         if (voice) d.messages = P.dropSentences(d.messages, { his: voice.his, noOffer: d.ppv ? '' : noPpv || base.noOffer || '' });
         const n = voice ? questionsIn(d.messages, voice.his) : 0;
         if (voice && ((voice.noQuestion && n) || n > 1)) {
@@ -2607,6 +2665,11 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         // a reply all about her ("I love how names travel makes me want to try some rooibos tea again"): no door for him
         now.style.push('It gives him nothing to answer: it is all about you. Say something to him he can pick up (a guess about him, "bet you…", "you seem…", or tell him something and hand it back).');
       }
+      // round 4, F5: repairing a line that claimed too much: the claim is not said again
+      if (base.plan?.clarify_kind === 'overclaim' && (Sf.FELT_FROM_HIM.test(draft.messages.join(' ')) || Sf.DECLARED.test(draft.messages.join(' ')))) now.style.push('It says the claim again: take it down a notch instead, in plain words (what you really meant).');
+      // round 4, F4: he just gave his name: she says it back; a comment on his name when he gave it earlier comes too late
+      if (base.plan?.name_given && draft.messages.length && !new RegExp(`\\b${base.plan.name_given}\\b`, 'i').test(draft.messages.join(' ')) && !NICE_TO_MEET.test(draft.messages.join(' '))) now.style.push(`He just told you his name: say it back warmly ("nice to meet you, ${base.plan.name_given}").`);
+      if (!base.plan?.name_given && LATE_NAME.test(draft.messages.join(' '))) now.style.push('It comments on his name late; he gave it earlier. React to what he just said.');
       // her mood of the day said or hinted ("I could use some of that right now", "feeling a little slow today") early on
       if (TALK_GOALS.has(base.plan?.goal) && (voice?.closeness === 'new' || recentHer.length < 5) && MOOD_TALK.test(draft.messages.join(' '))) now.style.push('Your mood of the day is colour, not content: don\'t tell him you\'re slow or down; react to him instead.');
       // a first bubble that only says his words back ("South Africa…")
@@ -2688,7 +2751,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
 
 // The candidate reply that fits the bands best (research round 2): the question the plan wants (or none),
 // the length target, no repeated opener, bubbles like a person's, no declared feelings early on.
-const DECLARED_RE = /\b(?:i\s+(?:really\s+|truly\s+|so\s+)?(?:care\s+(?:about|for)|miss|adore|love|need)\s+(?:you|u)\b|you\s+mean\s+(?:so\s+much|a\s+lot|the\s+world|everything)\s+to\s+me|i\s+feel\s+(?:the\s+same|it\s+too))\b/i;
+const DECLARED_RE = Sf.DECLARED;   // one pattern, kept in safety.js
 // a non-answer to his question ("good question", "wouldn't you like to know")
 const DEFLECTS = /\b(?:good question|great question|wouldn'?t you like to know|that'?s for me to know|you'?ll (?:have to|never) (?:find out|know)|maybe one day|i'?ll never tell|a girl (?:has to have|needs) (?:her|some) secrets|that'?s a secret|mystery|you know\W*$|guess\b)/i;
 const QUESTION_GOALS = new Set(['curious', 'direct_ask', 'dry_ask', 'readiness_check', 'why_not', 'welcome_new', 'get_to_know']);
@@ -2717,6 +2780,8 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new', que
     if (d.messages.length > 3) { score -= 20; why.push('too many messages'); }
     if (d.messages.some(m => words(m) > 15)) { score -= 10; why.push('a long message'); }
     if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
+    if (!plan?.name_given && LATE_NAME.test(text)) { score -= 15; why.push('comments on his name late'); }
+    if (Sf.FELT_FROM_HIM.test(text) && ['new', 'friendly'].includes(closeness) && !voice?.earned) { score -= 20; why.push('claims a feeling he didn\'t cause'); }
     const beats = (plan?.beats || []).join(' ');
     if (/thing of yours/.test(beats)) { if (SHARES.test(text)) { score += 14; why.push('carries the small thing of hers'); } else { score -= 10; } }
     if (plan?.goal === 'curious' && plan.reading?.curious && !questionDropped) { const w = wordsOf(plan.reading.curious); const q = d.messages.filter(m => /\?/.test(m)).join(' '); if (q && [...wordsOf(q)].some(x => w.has(x))) { score += 14; why.push('asks the planned question'); } }

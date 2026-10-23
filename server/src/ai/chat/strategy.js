@@ -103,7 +103,7 @@ function readPrompt({ chat, money, selling = false, notes = [] }) {
         'Answer about his latest message(s):\n'
           + '- ids: the situations (at most 3) that clearly fit right now; only ones that clearly fit.\n'
           + '- level: how sexual his latest message is: 0 = friendly, no flirting; 1 = flirty (compliments, light teasing); 2 = suggestive (hints, innuendo); 3 = explicit (sex acts or intimate body parts). Swearing, politics and slang are not sexual.\n'
-          + '- answers: how his latest message answers her last one: "straight" (a real answer), "short" (the bare minimum: "true", "idk", "I guess"), "joke" (a joke or a sarcastic answer, like "lack of bombs" to "what\'s making it quiet?": its meaning is plain, it is not a riddle), "dodge" (he skips what she said), or "" if she asked or said nothing he could answer.\n'
+          + '- answers: how his latest message answers her last one: "straight" (a real answer), "short" (the bare minimum: "true", "idk", "I guess"), "joke" (a joke or a sarcastic answer, like "lack of bombs" to "what\'s making it quiet?": its meaning is plain, it is not a riddle), "dodge" (he skips what she said), "closing" (a pleasantry that closes the exchange: "got it", "my pleasure", "nice to meet you", "likewise", "cool", "haha ok", "sounds good": nothing in it to react to, she leads with something new; not a joke, not odd), or "" if she asked or said nothing he could answer.\n'
           + '- thread: "dead" when the topic they are on has run out (he has little more to give it: short or joking answers to it, or it has filled two or more of her replies with nothing new from him), so a real girl would let it go and bring up something new; "alive" otherwise.\n'
           + `- mood: his mood right now, one of ${MOODS.join(', ')}.\n`
           + '- pulled_back: true only if he is slowing things down after something sexual (says it\'s going fast, changes the subject away from sex, seems put off).\n'
@@ -122,7 +122,7 @@ function readPrompt({ chat, money, selling = false, notes = [] }) {
   ];
 }
 /** The reading from Claude's answer, checked: { doing, new, readings: [{ what, sure }], curious, stance, answers, thread }. */
-const ANSWERS = ['straight', 'short', 'joke', 'dodge'];
+const ANSWERS = ['straight', 'short', 'joke', 'dodge', 'closing'];
 function readReading(json) {
   if (!json || typeof json !== 'object') return null;
   const text = (v, n) => clean(v).slice(0, n);

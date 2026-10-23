@@ -11,7 +11,7 @@
  *  - planText: the plan as the writer reads it.
  * Pure (no database, no network).
  */
-const { replyLevel } = require('./safety');
+const { replyLevel, FELT_FROM_HIM, DECLARED, COMPLIMENT: HER_COMPLIMENT } = require('./safety');
 const { closenessOf, CLOSENESS, TONE, likesFor, awayText } = require('./memory');
 const { eventFits, WANTS_TO_BUY } = require('./session');
 const { seenText } = require('./notes');
@@ -74,8 +74,13 @@ function beatsFor(p) {
   if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
   if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
+  else if (p.clarify && p.clarify_kind === 'overclaim') base.unshift('take your last line down a notch in plain words: no apology, don\'t say it again');
   else if (p.clarify) base.unshift('say plainly what you meant by your last line, in one line; no question back');
   else if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  // round 4, F4: he closed the topic with a pleasantry: she leads with something new instead of reacting to it
+  if (p.closing && !p.answer_first && !p.clarify && !p.repair && ['chat', 'get_to_know', 'curious', 'share', 'flirt'].includes(p.goal)) base.splice(0, base.length, 'a short warm acknowledgement, or none', 'lead: one easy question about him, or a small thing of yours that opens a new topic');
+  // he just gave his name: she says it back warmly in this reply
+  if (p.name_given) base.splice(p.answer_first || p.clarify || p.repair ? 1 : 0, 0, `say his name back warmly ("nice to meet you, ${p.name_given}")`);
   if (p.complimented && !/compliment/.test(base.join(' '))) base.splice(p.repair || p.answer_first ? 1 : 0, 0, 'receive his compliment warmly: thank him in your way, playful and specific; no deflecting, no "I get that a lot"');
   // the floor of the question band: she has asked little lately, and this reply has room for one follow-up
   if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
@@ -218,7 +223,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ herLast = '', level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, rand = Math.random }) {
+function planReply({ herLast = '', level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, nameGiven = '', rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -279,7 +284,8 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
     const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
     // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
-    if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(g)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
+    if (aim === 'first_sale' && !taste?.bought && ['declined', 'no_ask', 'asked'].includes(stage?.stage) && !(asks && stage.stage !== 'asked')) hold = stage.why;   // round 4, F1/F2
+    else if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(g)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
     else if (g === 'after_buy') {
       if (!warmNow) hold = 'he\'s cooling off after the buy: no second offer (A4)';
       else if (attempts.here >= 2) hold = 'one more at most after a buy, and it was made (A4)';
@@ -399,6 +405,8 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   const pushedBack = talkGoal && herReplies > 0 && (PUSHBACK.test(said) || (p.reading?.readings || []).some(r => /\b(?:dig|push(?:es|ing)? back|took it (?:wrong|badly|personally)|offended|calling (?:her|it) out|correct(?:s|ing) her|didn'?t like (?:her|the))\b/i.test(r.what) && r.sure >= 0.5));
   p.repair = pushedBack;
   p.clarify = talkGoal && !pushedBack && confusedNow;
+  p.closing = talkGoal && reading?.answers === 'closing';
+  p.name_given = nameGiven || '';
   if (p.new_today && p.reading?.curious) p.reading.curious = p.reading.curious.replace(/\b(?:finally|at last|eventually)\b\s*/gi, '').replace(/\s{2,}/g, ' ').trim();
   // he complimented her or told her what drew him: she receives it warmly (that isn't flirting, so the vibe stage allows it)
   p.complimented = talkGoal && !pushedBack && COMPLIMENT.test(said) && !NEGATED.test(said);
@@ -493,7 +501,11 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   // he asked something directly (fix 4): it gets a plain answer first, whatever else the reply does
   const hisQuestion = reading?.asked?.length ? reading.asked[0] : '';
   const answerable = (p.clarify || DIRECT_Q.test(said) || !!hisQuestion) && !politics && !p.repair && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
-  p.answer_first = answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say plainly what you meant, light, in one line; don't repeat the joke, don't apologise, then on`
+  // round 4, F5: the line he didn't get claimed more than the moment had (a feeling he didn't cause, a compliment, a declared
+  // feeling): she takes it down a notch in plain words instead of saying it again
+  if (p.clarify && herLast && (FELT_FROM_HIM.test(herLast) || DECLARED.test(herLast) || HER_COMPLIMENT.test(herLast))) p.clarify_kind = 'overclaim';
+  p.answer_first = answerable && p.clarify_kind === 'overclaim' ? `He didn't get your last line ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}"): it said more than the moment had. Take it down a notch in plain words (what you really meant, like that it's nice to meet him, or that you like talking to him); light, no apology, don't say the claim again, then carry on`
+    : answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say plainly what you meant, light, in one line; don't repeat the joke, don't apologise, then on`
     : answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
     : p.clarify ? { allowed: false, why: 'he asked what you meant: explain it, no question back' }
@@ -589,6 +601,8 @@ function planText(p) {
   if (p.hour_note) lines.push(p.hour_note);
   if (p.reading?.new) lines.push(`What's new in his message: ${p.reading.new}. Pick up on it; don't skate past it.`);
   if (p.reading?.readings?.length) lines.push(`You're not sure what he means: ${p.reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}% sure)`).join('; ')}. Don't assume; ask lightly or tease around it.`);
+  if (p.closing) lines.push('He closed the exchange with a pleasantry: nothing to react to. Lead: one easy question about him, or a small thing of yours that opens a new topic.');
+  if (p.name_given) lines.push(`He just told you his name: say it back warmly in this reply ("nice to meet you, ${p.name_given}").`);
   if (p.reading?.answers === 'joke') lines.push('He answered your last message with a joke: laugh or play along with it, its meaning is plain; never ask what he meant, and never take it literally.');
   if (p.reading?.thread === 'dead') lines.push('The topic you two were on has run out (he has nothing more to give it): let it go now. React briefly, then bring up something new: something easy about him (where he\'s from, what he does, what he\'s into), or a small real thing of yours. No more questions about the old topic.');
   if (p.reading?.curious && p.ask.allowed) lines.push(`What you'd want to know: "${p.reading.curious}" (ask it in your own words, if you ask anything).`);
@@ -630,4 +644,4 @@ function planText(p) {
   return lines;
 }
 
-module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, TIER_LABEL, BUDGET, GOODBYE };
+module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, TIER_LABEL, BUDGET, GOODBYE, CONFUSED, PUSHBACK, DIRECT_Q };

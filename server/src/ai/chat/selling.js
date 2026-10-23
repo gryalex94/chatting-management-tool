@@ -99,15 +99,38 @@ const STAGE_TEXT = Object.fromEntries(STAGES.map(([k, , t]) => [k, t]));
  * replies since he got sexual (a sexual fan is in the sexy stage already), `asked` /
  * `offered` = the direct ask or the offer was made in this conversation.
  */
-function firstSaleStage({ herHere = 0, direct = false, hisLevel = 0, since = 0, asked = false, offered = false }) {
+// the direct ask is due but waits (round 4, F2): he never flirted back, or the moment doesn't fit
+const ASK_CAP = 20;          // her replies in a conversation: a fan who never went along by then gets no ask this conversation
+const MAX_WAITS = 6;         // replies the ask may wait for a fitting moment before it is dropped for this conversation
+const NO_ASK = (why) => ({ stage: 'no_ask', text: 'No direct ask this conversation: just chat with him warmly, nothing sold unless he asks himself', why });
+function firstSaleStage({ herHere = 0, direct = false, hisLevel = 0, since = 0, asked = false, offered = false, declined = false, answer = '', warm = true, fits = true, unfit = '', waited = 0, noAsk = false, herTurns = herHere }) {
   if (offered) return { stage: 'done', text: 'The first offer is out: nothing more this conversation unless he buys it', why: 'the probe offer was made (A1)' };
   if (direct) return { stage: 'offer', text: 'He said exactly what he wants: say yes and offer it now, at the probe price', why: 'a direct fan skips the stages (A1)' };
-  if (asked) return { stage: 'offer', text: 'He answered what he wants: the probe offer now, matched to his answer', why: 'the direct ask is done (A1)' };
+  // his answer is read, not assumed (round 4, F1): "just talk" or a no ends the path for this conversation
+  if (declined) return { stage: 'declined', text: 'He said he just wants to talk (or not now): take him at his word, warm and easy; nothing sold and no ask for the rest of this conversation unless he asks himself', why: 'he declined (A1: the first offer not bought, warm, no pushing for the rest of that conversation)' };
+  if (asked) {
+    if (answer === 'wants') return { stage: 'offer', text: 'He answered what he wants: the probe offer now, matched to his answer', why: 'the direct ask is done and he said what he wants (A1)' };
+    return { stage: 'asked', text: 'You asked what he would like to see and he has not said: answer what he wrote, keep the vibe, no PPV until he says what he wants', why: 'the direct ask is out, his answer is not a yes yet (A1)' };
+  }
+  if (noAsk) return NO_ASK('the ask already waited as long as it may this conversation (A1: never push him into it)');
   let stage = 'vibe';
   for (const [k, from] of STAGES) if (herHere >= from) stage = k;
+  let due = null;
   if (hisLevel >= 2 && stage !== 'ask') {
-    if (since >= 3) return { stage: 'ask', text: STAGE_TEXT.ask, why: `he got sexual himself and they've had ${since} of her replies in that vibe: time to ask (A1)` };
-    return { stage: 'sexy', text: STAGE_TEXT.sexy, why: `he got sexual himself: the sexy vibe, the direct ask after about 3 of her replies (${since} so far) (A1)` };
+    if (since >= 3) due = `he got sexual himself and they've had ${since} of her replies in that vibe: time to ask (A1)`;
+    else return { stage: 'sexy', text: STAGE_TEXT.sexy, why: `he got sexual himself: the sexy vibe, the direct ask after about 3 of her replies (${since} so far) (A1)` };
+  } else if (stage === 'ask') due = `her message ${herHere + 1} of this conversation (A1)`;
+  if (due) {
+    // he never went along with the flirting: the ask waits, and never comes this conversation if he still hasn't by her 20th reply
+    if (!warm) {
+      if (herTurns + 1 >= ASK_CAP) return NO_ASK(`he never flirted back in ${herTurns} of her replies (A1: never push him into it)`);
+      return { stage: 'flirt', text: `${STAGE_TEXT.flirt}. Keep it flirty and fun; the direct ask waits until he flirts back`, why: `the ask is due, but he hasn't flirted back yet (A1)` };
+    }
+    if (!fits) {
+      if (waited >= MAX_WAITS) return NO_ASK(`the ask waited ${waited} replies for a moment that fits (A1: never push him into it)`);
+      return { stage: 'sexy', text: `${STAGE_TEXT.sexy}. The direct ask waits: ${unfit}`, why: `the ask is due, but not now: ${unfit} (A1)`, waits: unfit };
+    }
+    return { stage: 'ask', text: STAGE_TEXT.ask, why: due };
   }
   const next = STAGES[STAGES.findIndex(([k]) => k === stage) + 1];
   return { stage, text: STAGE_TEXT[stage], why: `her message ${herHere + 1} of this conversation${next ? `; ${next[0] === 'ask' ? 'the direct ask' : `the ${next[0]} stage`} from her message ${next[1] + 1}` : ''} (A1)` };
