@@ -32,8 +32,9 @@
     summary: null, summaryBusy: false, summaryError: '', summaryAskedAt: 0,
     scripts: null, scriptsFor: null, openStages: new Set(['opener', 'ppv_pitch']), scriptFilter: '',
     noteDraft: '', editing: null, editDraft: '', toast: '',
-    suggest: null, suggestBusy: false, suggestError: '',   // { draft_id, messages, goal, why, inserted, group }
-    width: 420, collapsed: false, push: true, open: { suggest: true, card: true, metrics: true, notes: true, summary: true, scripts: true },
+    suggest: null, suggestBusy: false, suggestError: '',
+    linkQ: '', linkResults: null, linkBusy: false,   // { draft_id, messages, goal, why, inserted, group }
+    width: 420, collapsed: false, push: true, open: { suggest: true, card: true, agency: true, metrics: true, notes: true, summary: true, scripts: true },
   };
 
   // ---------- the host element and its shadow root ----------
@@ -180,9 +181,9 @@
       const fanChanged = data.found && data.fan.fansly_account_id !== st.fanId;
       st.data = data; st.error = '';
       st.fanId = data.found ? data.fan.fansly_account_id : null;
-      // a new fan: read (or build) his summary; the same fan whose chat moved on: ask again at most every 3 minutes
-      if (data.found && (fanChanged || (data.summary && data.summary.stale && Date.now() - st.summaryAskedAt > 180000))) loadSummary(false);
-      else if (data.found && !st.summaryBusy) st.summary = data.summary;
+      // the AI summary is built only when the chatter presses the button (it costs money); the saved one is shown as it is
+      if (data.found && !st.summaryBusy) st.summary = data.summary;
+      void fanChanged;
     } catch (e) { if (seq === loadSeq) st.error = e.message; }
     finally { if (seq === loadSeq) { st.loading = false; render(); } }
   }
@@ -194,6 +195,7 @@
       const r = await call('POST', '/api/fansly/panel/summary', { account: st.accountId, fan, force: !!force });
       if (fan !== st.fanId) return;
       st.summary = r.summary; st.summaryError = r.error || (r.summary ? '' : (r.reason || ''));
+      if (r.cost_usd != null) flash(`Summary updated (cost $${Number(r.cost_usd).toFixed(4)})`);
     } catch (e) { if (fan === st.fanId) st.summaryError = e.message; }
     finally { st.summaryBusy = false; render(); }
   }
@@ -210,7 +212,7 @@
   function setGroup(g) {
     if (g === st.groupId) return;
     dropSuggestion();
-    st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null;
+    st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null; st.linkQ = ''; st.linkResults = null;
     loadFan(false);
   }
   let lastHref = location.href;
@@ -261,6 +263,27 @@
     const where = await insertText(fillPlaceholders(s.text));
     flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box');
     if (where) call('POST', `/api/fansly/panel/scripts/${s.id}/use`, { account: st.accountId, fan: st.fanId }).catch(() => {});
+  }
+
+  // ---------- one fan across the agency: link him to his OnlyFans / Fanvue account ----------
+  let linkTimer = null;
+  function searchLinks(q) {
+    st.linkQ = q; clearTimeout(linkTimer);
+    if (q.trim().length < 2) { st.linkResults = null; renderSoon(); return; }
+    linkTimer = setTimeout(async () => {
+      st.linkBusy = true; renderSoon();
+      try { const r = await call('GET', `/api/fansly/panel/link-search?account=${encodeURIComponent(st.accountId)}&q=${encodeURIComponent(q.trim())}`); if (st.linkQ === q) st.linkResults = r.results || []; }
+      catch (e) { flash(e.message); }
+      finally { st.linkBusy = false; render(); }
+    }, 400);
+  }
+  async function linkFan(x) {
+    try { await call('POST', '/api/fansly/panel/links', { account: st.accountId, fan: st.fanId, platform: x.platform, ref_id: x.ref_id, ref_name: x.name || x.ref_name }); st.linkQ = ''; st.linkResults = null; flash('Linked: his spending there now counts here'); await loadFan(true); }
+    catch (e) { flash(e.message); }
+  }
+  async function unlinkFan(id) {
+    if (!confirm('Not the same person? Remove the link.')) return;
+    try { await call('DELETE', `/api/fansly/panel/links/${id}`); await loadFan(true); } catch (e) { flash(e.message); }
   }
 
   // ---------- suggested replies (phase 4) ----------
@@ -341,6 +364,35 @@
     ]);
   }
 
+  const PLATFORM = { fansly: 'Fansly', onlyfans: 'OnlyFans', fanvue: 'Fanvue' };
+  function agency(d) {
+    const a = d.agency;
+    if (!a) return null;
+    const rows = a.pages || [];
+    const content = [
+      h('div', { class: 'row' }, h('span', { class: 'name', style: 'font-size:14px' }, money(a.total_net)), h('span', { class: 'muted small' }, `spent with the agency on ${rows.filter(p => p.page).length} page${rows.filter(p => p.page).length === 1 ? '' : 's'}`)),
+      ...rows.map(p => h('div', { class: 'note' },
+        h('div', { class: 'row' },
+          h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[p.platform] || p.platform),
+          h('b', null, p.page || (p.ref_name ? `@${p.ref_name}` : 'no purchases')),
+          p.this_page ? h('span', { class: 'small muted' }, 'this chat') : null,
+          h('span', { style: 'margin-left:auto;font-weight:600' }, money(p.spent_net))),
+        h('div', { class: 'small muted' }, [
+          `${p.purchases} purchase${p.purchases === 1 ? '' : 's'}`,
+          p.last_purchase_at ? `last ${date(p.last_purchase_at)}` : null,
+          p.platform === 'fansly' ? (p.tier ? `${p.tier}${p.subscribed_until ? ` until ${date(p.subscribed_until)}` : ''}` : (p.subscribed_until ? `subscribed until ${date(p.subscribed_until)}` : null)) : null,
+          p.platform === 'fansly' && p.last_message_at && !p.this_page ? `chatted ${ago(p.last_message_at)}` : null,
+        ].filter(Boolean).join(' · ')),
+        p.match === 'username' ? h('div', { class: 'small', style: 'color:#fcd34d' }, `Same username (@${p.ref_name}): probably him. `, h('button', { class: 'link', onclick: () => linkFan(p) }, 'yes, link')) : null,
+        p.match === 'linked' && p.link_id ? h('div', { class: 'small muted' }, `Linked to @${p.ref_name || p.ref_id} by hand. `, h('button', { class: 'link', onclick: () => unlinkFan(p.link_id) }, 'not him')) : null)),
+      h('div', { class: 'lbl' }, 'Same person on OnlyFans or Fanvue?'),
+      h('input', { placeholder: 'Search his username there', value: st.linkQ, oninput: (e) => searchLinks(e.target.value) }),
+      st.linkBusy ? h('div', { class: 'muted small' }, 'Searching…') : null,
+      st.linkResults ? (st.linkResults.length ? h('div', null, st.linkResults.map(x => h('div', { class: 'row', style: 'padding:3px 0' }, h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[x.platform]), h('span', null, x.name || x.ref_id), h('button', { class: 'link', style: 'margin-left:auto', onclick: () => linkFan(x) }, 'link')))) : h('div', { class: 'muted small' }, 'Nobody found.')) : null,
+    ];
+    return section('agency', 'Across the agency', content, rows.length > 1 ? h('span', { class: 'pill' }, String(rows.length)) : null);
+  }
+
   function metrics(d) {
     const m = d.metrics;
     const stat = (l, v) => h('div', { class: 'stat' }, h('div', { class: 'l' }, l), h('div', { class: 'v' }, v));
@@ -391,9 +443,10 @@
       content.push(...list('Likes', s.likes), ...list('Bought', s.bought), ...list('Said no to', s.refused), ...list('Open promises', s.promises), ...list('About him', s.facts));
       if (s.next_step) content.push(h('div', { class: 'lbl' }, 'Next step'), h('div', null, s.next_step));
       if (s.suggested_note) content.push(h('div', { class: 'warn info', style: 'margin-top:8px' }, 'Note idea: ', s.suggested_note, ' ', h('button', { class: 'link', onclick: () => addNote(s.suggested_note) }, 'save as note')));
-      content.push(h('div', { class: 'row small muted', style: 'margin-top:6px' }, `From ${s.messages_used || '?'} messages · ${ago(s.built_at)}`, h('button', { class: 'link', style: 'margin-left:auto', disabled: st.summaryBusy, onclick: () => loadSummary(true) }, 'refresh')));
+      if (s.stale && !st.summaryBusy) content.push(h('div', { class: 'warn info', style: 'margin-top:8px' }, 'His chat has moved on since this summary. ', h('button', { class: 'link', onclick: () => loadSummary(true) }, 'update it')));
+      content.push(h('div', { class: 'row small muted', style: 'margin-top:6px' }, `From ${s.messages_used || '?'} messages · ${ago(s.built_at)}`, h('button', { class: 'link', style: 'margin-left:auto', disabled: st.summaryBusy, onclick: () => loadSummary(true) }, 'update')));
     } else if (!st.summaryBusy) {
-      content.push(h('div', { class: 'muted small' }, st.summaryError || 'No summary yet.'), h('button', { style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Summarise him'));
+      content.push(h('div', { class: 'muted small' }, st.summaryError || 'No summary yet. It reads his whole chat and costs about a tenth of a cent.'), h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Summarise him'));
     }
     if (s && st.summaryError) content.push(h('div', { class: 'err small' }, st.summaryError));
     return section('summary', 'AI summary', content);
@@ -434,7 +487,7 @@
     else if (!d) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, st.loading ? 'Loading the fan…' : ''));
     else if (!d.found && d.reason === 'not_assigned') { parts.push(h('div', { class: 'warn high' }, d.message || 'You are not on the roster for this page.')); return h('div', { class: 'body' }, parts); }
     else if (!d.found) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, d.reason === 'page' ? 'This Fansly page is not in the tool yet; it appears after the first messages are recorded.' : 'This chat is not recorded yet. It will be in a few seconds; scroll up in it to record older messages.'));
-    else parts.push(suggestion(d), fanCard(d), metrics(d), notes(d), summary());
+    else parts.push(suggestion(d), fanCard(d), agency(d), metrics(d), notes(d), summary());
     parts.push(scripts());
     return h('div', { class: 'body' }, parts);
   }

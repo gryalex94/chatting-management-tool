@@ -5,6 +5,7 @@ const { demoMask } = require('../utils/privacy');
 const { ROLE_RANK } = require('../utils/roles');
 const F = require('../utils/fanslyIngest');
 const { client } = require('../ai/agentRunner');
+const Agency = require('../utils/fanAgency');
 
 /**
  * Fansly, phase 3: the side panel the extension shows next to a Fansly chat,
@@ -188,6 +189,8 @@ panel.get('/fan', async (req, res) => {
       notes: (notes || []).map(n => ({ id: n.id, text: n.text, pinned: n.pinned, created_at: n.created_at, updated_at: n.updated_at, author: n.users?.name || 'Someone', mine: n.user_id === req.user.id, can_edit: n.user_id === req.user.id || isManager(req.user) })),
       summary: summary ? { ...summary.summary, built_at: summary.built_at, stale: summary.last_message_id !== lastId, messages_used: summary.messages_used } : null,
       owned_item_ids: owned,
+      // where else he sits in the agency and what he spent there (utils/fanAgency.js)
+      agency: await Agency.agencySpend(req.user.organisationId, fanId, { username: fan.username, thisAccountId: account.id }).catch(e => { console.error('[fansly-panel] agency:', e.message); return null; }),
     });
   } catch (e) { fail(res, e, 'load the fan'); }
 });
@@ -291,13 +294,18 @@ panel.post('/summary', async (req, res) => {
         + 'next_step (one sentence: what the next chatter should do with him now), suggested_note (one short fact worth saving as a note for every shift, or empty).';
       const r = await client.messages.create({ model: SUMMARY_MODEL, max_tokens: 1500, system, messages: [{ role: 'user', content: user }],
         output_config: { effort: 'low', format: { type: 'json_schema', schema: SUMMARY_SCHEMA } } });
+      // what it cost, in the AI usage log with the rest of the AI spend (Claude Haiku 5.5: $0.10 in / $0.50 out per million tokens)
+      const inTok = r.usage?.input_tokens || 0, outTok = r.usage?.output_tokens || 0;
+      const cost = Math.round(((inTok * 0.10 + outTok * 0.50) / 1e6) * 1e6) / 1e6;
+      supabaseAdmin.from('ai_usage').insert({ organisation_id: req.user.organisationId, kind: 'fansly_summary', model: SUMMARY_MODEL, input_tokens: inTok, output_tokens: outTok, cost_usd: cost, creator_id: account.creator_id || null, fan_uuid: fanId })
+        .then(({ error: e2 }) => { if (e2) console.error('[fansly-panel] usage:', e2.message); });
       if (r.stop_reason === 'refusal') return res.json({ summary: have ? out(have) : null, error: 'The AI did not summarise this chat' });
       let summary;
       try { summary = JSON.parse(r.content.find(b => b.type === 'text')?.text || ''); } catch { return res.json({ summary: have ? out(have) : null, error: 'The AI answer could not be read' }); }
       const row = { account_id: account.id, fan_account_id: fanId, summary, last_message_id: lastId, last_message_at: msgs[msgs.length - 1].sent_at, messages_used: msgs.length, model: SUMMARY_MODEL, built_at: new Date().toISOString() };
       const { error } = await supabaseAdmin.from('fansly_fan_summaries').upsert(row, { onConflict: 'account_id,fan_account_id' });
       if (error) throw error;
-      res.json({ summary: out(row) });
+      res.json({ summary: out(row), cost_usd: cost });
     } finally { building.delete(key); }
   } catch (e) { fail(res, e, 'summarise the fan'); }
 });
@@ -329,6 +337,41 @@ panel.post('/scripts/:id/use', async (req, res) => {
     if (error) throw error;
     res.json({ ok: true });
   } catch (e) { fail(res, e, 'record the script'); }
+});
+
+// ---------- one fan across the agency: links to his OnlyFans and Fanvue accounts ----------
+
+// GET /api/fansly/panel/link-search?account=&q= → fans on OnlyFans and Fanvue to link him to
+panel.get('/link-search', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.query.account);
+    if (!account) return;
+    res.json({ results: await Agency.searchOther(req.user.organisationId, req.query.q) });
+  } catch (e) { fail(res, e, 'search'); }
+});
+
+// POST /api/fansly/panel/links { account, fan, platform, ref_id, ref_name } — "this is the same person"
+panel.post('/links', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fan = String(req.body?.fan || ''), platform = String(req.body?.platform || ''), refId = String(req.body?.ref_id || '').slice(0, 80);
+    if (!/^\d{5,25}$/.test(fan) || !['onlyfans', 'fanvue'].includes(platform) || !refId) return res.status(400).json({ error: 'Pick a fan to link' });
+    const { error } = await supabaseAdmin.from('fan_links').upsert({ organisation_id: req.user.organisationId, fansly_fan_id: fan, platform, ref_id: refId,
+      ref_name: String(req.body?.ref_name || '').slice(0, 120) || null, created_by: req.user.id }, { onConflict: 'organisation_id,fansly_fan_id,platform,ref_id' });
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'link the fan'); }
+});
+
+// DELETE /api/fansly/panel/links/:id — not the same person after all
+panel.delete('/links/:id', async (req, res) => {
+  try {
+    const { data, error } = await supabaseAdmin.from('fan_links').delete().eq('id', req.params.id).eq('organisation_id', req.user.organisationId).select('id');
+    if (error) throw error;
+    if (!data?.length) return res.status(404).json({ error: 'No such link' });
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'remove the link'); }
 });
 
 // ---------- phase 4: suggested replies ----------
