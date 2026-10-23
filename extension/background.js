@@ -83,6 +83,7 @@ async function enqueue(msg) {
 function scheduleFlush() { if (!flushTimer) flushTimer = setTimeout(() => { flushTimer = null; flush(); }, FLUSH_MS); }
 
 async function flush() {
+  await ready;
   if (flushing || !queue.length) return;
   flushing = true;
   try {
@@ -108,6 +109,7 @@ async function flush() {
 
 // ---- presence ----
 async function heartbeat() {
+  await ready;
   try {
     const tabs = await chrome.tabs.query({ url: 'https://fansly.com/*' });
     if (!tabs.length) return;
@@ -156,8 +158,8 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 chrome.alarms.create('cmt-heartbeat', { periodInMinutes: HEARTBEAT_MIN });
 chrome.alarms.onAlarm.addListener((a) => { if (a.name === 'cmt-heartbeat') { heartbeat(); if (queue.length) flush(); } });
 
-// restore the queue and the state when the worker wakes up
-(async () => {
+// restore the queue and the state when the worker wakes up; heartbeats and flushes wait for it
+const ready = (async () => {
   const s = await get(['queue', 'state']);
   if (Array.isArray(s.queue)) queue = s.queue;
   if (s.state) state = { ...state, ...s.state };

@@ -423,7 +423,9 @@ async function heartbeat({ user, chatterId, deviceId, account, extensionVersion 
   const { data: open } = await supabaseAdmin.from('fansly_presence').select('id, account_id').eq('user_id', user.id).eq('device_id', deviceId).is('ended_at', null)
     .order('started_at', { ascending: false }).limit(5);
   const rows = open || [];
-  const same = rows.find(r => (r.account_id || null) === (account?.id || null));
+  // No account named (the worker just woke up): keep whatever row is open rather than "switching" to nothing.
+  const same = account ? rows.find(r => r.account_id === account.id) || rows.find(r => !r.account_id) : rows[0];
+  if (same && account && !same.account_id) await supabaseAdmin.from('fansly_presence').update({ account_id: account.id }).eq('id', same.id);
   const others = rows.filter(r => r !== same);
   if (others.length) await supabaseAdmin.from('fansly_presence').update({ ended_at: now, ended_reason: 'switched' }).in('id', others.map(r => r.id));
   if (same) {
