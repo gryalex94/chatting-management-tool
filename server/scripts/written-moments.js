@@ -34,8 +34,20 @@ const MOMENTS = [
     type: 'new_sub', selling: true, lines: ['Hey', 'Im arab', 'We like to explode every now and then', 'What do you mean?'],
     judge: (turns) => {
       const mood = /\b(?:feeling (?:a (?:little|bit) )?(?:slow|down|moody|low|meh|off)|could use (?:some|a bit of)|not (?:my|the best) day|cheer me up)\b/i;
-      return [turns[2].odd || 'the dark joke was not read as odd', !mood.test(turns[2].her.join(' ')) || 'her mood in the third reply', !/\?/.test(turns[3].her.join(' ')) || 'a question back when he asked what she meant',
+      return [turns[2].odd || 'the dark joke was not read as odd', !mood.test(turns[2].her.join(' ')) || 'her mood in the third reply', (!/\?/.test(turns[3].her.join(' ')) || /\?/.test(turns[2].her.join(' '))) || 'a question back when he asked what she meant (and her line was no question)',
         turns.slice(0, 3).every(t => !/\bbabe\b/i.test(t.her.join(' '))) || '"babe" in her first three replies', turns.every(t => !t.aboutMe.some(x => mood.test(x))) || 'her mood stored as a fact'];
+    } },
+  { title: 'Bob (practice run 11, round 4): his name said back, no feeling he didn\'t cause, no pet name early or in a repair, no PPV after "I came here just to talk to you"',
+    type: 'new_sub', selling: true,
+    lines: ['Hey there', 'Curiosity to be honest, couldn\'t resist your tallness and the fact that you are asian, you are looking very appealing tbh', 'My name is Bob, and you?', 'Got ya, my pleasure!', 'What do you mean?',
+      'I see, all good, haha. What are you doing right now?', 'I\'m currently doing nothing to be honest', 'Snacks, Netflix, cutie on my side. Maybe a little bit of alcohol', 'What do you do for a living?', 'And how is it - working on Fanvue?',
+      'Lonely? Why? I thought you get a lot of attention to be honest', 'You look very different from others, in a good way', 'Really? Why?', 'And I always prefer to be invisible', 'I\'d be glad to talk to you a bit, I came here just to talk to you'],
+    judge: (turns) => {
+      const felt = /\b(?:(?:you(?:'re|\s+are)?|you'?ve)\s+(?:already\s+)?(?:making|got(?:ten)?|made)\s+me\s+(?:feel|blush|smile|melt)|feel(?:ing)?\s+(?:all\s+kinds\s+of\s+|so\s+)?special|(?:making|made)\s+my\s+day)\b/i;
+      const t3 = turns[2].her.join(' '), last = turns.at(-1);
+      return [/\bbob\b|nice to meet|pleasure to meet/i.test(t3) || 'his name not said back at reply 3', !felt.test(turns[3].her.join(' ')) || 'a feeling he did not cause at reply 4',
+        turns.slice(0, 5).every(t => !/\b(?:babe|baby)\b/i.test(t.her.join(' '))) || 'a pet name in her first five replies', !last.ppv && last.goal !== 'first_offer' || 'a PPV after "I came here just to talk to you"',
+        turns.slice(-3).every(t => t.goal !== 'direct_ask' || !/\?$/.test(t.him)) || 'the direct ask while he was asking her something'];
     } },
 ];
 

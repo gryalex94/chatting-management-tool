@@ -1788,7 +1788,20 @@ const BRUSH_OFF = /\b(?:i get that a lot|everyone says that|heard that (?:one )?
 // a small real thing of hers: first person plus a piece of her life
 const SHARES = /\b(?:my (?:day|morning|night|weekend|friend|sister|brother|mum|mom|dad|flatmate|roommate|boss|coffee|gym|dog|cat|date|ex|week|shift|coach|neighbou?r)|(?:i|i'?ve|i'?m) (?:just|was|went|had|spent|tried|made|got|finished|cooked|watched|woke|slept|started|been|booked|ended up|nearly|almost|spilled|burnt|lost|found)\b|last (?:night|week|weekend|date|time i)|this morning|earlier today|(?:helps|makes|gets|keeps) me\b|\bi (?:usually|always|never|tend to|keep|can'?t stop|get)\b|\bmy (?:thing|go-to|guilty pleasure|favou?rite|weakness|happy place)\b)\b/i;
 // a line that trails off after a question was cut
-const DANGLING = /\b(?:but i'?m curious|i'?m curious though|so tell me|tell me|but|and|so|wondering|i wonder)\s*[.…]*$/i;
+/** Messages that trail off ("Oh, I just meant") joined to the next one, so the thought reads as one line. */
+function joinStubs(list) {
+  const out = [];
+  for (let i = 0; i < list.length; i += 1) {
+    const m = String(list[i]).trim();
+    if (i < list.length - 1 && DANGLING.test(m) && wordCount(m) <= 6) {
+      const next = String(list[i + 1]).trim();
+      out.push(`${m.replace(/[.…,]+$/, '')} ${/^I\b/.test(next) ? next : next.charAt(0).toLowerCase() + next.slice(1)}`);
+      i += 1;
+    } else out.push(m);
+  }
+  return out;
+}
+const DANGLING = /\b(?:but i'?m curious|i'?m curious though|so tell me|tell me|but|and|so|wondering|i wonder|i (?:just )?meant|i mean)\s*[.…,]*$/i;
 // an excuse for her own line after he pushed back
 const EXCUSE = /\b(?:i just (?:thought|figured|assumed|meant)|i (?:thought|figured|assumed) (?:you|u)|i was just (?:saying|asking)|sorry,? i)\b/i;
 // he hands her the lead ("I'm all yours", "what are you going to do with me"): a concrete move now, and a new subscriber's direct ask may come
@@ -1811,6 +1824,7 @@ const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))
 // round 4, F4: a door is something he can pick up (a question, a guess about him, a dare, an invitation); a bare "you" isn't
 const DOOR = /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i;
 // round 4, H3: brushing his feeling off, advice he didn't ask for, and his asking for it (scripts/probes/round4-patterns.cjs)
+const LONELY_HOOK = /\b(?:(?:get|gets|getting|so|kinda|bit)\s+lonely|nobody (?:talks|texts) (?:to )?me|keep me company|i need (?:you|someone)|don'?t leave me)\b/i;
 const DISMISS = /\b(?:don'?t\s+worry|it'?ll\s+(?:be|get)\s+(?:ok(?:ay)?|fine|better|alright)|everything\s+happens\s+for\s+a\s+reason|look\s+on\s+the\s+bright\s+side|cheer\s+up|could\s+be\s+worse|you'?ll\s+be\s+(?:fine|ok(?:ay)?)|it'?s\s+not\s+that\s+bad|it\s+takes\s+time|stay\s+strong|one\s+day\s+at\s+a\s+time|at\s+least\s+you)\b/i;
 const ADVICE = /\b(?:you\s+should|you\s+need\s+to|you\s+have\s+to|you\s+gotta|try\s+to|have\s+you\s+tried|why\s+don'?t\s+you|maybe\s+you\s+(?:could|should))\b/i;
 const ADVICE_ASKED = /\b(?:what\s+(?:should|would|do)\s+(?:i|you)\s+do|any\s+(?:advice|tips|ideas)|what\s+would\s+you\s+do|help\s+me|tell\s+me\s+what\s+to\s+do|what\s+do\s+you\s+think\s+i\s+should)\b/i;
@@ -1853,7 +1867,7 @@ const COOLING_READ = /\b(?:dull|boring|bored|too much|annoyed|irritated|pushing 
 // round 4: replies with no pet name (F5) and replies with no name of his (G1: the ask, the price, right after a no)
 const NO_PET_GOALS = new Set(['comfort', 'reassure', 'calm', 'ease_off', 'honest_no', 'why_not', 'goodbye', 'dry_bye']);
 const NO_NAME_GOALS = new Set(['offer', 'first_offer', 'cheaper', 'steer_to_sale', 'direct_ask', 'readiness_check', 'point_to_ppv', 'why_not', 'answer_ppv']);
-const SERIOUS_STYLE = /brushes his feeling off|advice he didn'?t ask for|says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+const SERIOUS_STYLE = /loneliness as a hook|brushes his feeling off|advice he didn'?t ask for|says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2693,6 +2707,18 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         // a reply all about her ("I love how names travel makes me want to try some rooibos tea again"): no door for him
         now.style.push('It gives him nothing to answer: it is all about you. Say something to him he can pick up (a guess about him, "bet you…", "you seem…", or tell him something and hand it back).');
       }
+      // round 4: the same small story of hers again ("a smoothie spill", then "a second coffee spill"): something else, or nothing
+      if (base.plan?.beats?.some(b => /thing of yours/.test(b))) {
+        const FILLER = new Set('though first second third before after everywhere always never little still again already other another today tonight morning everything something anything maybe probably'.split(' '));
+        const stems = (t) => Plan.topicWords(t).filter(w => !FILLER.has(w)).map(w => w.slice(0, 5));
+        const herTopics = new Set(recentHer.slice(-3).flatMap(stems));
+        const hisTopics = new Set(stems(`${voice?.his || ''} ${latestText}`));
+        const repeated = stems(draft.messages.join(' ')).find(w => herTopics.has(w) && !hisTopics.has(w));
+        if (repeated) now.style.push(`You already told him about that ("${repeated}"): tell him something else of yours, or nothing.`);
+      }
+      // round 4, I3: loneliness as a hook; I4: a compliment inside a selling message
+      if (!base.plan?.hard && LONELY_HOOK.test(draft.messages.join(' '))) now.style.push('Don\'t use loneliness as a hook: share something light of yours instead.');
+      if (draft.offer && Sf.COMPLIMENT.test(draft.messages.join(' '))) now.style.push('Keep the compliment out of the message with the PPV: it reads as a sales move there.');
       // round 4, H3: in a hard moment, nothing that brushes his feeling off, and no advice he didn't ask for
       if (base.plan?.hard && DISMISS.test(draft.messages.join(' '))) now.style.push(`It brushes his feeling off ("${draft.messages.join(' ').match(DISMISS)[0]}"): name it and stay with it.`);
       if (base.plan?.hard && ADVICE.test(draft.messages.join(' ')) && !ADVICE_ASKED.test(voice?.his || latestText)) now.style.push('It gives advice he didn\'t ask for: stay with what he feels; ask if he wants ideas.');
@@ -2745,6 +2771,9 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
     if (pick.badQuestion && pick.verdict !== 'block') {
       const before = draft.messages.join(' ');
       draft.messages = P.unQuestion(draft.messages, { keep: 0, his: voice?.his || '' });
+      // a stub left by the cut ("I just meant"): it goes too, when something else remains
+      const kept2 = draft.messages.filter(m => !(DANGLING.test(String(m).trim()) && wordCount(m) <= 4));
+      if (kept2.length) draft.messages = kept2;
       if (draft.messages.join(' ') !== before) notes.push(`Its question was cut: ${pick.badQuestion}`);
     }
     // a typo now and then (A8), only on a reply that passed and carries no PPV
@@ -2754,7 +2783,9 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       draft.messages = t.messages;
       typo = t.typo;
     }
-    if (pick.verdict !== 'block' && base.plan?.length?.target !== 'piece') draft.messages = P.surfacePass(draft.messages);   // lowercase starts now and then, no full stop on a short last bubble
+    // a message that trails off into the next one ("Oh, I just meant" / "you've got a dark sense of humour"): one message again
+    draft.messages = joinStubs(draft.messages);
+    if (pick.verdict !== 'block' && base.plan?.length?.target !== 'piece') draft.messages = P.surfacePass(draft.messages, { his: voice?.his || '' });   // lowercase starts now and then, no full stop on a short last bubble
     if (noPpv && pick === kept && !draft.offer) notes.push(`Written again without a PPV: ${noPpv}`);
     // a problem about meaning that survived every rewrite: a person looks before it goes (not "ok")
     const status = pick.verdict === 'ok' && !stillSerious.length ? 'ok' : pick.verdict === 'ok' || pick.verdict === 'person' ? 'check' : 'blocked';
@@ -2821,6 +2852,8 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new', que
     const qs = questionSentences(d.messages);
     if (qs.length && plan?.ask?.follow_only && !qs.some(q => followsHim(q, hisLine))) { score -= 20; why.push('changes the subject after two questions'); }
     else if (qs.length && ['sharing', 'venting'].includes(plan?.reading?.doing)) { if (qs.some(q => followsHim(q, hisLine))) { score += 10; why.push('follows up on what he shared'); } else { score -= 10; why.push('changes the subject'); } }
+    if (Sf.ME_TOO.test(text) && (voice?.recent || []).slice(-5).some(r => Sf.ME_TOO.test(r))) { score -= 10; why.push('agrees with his taste again'); }
+    if (LONELY_HOOK.test(text) && !plan?.hard) { score -= 10; why.push('loneliness as a hook'); }
     if (!plan?.name_given && LATE_NAME.test(text)) { score -= 15; why.push('comments on his name late'); }
     if (Sf.FELT_FROM_HIM.test(text) && ['new', 'friendly'].includes(closeness) && !voice?.earned) { score -= 20; why.push('claims a feeling he didn\'t cause'); }
     const beats = (plan?.beats || []).join(' ');

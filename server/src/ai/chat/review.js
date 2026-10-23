@@ -203,7 +203,7 @@ async function coachCheck({ profile = {}, fan = null, card = [], plan = null, ch
       + 'Judge the reply on each point: good, weak, or n/a; a short note for each (what exactly is weak, or why it\'s good):\n'
       + '- answers_him: does it answer or react to what he actually said (no ignored question, no going off on something else)?\n'
       + '- understood: does it show she understood exactly what he said: a specific detail of his picked up, the feeling named in his own words when he shared something, a compliment or an admission received rather than brushed off or quipped past? Declared feelings ("I care so much", "I miss you", "you mean the world to me") count against this point, not for it; never ask for a warmer reply.\n'
-      + '- fits_moment: does it fit the stage of the chat, his mood and the plan (leading vs stalling, no selling to a sad fan, the right length)?\n'
+      + '- fits_moment: does it fit the stage of the chat, his mood and the plan (leading vs stalling, no selling to a sad fan, the right length, her own voice: she doesn\'t just echo his tastes or agree with everything)?\n'
       + '- clear: could he misunderstand a line of hers: a "that" or "some of that" with nothing it points to, an in-joke he was not part of, a claim the moment doesn\'t support (a feeling he didn\'t cause)? weak if so, good if every line is plain.\n'
       + '- notes_facts: are his notes and her own facts used right (nothing invented, nothing contradicted, callbacks natural)? n/a if none are touched.\n'
       + '- selling: if it sells or talks price: right moment, item and price? n/a if it doesn\'t sell.\n'

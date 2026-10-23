@@ -87,6 +87,7 @@ const SELLING_GUIDE = [
 const CHAT_GUIDE = [
   'Answer what he said first. If he asks something, answer it plainly before anything else.',
   'Sound like a real girl texting, not a script: react to his words and build on what he tells you. Pick up one word or detail of his; never repeat his sentence back to him.',
+  'You have your own tastes (see what you like). Agreeing with everything he says is not flirting: now and then say playfully what you\'d rather ("hmm, not me, I\'d drag you out dancing"); never argue, never lecture.',
   'Short and simple: most replies are 4–11 words in one message (real chatters average 7); a second short message about one reply in four, with any question in the last one; three is rare. Everyday texting words, never an assistant\'s or an office\'s ("agenda", "plans for the day", "I must say", "indeed", "trips me up", "I like your honesty"), no clever or poetic lines.',
   'Talk to him, not about him: never "someone\'s eager", "aren\'t they?" or "I like a man who…".',
   'Questions: at most one per reply, in about four replies out of ten, mostly follow-ups on what he just said; never three replies in a row with one. The rest react, tease or tell him something about you instead. When he has told you what he wants, or said yes to something, don\'t ask again: do it, say yes or lead.',
@@ -476,7 +477,10 @@ function dropName(t, name) {
   const out = t
     .replace(new RegExp(`^\\s*${n}\\s*[,!.…]+\\s*`, 'i'), '')
     .replace(new RegExp(`,\\s*${n}\\s*,`, 'gi'), ',')
-    .replace(new RegExp(`[,\\s]+${n}(?=\\s*[.!?…]|\\s*$)`, 'gi'), '');
+    .replace(new RegExp(`[,\\s]+${n}(?=\\s*[.!?…]|\\s*$)`, 'gi'), '')
+    // after a first word ("So Bob, what…", "hey Bob"): the word stays, his name goes (round 4)
+    .replace(new RegExp(`^(\\s*(?:so|and|well|oh|ok(?:ay)?|hey|hi|aww*|haha|mm+|yes|yeah|but))\\s+${n}\\s*,\\s*`, 'i'), '$1 ')
+    .replace(new RegExp(`\\b(hey|hi|hello|aww*|oh|thanks|thank you|night|morning)\\s+${n}\\b`, 'gi'), '$1');
   if (out === t || out.trim().split(/\s+/).length < 2) return t;
   return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
@@ -489,6 +493,8 @@ function dropPet(t) {
     .replace(new RegExp(`\\b(hey|hi|hello|aww*|oh|mm+|ok(?:ay)?|yes|night)\\s+(?:${PETS})\\b`, 'gi'), '$1')
     .replace(new RegExp(`^\\s*(?:${PETS})\\s*[,!.…]+\\s*`, 'i'), '')
     .replace(new RegExp(`,\\s*(?:${PETS})\\s*,`, 'gi'), ',')
+    // a pet name run into the next sentence with no full stop ("hey there, babe Glad you found me"): the sentence ends there
+    .replace(new RegExp(`,\\s*(?:${PETS})\\s+(?=[A-Z])`, 'g'), '. ')
     .replace(new RegExp(`,\\s*(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '')
     // the last word with no comma ("I love that energy babe"), not "you're my baby" or "a baby"
     .replace(new RegExp(`(?<!\\b(?:my|your|his|her|a|the|that|this))\\s+(?:${PETS})(?=\\s*[.!?…]|\\s*\\p{Extended_Pictographic}|\\s*$)`, 'giu'), '');
@@ -740,11 +746,20 @@ function outfitClash(text, outfit) {
  * reply in five starts in lowercase; a short last bubble doesn't end with a full stop (8% of theirs do,
  * and a full stop at the end of a short text reads as less sincere).
  */
-function surfacePass(list, { rand = Math.random } = {}) {
+function surfacePass(list, { rand = Math.random, his = '' } = {}) {
   const out = list.map(t => String(t));
   if (!out.length) return out;
-  if (rand() < 0.2 && /^[A-Z][a-z]/.test(out[0]) && !/^I(?:'|\s)/.test(out[0])) out[0] = out[0][0].toLowerCase() + out[0].slice(1);
+  // round 4, I2: she matches his texting habits (lowercase starts, end punctuation, emoji) once he has written a few lines
+  const lines = String(his || '').split('\n').map(x => x.trim()).filter(x => /\p{L}/u.test(x));
+  const known = lines.length >= 3;
+  const share = (f) => lines.filter(f).length / (lines.length || 1);
+  const lowerP = known ? Math.max(0.1, Math.min(0.8, share(x => /^[a-z]/.test(x)))) : 0.2;
+  const neverStops = known && share(x => /[.!?]$/.test(x)) === 0;
+  const fewEmoji = known && share(x => emojisIn(x).length > 0) < 0.2;
+  if (rand() < lowerP && /^[A-Z][a-z]/.test(out[0]) && !/^I(?:'|\s)/.test(out[0])) out[0] = out[0][0].toLowerCase() + out[0].slice(1);
+  if (fewEmoji) { let kept = 0; for (let i = 0; i < out.length; i += 1) out[i] = out[i].replace(EMOJI, (e) => (kept++ ? '' : e)).replace(/\s{2,}/g, ' ').trim(); }
   const last = out.length - 1;
+  if (neverStops) out[last] = out[last].replace(/([^.])\.$/, '$1');
   if (/[^.!?]\.$/.test(out[last]) && !/[.!?…]\s+\S/.test(out[last]) && (out[last].match(/[\p{L}\p{N}']+/gu) || []).length <= 14) out[last] = out[last].replace(/\.$/, '');
   return out;
 }

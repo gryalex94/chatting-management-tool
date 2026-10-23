@@ -3,7 +3,7 @@
 // Use these expressions as written (or tighten them and keep this file passing).
 const P = {
   TALK_ONLY: /\b(?:(?:just|only)\s+(?:(?:want(?:ed)?|wanna|came|here)\s+(?:to\s+)?)?(?:talk|chat)(?:ting)?|came\s+(?:here\s+)?(?:just\s+|only\s+)?(?:to|for)\s+(?:talk|chat|a\s+chat|the\s+conversation)|(?:i'?m|am)\s+(?:just\s+)?here\s+(?:to|for)\s+(?:talk|chat|the\s+company|your\s+company)|not\s+(?:here\s+)?(?:for|about)\s+(?:that|pics|content|nudes|buying|the\s+pics)|not\s+(?:looking|here)\s+to\s+(?:buy|pay|spend)|i'?m\s+good(?:\s*,?\s*thanks?)?(?=\s*[.!]*\s*$)|no\s+thanks|not\s+(?:right\s+)?now|maybe\s+(?:later|another\s+time|some\s+other\s+time)|i\s+don'?t\s+(?:want|need)\s+(?:anything|to\s+(?:see|buy))|let'?s\s+(?:just\s+)?(?:talk|chat))\b/i,
-  FELT_FROM_HIM: /\b(?:(?:you(?:'re|\s+are)?|you'?ve)\s+(?:already\s+)?(?:making|got(?:ten)?|made)\s+me\s+(?:feel|blush|smile|melt|giggle|blushing|smiling|giggling)|you\s+make\s+me\s+(?:feel|blush|smile|melt|giggle)|(?:making|made)\s+my\s+(?:day|night|evening|week)|feel(?:ing)?\s+(?:all\s+kinds\s+of\s+|so\s+|really\s+|extra\s+)?special|butterflies|(?:i'?m|im)\s+(?:blushing|melting))\b/i,
+  FELT_FROM_HIM: /\b(?:(?:you(?:'re|\s+are)?|you'?ve)\s+(?:already\s+)?(?:making|got(?:ten)?|made)\s+me\s+(?:feel|blush|smile|melt|giggle|blushing|smiling|giggling)|you\s+make\s+me\s+(?:feel|blush|smile|melt|giggle)|(?:making|made)\s+my\s+(?:day|night|evening|week|morning|afternoon)|feel(?:ing)?\s+(?:all\s+kinds\s+of\s+|so\s+|really\s+|extra\s+)?special|butterflies|(?:i'?m|im)\s+(?:blushing|melting))\b/i,
   DOOR: /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i,
   NAME_GIVEN: /\b(?:[Mm]y\s+name(?:'?s|\s+is)|[Nn]ame'?s|[Cc]all\s+me)\s+([A-Za-z]{2,15})\b|\bI'?m\s+([A-Z][a-z]{1,14})\b/,
   LATE_NAME: /\b(?:love|like|cute|nice|great|lovely|cool|sexy)\s+(?:that\s+|the\s+|your\s+)?name\b|\bname\s+suits\s+you\b/i,
@@ -25,7 +25,7 @@ const T = [
   ['TALK_ONLY', false, 'I came here to see your pics'], ['TALK_ONLY', false, 'I came for you'], ["TALK_ONLY", false, "I'm good at that"], ['TALK_ONLY', false, 'I just want to see you naked'],
   ['FELT_FROM_HIM', true, "Bob, love that name. You're making me feel all kinds of special already."],
   ['FELT_FROM_HIM', true, "I just meant you're making me blush, babe"], ['FELT_FROM_HIM', true, "just that you're already making my day brighter, Bob"],
-  ['FELT_FROM_HIM', true, "aww you've got me blushing"], ['FELT_FROM_HIM', true, "I'm blushing here"],
+  ['FELT_FROM_HIM', true, "aww you've got me blushing"], ['FELT_FROM_HIM', true, 'Just that you made my morning brighter, Bob'], ['FELT_FROM_HIM', true, "I'm blushing here"],
   ['FELT_FROM_HIM', false, 'I like the way you think, Bob... lazy days are my weakness too'], ['FELT_FROM_HIM', false, 'Lucky you, getting all my attention today 😉'],
   ['FELT_FROM_HIM', false, "it's fun, but can get lonely sometimes"], ['FELT_FROM_HIM', false, 'that made me laugh'],
   ['DOOR', false, "Bob, love that name. You're making me feel all kinds of special already."], ['DOOR', false, 'I love how names travel makes me want to try some rooibos tea again'],

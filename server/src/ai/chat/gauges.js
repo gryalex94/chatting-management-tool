@@ -124,7 +124,7 @@ function updateGauges(prev, ctx = {}) {
 const MOVES = {
   react: { goal: 'chat', text: 'React to what he said with real interest, in your own words; nothing steered' },
   curious: { goal: 'curious', text: 'React, then one real question about the new thing he said' },
-  share: { goal: 'share', text: 'React, then a small real thing of yours that connects to what he said (a place, a memory, a plan of yours about it), with a person in it when it fits; no question' },
+  share: { goal: 'share', text: 'React, then a small real thing of yours that connects to what he said (a place, a memory, a plan of yours about it): a small fail or a shy moment rather than a complaint or a brag, with a person in it when it fits; no question' },
   get_to_know: { goal: 'get_to_know', text: 'Get to know him: one easy question about him' },
   flirt: { goal: 'flirt', text: 'Flirt: playful, a compliment, light teasing' },
   tease: { goal: 'tease', text: 'He got sexual: say yes playfully and tease; don\'t stall' },

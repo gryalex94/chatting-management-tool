@@ -31,7 +31,7 @@ const STANCE_TEXT = {
 const BEATS = {
   welcome_new: ['welcome him, glad he found you', 'react to what he wrote', 'one question: what brought him here or what he is into'],
   curious: ['react to what he just said', 'one real question about it'],
-  share: ['react to his exact words (name the detail he gave)', 'a small real thing of yours that matches what he just said (same topic); a person in it when it fits'],
+  share: ['react to his exact words (name the detail he gave)', 'a small real thing of yours that matches what he just said (same topic): a small fail, a clumsy or shy moment rather than a complaint or a brag; a person in it when it fits'],
   chat: ['react to what he said with real interest'],
   get_to_know: ['react to what he said', 'one easy question about him'],
   flirt: ['react to what he said', 'a playful compliment or a light tease'],
@@ -616,7 +616,10 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   p.taste = taste && (taste.sent.length || taste.dislikes.length || taste.only.length) ? taste.text : '';
 
   // the beats (step 4): what this reply does, in order; and what is still open about him from earlier readings
+  // round 4, I5: with a close fan in a heated moment, a playful challenge or a small delay; never with a new or friendly fan, after his no, or when it's hard
+  p.tension = p.goal === 'tease' && ['flirty', 'intimate', 'girlfriend'].includes(profile.closeness) && (gauges?.heat ?? 0) >= 30 && !profile.new_sub && !session?.buy_no && !session?.first_sale?.declined && !p.hard;
   p.beats = beatsFor(p);
+  if (p.tension) p.beats = [...p.beats.slice(0, 1), 'a playful challenge or a small delay: make him earn the next step ("maybe… if you\'re good"), then give it', ...p.beats.slice(1)].slice(0, 3);
   p.open = (session?.open || []).filter(o => !(p.reading?.readings || []).some(r => overlap(r.what, o.what) >= 0.5)).slice(0, 3);
   // 7. the story move, when they sext
   p.story = sexting?.on && sexting.moves?.moves?.length ? { move: sexting.moves.moves[0], why: `the next move for ${sexting.moves.where}` } : null;

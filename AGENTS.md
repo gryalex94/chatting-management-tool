@@ -44,7 +44,8 @@ node scripts/simulate-dialogues.js          # 37 edge-case dialogues, plan only;
 node scripts/simulate-dialogues.js 2 21 36  # a few of them
 node scripts/replay-practice.js             # saved practice conversations replayed; lists turns that decide differently now
 node scripts/check-communication.js         # offline (no model calls): how the engine reads him and keeps her words; every line PASS
-node scripts/written-moments.js             # five moments written by the real writer, to judge by eye (a few cents)
+node scripts/written-moments.js             # six moments written by the real writer, to judge by eye (a few cents)
+node scripts/probes/round4-patterns.cjs     # offline: every round-4 pattern against real and made-up lines
 node scripts/scorecard.js --days 7          # her replies measured against the human chatters' bands
 node scripts/scorecard.js --days 7 --moves 150   # plus the main move of 150 replies, labelled
 cd ../client && npx eslint src              # the client lints clean

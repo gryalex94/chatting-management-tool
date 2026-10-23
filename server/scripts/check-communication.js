@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy,DISMISS,ADVICE,ADVICE_ASKED};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy,DISMISS,ADVICE,ADVICE_ASKED,LONELY_HOOK,joinStubs};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -189,6 +189,21 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   check('H2 a no to buying holds selling for the conversation, kept between replies', keep === true && h2.used.session.buy_no === true && !braked.sell.allowed && /signalled no to buying/.test(braked.sell.why || ''), { keep, buyNo: h2.used.session.buy_no, sell: braked.sell });
   Object.assign(reading, { wishes: null });
   check('H3 brushing him off and unasked advice are caught', audit.DISMISS.test("don't worry, it'll be okay") && audit.ADVICE.test('you should talk to her') && audit.ADVICE_ASKED.test('what should I do?') && !audit.DISMISS.test("that sounds really lonely, I'm sorry"));
+
+  // round 4, Group I: her character
+  check('I1 agreeing with his taste twice in a row is flagged', Sf.voiceProblems(['lazy days are my weakness too'], { recent: ['x', 'doing nothing sounds like my kind of fun'], closeness: 'friendly' }).some(x => /agreed with him again/.test(x)) && !Sf.voiceProblems(['lazy days are my weakness too'], { recent: ['x', 'y'], closeness: 'friendly' }).some(x => /agreed with him again/.test(x)));
+  const low = P.surfacePass(['Haha that sounds fun'], { rand: () => 0.5, his: 'hey whats up\nlol nice\nyeah same tbh' })[0];
+  const cap = P.surfacePass(['Haha that sounds fun'], { rand: () => 0.5, his: 'Hey, how are you?\nI had a long day.\nWork was busy.' })[0];
+  check('I2 she starts lowercase when he does, not when he writes properly', low === 'haha that sounds fun' && cap === 'Haha that sounds fun', { low, cap });
+  check('I3 loneliness as a hook is caught, a small fail is not', audit.LONELY_HOOK.test("it's fun, but can get lonely sometimes") && audit.LONELY_HOOK.test("Bet you'd keep me company though") && !audit.LONELY_HOOK.test("I burnt my toast twice this morning, I'm a disaster"));
+  const comp = (extra) => Sf.voiceProblems(["you're so sweet"], { recent: ['a', 'b', 'c', 'd', 'e'], lately: ["you're so sweet", 'b', 'c', 'd', 'e', 'f'], his: 'I fixed my car today', closeness: 'intimate', ...extra });
+  check('I4 close fans: a compliment every few replies, but about something of his', !comp({}).some(x => /again; she did that recently/.test(x)) && comp({}).some(x => /something he actually said/.test(x)) && !Sf.voiceProblems(["you're so smart, fixing your own car"], { recent: ['a', 'b', 'c'], his: 'I fixed my car today', closeness: 'intimate' }).some(x => /something he actually said|recently/.test(x)));
+  const hot = Plan.planReply({ level: { his: 2, max: 2, mood: 'horny', warm: true }, latest: ['fuck you look so good tonight'], profile: { ...profile, closeness: 'intimate' }, herReplies: 8, reading: { ...reading, doing: 'flirting' }, gauges: { heat: 60, mood: 70, rapport: 80, readiness: 40, doubt: 0, engagement: 80, surprise: 10 }, rand: () => 0 });
+  const newFan = Plan.planReply({ level: { his: 2, max: 2, mood: 'horny', warm: true }, latest: ['fuck you look so good tonight'], profile: { ...profile, closeness: 'new' }, herReplies: 8, reading: { ...reading, doing: 'flirting' }, gauges: { heat: 60, mood: 70, rapport: 80, readiness: 40, doubt: 0, engagement: 80, surprise: 10 }, rand: () => 0 });
+  check('I5 a playful challenge only with a close fan', hot.goal === 'tease' && hot.tension && hot.beats.some(b => /playful challenge/.test(b)) && !newFan.tension, { goal: hot.goal, beats: hot.beats, newFan: newFan.tension });
+
+  check('a message that trails off joins the next one', same(audit.joinStubs(['Oh, I just meant', "You've got a dark sense of humour"]), ["Oh, I just meant you've got a dark sense of humour"]) && same(audit.joinStubs(['haha nice', 'what about you?']), ['haha nice', 'what about you?']));
+  check('a pet name run into the next sentence goes', P.tidyMessages(['hey there, babe Glad you found me'], { emojis: 'none', recent: [], closeness: 'new' })[0] === 'hey there. Glad you found me');
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);

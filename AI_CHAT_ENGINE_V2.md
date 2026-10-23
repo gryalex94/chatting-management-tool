@@ -62,6 +62,20 @@ From an outside review (Codex, with offline probes) and the Abeba practice chat 
 
 Checked with `scripts/check-communication.js` (offline, every item), the simulation (zero flags), the replay (run 8's third reply now plans a follow-up question) and `scripts/written-moments.js` (five moments written by the real writer).
 
+## Round 4 (23 Oct): the first sale reads him, her own character
+
+From the Bob practice chat (run 11), the research report `reports/Communication and sales papers for Yuna.md` and the review of Greene's *The Art of Seduction*. The full plan with every case is `AI_CHAT_FIX_PLAN_23_OCT.md`; every pattern it names is tested in `server/scripts/probes/round4-patterns.cjs`.
+
+1. **His answer to the direct ask decides the offer.** "I came here just to talk", a no or "I'm broke" ends the first-sale path for that conversation, warm and without pushing (A1); a second unclear answer counts as a no. The ask also waits until he has flirted back at least once and for a moment that fits: not while he cools, not right after he asked her something, not in a repair. If it never fits, no ask that conversation. Before, the offer followed any answer, including "I just want to talk".
+2. **No feelings he didn't cause.** "You're making me feel special" or "you made my morning" is flagged unless his message was a compliment or a flirt.
+3. **A pleasantry means she leads; his name comes back once.** "Got ya, my pleasure!" is read as closing the topic, so she opens a new one. When he gives his name she says it back in that reply; a late comment on his name is caught; his name never goes into a selling message or the reply after a no.
+4. **Repairs by kind.** A word of hers gets its meaning, "that" gets what it pointed to, "what do you mean" gets the line again in plainer words, "like what?" gets an example; a line that claimed too much is taken down a notch. No pet name in a repair, a comfort or a goodbye, or with a new fan who hasn't flirted back.
+5. **Questions judged by whether they follow him.** Two in a row no longer block a third; the next one has to follow up what he just said. Three in a row still block. The scorecard reports the share of her questions that follow him (26% before this round).
+6. **Three wishes, and a brake.** The reader rates what her last line did to his wish to keep talking, to tell her things and to buy. A no to buying holds every PPV for the rest of the conversation until he asks or turns explicit; a first price objection still gets the cheaper piece (A5). On a planned attempt the PPV goes once he shows interest.
+7. **Hard moments.** "Don't worry", "it'll be okay" and advice he didn't ask for are flagged; the comfort beats name his feeling and invite him to say more.
+8. **Her character.** Her own tastes instead of agreeing with everything; her texting style follows his (lowercase, punctuation, emoji); small imperfections instead of loneliness as a hook; more compliments once a fan is close, about something of his and never in a selling message; a playful challenge only with close fans and never tied to money.
+9. **Marks in Practice.** Talk, Tell and Buy under each of her replies, saved with the conversation and shown in the scorecard beside the reader's own reads.
+
 ## What is still the AI's call, and the next lever
 
 Code decides every number (prices, cadence, stages, holds, budgets), checks the reading against his words, and scores the moves. Claude reads the human side (what he is doing, what is new, what it could mean). Mistral writes. The weakest link now is the writing: with a clear plan and clear beats, Mistral still sometimes stalls on a sexual line or asks a rhetorical question instead of the planned one; Claude's check catches it and the targeted rewrite fixes some. The next lever is yours to judge from the blind tests already run (Mistral against Haiku and against Sonnet on talk moments): a Claude writer for talk and curious moments, Mistral for selling and sexting, at about three cents a reply for Sonnet.
