@@ -37,6 +37,12 @@ const MOMENTS = [
       return [turns[2].odd || 'the dark joke was not read as odd', !mood.test(turns[2].her.join(' ')) || 'her mood in the third reply', (!/\?/.test(turns[3].her.join(' ')) || /\?/.test(turns[2].her.join(' '))) || 'a question back when he asked what she meant (and her line was no question)',
         turns.slice(0, 3).every(t => !/\bbabe\b/i.test(t.her.join(' '))) || '"babe" in her first three replies', turns.every(t => !t.aboutMe.some(x => mood.test(x))) || 'her mood stored as a fact'];
     } },
+  { title: 'Group J: a correction is accepted once; "that was mean" is owned, not laughed off',
+    type: 'regular', selling: true, start: [him('got my interview on Thursday'), her('good luck with the interview on Tuesday!')], lines: ['Thursday, not Tuesday', 'that was mean, you never listen'],
+    judge: (turns) => { const a = turns[0].her.join(' '), b = turns[1].her.join(' '); return [/thursday/i.test(a) || 'the corrected day not said back', (a.match(/sorry|my bad|oops/gi) || []).length <= 1 || 'an apology spiral', !/teas|relax|chill|joking|kidding/i.test(b) || '"I was teasing" after "that hurt"']; } },
+  { title: 'Group J: a big change gets "how do you feel?", not a feeling assigned; a mixed message gets both halves; "distract me" gets a light topic',
+    type: 'regular', selling: true, start: [him('hey'), her('hey you, how was your week?')], lines: ['I finally quit that job', 'The interview went well, but the commute would be awful', "It's been a rough day. Please distract me"],
+    judge: (turns) => { const a = turns[0].her.join(' '), b = turns[1].her.join(' '), c = turns[2].her.join(' '); return [!/must be|bet you'?re|you'?re probably/i.test(a) || 'a feeling assigned', /\?/.test(a) || 'no question about how he feels', /commut|journey|travel|drive|far/i.test(b) || 'the catch (the commute) ignored', turns[2].goal === 'distract' || `goal ${turns[2].goal}`, !/sorry|what happened|tell me about it|what'?s wrong|wanna talk about it|want to talk about it/i.test(c) || 'probing into the rough day']; } },
   { title: 'Bob (practice run 11, round 4): his name said back, no feeling he didn\'t cause, no pet name early or in a repair, no PPV after "I came here just to talk to you"',
     type: 'new_sub', selling: true,
     lines: ['Hey there', 'Curiosity to be honest, couldn\'t resist your tallness and the fact that you are asian, you are looking very appealing tbh', 'My name is Bob, and you?', 'Got ya, my pleasure!', 'What do you mean?',

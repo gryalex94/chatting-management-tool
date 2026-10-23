@@ -303,6 +303,21 @@ Agreed with the manager the same day. The book's manipulative tactics stay out (
 
 ---
 
+## Group J: from Brooks's *Talk* (Codex's playbook, 23 Oct)
+
+Checked against the engine the same day; everything else in the playbook was already built in rounds 3 and 4, or goes against the manager's decisions (typos, her small invented stories, spending in closeness, the delays), which stay.
+
+- **J1 A correction.** "Thursday, not Tuesday", "no, I said…", "you got my name wrong": accept it, say the corrected thing once, no apology spiral; the contradiction check ("didn't you say…?") is off that turn; the corrected fact is noted as learned. An "X, not Y" line counts only when she actually said Y.
+- **J2 "That hurt" is not pushback.** "That was mean", "not cool", "why would you say that": she names the specific thing she said and owns it plainly; "I was teasing", "relax", "can't take a joke" are flagged and rewritten. A laugh at the start ("haha not funny") is not a report of hurt.
+- **J3 A big change, no feeling said.** "I finally quit that job", "she left": the one question becomes "how are you feeling about it?"; assigning a feeling ("you must be relieved") is flagged. "I quit smoking" doesn't count.
+- **J4 A mixed message.** Good news with a catch ("went well, but the commute would be awful"): the react beat says respond to both halves.
+- **J5 "Distract me."** "Distract me", "cheer me up", "talk about something else": hard mode off, one light topic or a playful question, no probing, nothing sold.
+- **J6 A closed question for a bare reference.** "I'll take that one" with two PPVs waiting: she asks which ("the blue set?"), nothing else.
+- **J7 Deeper follow-ups.** The reader's question prefers his relationship to the subject (what he enjoys, how he started, what surprised him) over facts about it.
+- **J8 (round 5)** Updated preferences replace old notes instead of sitting beside them.
+
+Patterns in `server/scripts/probes/round4-patterns.cjs` (107 lines), offline checks J1–J6 in `check-communication.js`, two written moments.
+
 ## How to verify (in this order)
 
 1. `node scripts/probes/round4-patterns.cjs` passes (68 lines).

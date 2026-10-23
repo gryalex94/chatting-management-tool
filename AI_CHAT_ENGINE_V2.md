@@ -75,6 +75,7 @@ From the Bob practice chat (run 11), the research report `reports/Communication 
 7. **Hard moments.** "Don't worry", "it'll be okay" and advice he didn't ask for are flagged; the comfort beats name his feeling and invite him to say more.
 8. **Her character.** Her own tastes instead of agreeing with everything; her texting style follows his (lowercase, punctuation, emoji); small imperfections instead of loneliness as a hook; more compliments once a fan is close, about something of his and never in a selling message; a playful challenge only with close fans and never tied to money.
 9. **Marks in Practice.** Talk, Tell and Buy under each of her replies, saved with the conversation and shown in the scorecard beside the reader's own reads.
+10. **From Brooks's *Talk* (group J).** A correction is accepted once with no apology spiral; "that hurt" is owned plainly, never laughed off as teasing; a big change with no feeling said gets "how are you feeling about it?" instead of a feeling assigned; a mixed message gets both halves; "distract me" gets a light topic with no probing; "I'll take that one" with two pieces waiting gets "the blue set?"; the reader's follow-up prefers his relationship to a subject over facts about it.
 
 ## What is still the AI's call, and the next lever
 

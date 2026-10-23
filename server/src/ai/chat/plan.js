@@ -73,13 +73,19 @@ function beatsFor(p) {
   const runner = p.scores?.filter(x => x.allowed && x.move !== best?.move)[0] || null;
   if (best && runner && RUNNER_BEAT[runner.move] && runner.score >= best.score * 0.75 && base.length < 3
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
-  if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
+  if (p.correction) base.unshift('he corrected you: accept it and say the corrected thing once ("Thursday, right, my bad"), no apology spiral, then carry on with the corrected fact');
+  else if (p.repair && p.repair_kind === 'hurt') base.unshift('he says your line hurt: name the specific thing you said and own it plainly ("that came out wrong, I didn\'t mean it like that"); never "I was teasing", never "relax"; then ease off');
+  else if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
   else if (p.clarify && p.clarify_kind === 'overclaim') base.unshift('take your last line down a notch in plain words: no apology, don\'t say it again');
   else if (p.clarify && p.clarify_kind === 'term') base.unshift(`say what "${p.clarify_term}" means, in plain words`);
   else if (p.clarify && p.clarify_kind === 'example') base.unshift('give one concrete example');
   else if (p.clarify && p.clarify_kind === 'repeat') base.unshift('say your last line again, the same words');
   else if (p.clarify) base.unshift('say again what you meant, in plainer words; no question back unless your line was a question');
   else if (p.answer_first) base.unshift('answer his question plainly, in one line');
+  // J4: a mixed message: the react beat covers both halves
+  if (p.contrast && !p.answer_first) { const i = base.findIndex(b => /^react/.test(b)); if (i >= 0) base[i] = 'respond to both halves of what he said: the good part and the catch, not only one'; }
+  // J5: a distraction he asked for
+  if (p.goal === 'distract') base.splice(0, base.length, 'one light topic or a playful question, nothing about the rough day', 'no probing into how he feels');
   // round 4, F4: he closed the topic with a pleasantry: she leads with something new instead of reacting to it
   if (p.closing && !p.answer_first && !p.clarify && !p.repair && ['chat', 'get_to_know', 'curious', 'share', 'flirt'].includes(p.goal)) base.splice(0, base.length, 'a short warm acknowledgement, or none', 'lead: one easy question about him, or a small thing of yours that opens a new topic');
   // he just gave his name: she says it back warmly in this reply
@@ -127,6 +133,15 @@ const BUDGET = { whale: 20, new: 15, spender: 15, small: 10, none: 8, tw: 5 };
 // doubt that she is real (Q24c); "are you a real man / the real deal" is mockery or praise, not doubt (fix 2)
 const SUSPICIOUS = /\b(?:(?:are|r)\s+(?:you|u)\s+(?:even\s+)?(?:an?\s+)?(?:real(?!\s+(?:man|woman|one|deal|friend|leader|king|guy|girl|chad|boss))|bot|robot|fake|ai|human|a\s+scam|scamming|chat\s*bot|chatgpt)|is\s+(?:this|it)\s+(?:really\s+)?(?:you|real|a\s+bot|an\s+ai|fake|a\s+scam)|scam\w*|catfish\w*|chat\s*bot|chatgpt|fake\s+(?:account|profile|pics?)|not\s+really\s+(?:you|her)|who\s+am\s+i\s+(?:really\s+)?talking\s+to)\b/i;
 // he asked her something directly (fix 4): a question mark, or a question word up front
+// round 4, group J (from Brooks's Talk via Codex's playbook): a correction, reported hurt, a big change with no feeling, a mixed
+// message, a request for distraction, a bare reference to one of two pieces (scripts/probes/round4-patterns.cjs)
+const CORRECTS = /^\W*(?:no,?\s*)?[A-Z][\w' -]{1,30}?,?\s+not\s+[\w' -]{1,30}\W*$|\b(?:^\W*(?:no,?\s*)?i\s+(?:said|told\s+you)\s+(?!what\b|so\b)|you\s+(?:got|have)\s+(?:it|that|my\s+\w+)\s+wrong|wrong\s+(?:day|name|city|town|place|number|one)|^\W*(?:no|nope|nah),?\s+(?:it'?s|its|it\s+was|i'?m|im|he'?s|she'?s|my|the)\b|^\W*actually,?\s+(?:it'?s|its|i|my|he|she|the|that)\b)/i;
+const HURT = /^(?!\W*(?:ha+h?a*|lol|lmao)\b)[\s\S]*?\b(?:that\s+(?:was|is|felt)\s+(?:mean|rude|harsh|hurtful|uncalled\s+for|not\s+(?:cool|nice|funny|ok(?:ay)?))|that\s+(?:actually\s+)?hurt|that\s+stung|not\s+cool|not\s+funny|that'?s\s+(?:mean|harsh|rude|hurtful)|why\s+would\s+you\s+say\s+that|low\s+blow|dont\s+(?:say|talk)\s+(?:that|to\s+me)\s+like\s+that|don'?t\s+(?:say|talk)\s+(?:that|to\s+me)\s+like\s+that)\b/i;
+const BIG_CHANGE = /\b(?:i\s+(?:finally\s+|just\s+)?(?:quit(?!\s+(?:smoking|drinking|vaping|sugar|coffee|caffeine|alcohol|gaming|the\s+gym))|resigned|got\s+fired|got\s+laid\s+off|broke\s+up|got\s+divorced|moved\s+out|moved\s+to|got\s+promoted|got\s+the\s+job|retired|signed\s+the|sold\s+the\s+house|proposed|got\s+engaged|got\s+married|became\s+a\s+dad|dropped\s+out)|she\s+left|he\s+left|we\s+split|it'?s\s+over\s+with|i'?m\s+done\s+with)\b/i;
+const FEELING_SAID = /\b(?:happy|glad|relieved|relief|excited|sad|gutted|scared|nervous|terrified|devastated|thrilled|stressed|worried|fine|good|great|bad|awful|hurt|angry|pissed|upset|proud|free|lost|numb|weird|strange|okay|ok)\b/i;
+const CONTRAST = /\b(?:but|though|although|except|apart\s+from|the\s+only\s+(?:thing|problem|downside|catch)|on\s+the\s+other\s+hand|however|still,|shame\s+that|just\s+wish)\b/i;
+const DISTRACT = /\b(?:distract\s+me|cheer\s+me\s+up|make\s+me\s+laugh|take\s+my\s+mind\s+off|tell\s+me\s+something\s+(?:fun|funny|good|nice|random|happy)|something\s+to\s+cheer\s+me\s+up|need\s+a\s+laugh|lighten\s+(?:things|it|the\s+mood)\s+up|talk\s+about\s+(?:something|anything)\s+else)\b/i;
+const BARE_PICK = /^\W*(?:(?:ok(?:ay)?|yes|yeah|sure),?\s*)?(?:i'?ll\s+(?:take|get|buy|have|go\s+with)|send\s+me|i\s+want|give\s+me|let'?s\s+do|do)\s+(?:that|this|it|that\s+one|this\s+one|the\s+(?:first|second|other|last)\s+one|those)\W*$|^\W*(?:that|this)\s+one\W*$/i;
 const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/i;
 // he pushes back on something she just said ("why finally? I just subscribed"): she owns it lightly, no excuse
 // (challenges only: a sincere "why do you like painting?" is a question to answer, and "wow, that's beautiful" is praise)
@@ -245,7 +260,7 @@ function goodbyeOf({ profile, waiting = null, sexting = null, away = null, herRe
  * Returns { goal, goal_text, why, sell, ask, length, level, lead, tone, back,
  * opener, callback, touch, hook, check, likes, story, offer, aim, budget, rules }.
  */
-function planReply({ herLast = '', level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, nameGiven = '', rand = Math.random }) {
+function planReply({ herLast = '', level, voice = null, latest = [], followUp = false, sell = false, noOffer = '', waiting = null, match = null, sexting = null, profile, ids = [], card = [], herReplies = 0, gap = null, away = null, lastSexual = false, byeAgain = false, callback = null, hook = null, check = null, session = null, media = [], request = null, services = {}, lastSeen = null, content = [], taste = null, stage = null, attempts = { here: 0, today: 0 }, tip = null, creditIds = [], lastConv = null, first = null, dry = 0, asked = null, reading = null, politics = false, gauges = null, gaugeChanges = [], questions = null, readFailed = false, invited = false, subDays = null, nameGiven = '', confirmPick = null, rand = Math.random }) {
   const said = latest.join(' ');
   const mood = level.mood;
   const p = { rules: [] };
@@ -356,6 +371,8 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   else if (dryNow && !session?.dry_bye) goal('dry_bye', 'Still dry: a short, warm sign-off ("I\'ll let you get on with your day, come find me when you feel chatty"), no question, nothing sold', 'he stays dry after her question (fix 1)', ['R1']);
   else if (dryNow) goal('no_reply', 'No reply: he\'s been dry for a while, so she waits for something real from him', 'dry after her sign-off: she says nothing (fix 1)', ['R1']);
   else if (level.pulled_back) goal('ease_off', 'He\'s slowing down: ease off, back to normal talk', 'he pulled back');
+  else if (confirmPick?.length >= 2) goal('confirm_pick', `He says he'll take one, but two pieces are on the table (${confirmPick.join(' and ')}): ask which one in a closed question ("the ${confirmPick[0].toLowerCase()}?"), nothing else`, 'two PPVs waiting and a bare "that one" (J6)', ['J6']);
+  else if (DISTRACT.test(said) && !sexting?.on && !followUp) goal('distract', 'He asks for a distraction: one light topic or a playful question, nothing about the rough day, no probing, no selling', 'he asked to be distracted (J5)', ['J5']);
   else if (mood === 'sad') goal('comfort', 'Comfort him: reflect his specific words and name the feeling; no story of your own, no advice he didn\'t ask for, no flirting, no selling', `he seems sad${['spender', 'whale'].includes(profile.tier) ? ', and he spends: take your time' : ''}`, ['Q24', 'Q25']);
   else if (profile.suspicious && !asks) goal('reassure', 'Calm and easy: reassure him it\'s really her account and she\'s here for him; if he asks outright whether she\'s an AI or a bot, she says so honestly, warmly, in her own style (never a denial); no selling', 'he doubts it\'s real or worth it (and isn\'t asking to buy)', ['Q24c']);
   else if (mood === 'annoyed') goal('calm', 'Stay calm and warm; no selling', 'he seems annoyed', ['Q1', 'Q24d']);
@@ -404,7 +421,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
       tease: level.max >= 2 || stageNow === 'sexy', sell: sellOk, steer: sell && !noOffer && !holdFor('steer_to_sale'), check: sellOk && aim === 'sell' && !session?.asked_ready && !profile.time_waster,
     };
     const hardNow = ['venting', 'complaining'].includes(p.reading?.doing) || gauges.mood < 40;
-    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow, clarify: confusedNow, invited: !!invited && level.his >= 2, rand });
+    const ranked = G.scoreMoves(gauges, { allowed, stage: stageNow, timeWaster: profile.time_waster || aim === 'short', budgetShare: limit ? Math.min(1, profile.budget.used / limit) : 0, asks, reading: p.reading, questions, hard: hardNow && !DISTRACT.test(said), clarify: confusedNow, openFeeling: BIG_CHANGE.test(said) && !FEELING_SAID.test(said), invited: !!invited && level.his >= 2, rand });
     p.scores = ranked.map(x => ({ move: x.move, score: x.score, allowed: x.allowed, why: x.why }));
     // the ladder's goal is the incumbent: another move has to beat it clearly (or the incumbent isn't allowed)
     const best = ranked.find(x => x.allowed);
@@ -419,18 +436,28 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     }
   }
   // he is sharing something hard (research round 2): warmth through understanding, no story of hers, no advice
-  p.hard = p.goal === 'comfort' || ['venting', 'complaining'].includes(p.reading?.doing) || (gauges ? gauges.mood < 40 : mood === 'sad');
+  p.hard = p.goal !== 'distract' && (p.goal === 'comfort' || ['venting', 'complaining'].includes(p.reading?.doing) || (gauges ? gauges.mood < 40 : mood === 'sad'));
+  // J3: a big change with no feeling said: she asks how he feels about it instead of assigning one
+  p.open_feeling = !followUp && BIG_CHANGE.test(said) && !FEELING_SAID.test(said) && !['comfort', 'goodbye', 'no_reply'].includes(p.goal);
+  if (p.open_feeling && p.reading) p.reading.curious = 'How are you feeling about it?';
+  // J4: a mixed message (good news with a catch): both halves get a response
+  p.contrast = !followUp && CONTRAST.test(said) && words(said) >= 8 && ['sharing', 'small_talk', 'venting', 'complaining'].includes(p.reading?.doing || 'small_talk');
   p.questions = questions || null;
   p.read_failed = !!readFailed;
   p.invited = !!invited && !['goodbye', 'no_reply', 'dry_bye', 'refuse', 'comfort', 'reassure', 'calm'].includes(p.goal);
   // he subscribed today (a made-up new subscriber, or a real one who registered today): nothing about waiting or "finally"
   p.new_today = subDays === 0 || (subDays == null && !!profile.new_sub && !lastConv);
   p.sub_days = subDays;
-  const talkGoal = ['chat', 'curious', 'share', 'get_to_know', 'flirt', 'sexy_vibe', 'tease', 'welcome_new', 'steer_to_sale', 'wind_down'].includes(p.goal);
+  const talkGoal = ['chat', 'curious', 'share', 'get_to_know', 'flirt', 'sexy_vibe', 'tease', 'welcome_new', 'steer_to_sale', 'wind_down', 'distract'].includes(p.goal);
   // he pushes back on something she said: a light repair, not an excuse (and not a plain answer to "why?")
   const pushedBack = talkGoal && herReplies > 0 && (PUSHBACK.test(said) || (p.reading?.readings || []).some(r => /\b(?:dig|push(?:es|ing)? back|took it (?:wrong|badly|personally)|offended|calling (?:her|it) out|correct(?:s|ing) her|didn'?t like (?:her|the))\b/i.test(r.what) && r.sure >= 0.5));
-  p.repair = pushedBack;
-  p.clarify = talkGoal && !pushedBack && confusedNow;
+  // J1: a correction of a fact ("Thursday, not Tuesday"); J2: he says her line hurt: neither is a light "I was teasing"
+  const corrForm = said.trim().match(/^\W*(?:no,?\s*)?([\w' -]{1,30}?),?\s+not\s+([\w' -]{1,30})\W*$/i);   // "Thursday, not Tuesday": only when she said the wrong one
+  p.correction = herReplies > 0 && !followUp && !HURT.test(said) && (corrForm ? new RegExp(`\\b${escRe(corrForm[2].trim().split(/\s+/)[0])}`, 'i').test(herLast || '') : CORRECTS.test(said.trim()));
+  p.hurt = herReplies > 0 && !followUp && HURT.test(said);
+  p.repair = (pushedBack || p.hurt) && !p.correction;
+  if (p.hurt) p.repair_kind = 'hurt';
+  p.clarify = talkGoal && !pushedBack && !p.correction && !p.hurt && confusedNow;
   p.closing = talkGoal && reading?.answers === 'closing';
   p.name_given = nameGiven || '';
   if (p.new_today && p.reading?.curious) p.reading.curious = p.reading.curious.replace(/\b(?:finally|at last|eventually)\b\s*/gi, '').replace(/\s{2,}/g, ' ').trim();
@@ -451,6 +478,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     why_not: 'he didn\'t take the last one: find out why first; the next attempt comes next conversation (B5)', readiness_check: 'the check comes first, the offer after it (E5)',
     flirt: 'the first-sale path: the flirting stage, nothing sold yet (A1)', sexy_vibe: 'the first-sale path: the sexy vibe, no PPV yet (A1)', direct_ask: 'the first-sale path: the ask first, the offer with his answer (A1)',
     get_to_know: stage ? 'the first-sale path: stay with his vibe first (A1)' : null,
+    confirm_pick: 'first which piece he means; the PPV is already waiting (J6)', distract: 'he asked to be distracted from a rough day: nothing sold (J5)',
     welcome_new: 'his very first message: welcome him, nothing sold (fix 12)', curious: 'she asks first: nothing sold with a question like this (R2)', share: 'she shares something of hers: nothing sold in the same breath (M1)', dry_ask: 'he\'s gone dry: one real question, nothing sold (fix 1)', dry_bye: 'a sign-off, nothing sold (fix 1)', no_reply: 'no reply at all (fix 1)',
   }[p.goal];
   let hold = holdFor(p.goal);
@@ -514,7 +542,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   else if (tip?.amount > 0 && !p.offer?.items) p.tip_note = `He tipped $${tip.amount}: thank him warmly, and let it show for the rest of the conversation (D1).`;
 
   // a note his latest message contradicts (Q14): she checks with him, in a calm moment only
-  p.check = check && ['chat', 'get_to_know', 'welcome_back', 'wind_down', 'steer_to_sale', 'flirt'].includes(p.goal)
+  p.check = check && !p.correction && ['chat', 'get_to_know', 'welcome_back', 'wind_down', 'steer_to_sale', 'flirt'].includes(p.goal)
     ? { note: check.note, why: 'what he just said doesn\'t fit what she remembers (Q14)' } : null;
 
   // 3. questions
@@ -542,9 +570,11 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     : answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say it again in plainer words (it may be a little longer), light; don't repeat the joke, don't apologise, then carry on`
     : answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
+    : p.open_feeling ? { allowed: true, why: 'the one question: how he feels about the change he just told you (J3)' }
     : p.clarify && /\?/.test(herLast || '') && ['whole', 'that', 'term'].includes(p.clarify_kind) ? { allowed: true, why: 'carry on: your line was a question, ask it again in plainer words (Moore 2024)' }
     : p.clarify ? { allowed: false, why: 'he asked what you meant: explain it, no question back' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
+    : p.goal === 'confirm_pick' ? { allowed: true, why: 'the one question: which piece he means (J6)' }
     : ['direct_ask', 'readiness_check', 'why_not', 'curious'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)', curious: 'the one question: what she wants to know (R2)' }[p.goal] }
     : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal }
     : voice?.followOnly ? { allowed: true, follow_only: true, why: voice.followOnly }
@@ -648,6 +678,11 @@ function planText(p) {
   if (p.reading?.stance && p.reading.stance !== 'steady') lines.push(`Your stance: ${STANCE_TEXT[p.reading.stance]}.`);
   if (p.new_today && ['welcome_new', 'chat', 'curious', 'share', 'get_to_know'].includes(p.goal)) lines.push('He subscribed today and this is his first conversation with you: nothing about waiting, taking his time or "finally"; you have no history together.');
   else if (p.sub_days >= 2 && p.goal === 'welcome_new') lines.push(`He subscribed ${p.sub_days} days ago and writes only now: a light "finally" is fine.`);
+  if (p.correction) lines.push('He corrected a fact: accept it, say the corrected thing once, no apology spiral; from now on use the corrected fact (and note it as something learned).');
+  if (p.hurt) lines.push('He says your line hurt him: this is not pushback to laugh off. Name the specific thing you said and own it plainly; never say you were teasing or tell him to relax; then ease off.');
+  if (p.open_feeling) lines.push('He told you about a big change without saying how he feels about it: ask how he feels, don\'t assign a feeling ("you must be relieved").');
+  if (p.contrast) lines.push('His message has two halves (the good part and a catch): respond to both, not only the bright half.');
+  if (p.goal === 'distract') lines.push('He asked to be distracted: give him one light topic or a playful question; don\'t probe into the rough day, don\'t console.');
   if (p.clarify) lines.push('He didn\'t get your last line: he is confused, not offended. Say plainly what you meant, light and short, without repeating the joke or apologising; no question back.');
   if (p.repair) lines.push('He pushed back on something you said: own it lightly in one line ("ha, fair, I was teasing"), no excuse and no explaining, then move on warmly.');
   if (p.complimented) lines.push('He gave you a compliment (or told you what drew him): receive it, warm and specific, in your way; never brush it off ("I get that a lot", "hope I live up to it").');
@@ -683,4 +718,4 @@ function planText(p) {
   return lines;
 }
 
-module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, repairKind, TIER_LABEL, BUDGET, GOODBYE, CONFUSED, PUSHBACK, DIRECT_Q };
+module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, repairKind, CORRECTS, HURT, BIG_CHANGE, FEELING_SAID, CONTRAST, DISTRACT, BARE_PICK, TIER_LABEL, BUDGET, GOODBYE, CONFUSED, PUSHBACK, DIRECT_Q };

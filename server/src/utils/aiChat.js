@@ -1085,6 +1085,9 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // he hands her the lead: that is the sexy vibe's answer, so a new subscriber's direct ask may come now
   const invited = INVITES_LEAD.test(saidNow);
   const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0, invited && level.his >= 2 ? 3 : 0);
+  // round 4, J6: "I'll take that one" with two pieces on the table: she confirms which in a closed question
+  const onTable = convo.slice(talk.start).filter(m => !m.from_fan && m.media?.item && ['pending', 'ignored'].includes(m.media.status)).map(m => m.media.item);
+  const confirmPick = sell && latest.length && Plan.BARE_PICK.test(saidNow) && new Set(onTable).size >= 2 ? content.filter(it => onTable.includes(`c${it.id}`) || onTable.includes(String(it.id))).map(it => it.title).slice(0, 3) : null;
   // round 4, H1/H2: his three-wish read joins the session; a no to buying holds selling until he asks or gets explicit himself
   if (reading?.wishes && latest.length) session = { ...session, wishes: [...(session.wishes || []), { turn: herTurns, ...reading.wishes }].slice(-6) };
   // (a first price objection isn't a no: it gets one cheaper piece, A5; a second one after that is, "let it go")
@@ -1225,7 +1228,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     lastSexual: convo.slice(Math.max(0, talk.start - 12), talk.start).some(m => m.from_fan && replyLevel(m.text) >= 2),
     byeAgain: Plan.GOODBYE.test(hisBefore), callback, hook, check: clash ? { note: clash.text } : null, session, media: latestSeen, request, services, lastSeen,
     content, taste, stage, attempts, tip, creditIds, lastConv: state.last, first: firstMsg, dry, asked: askedHere, reading, politics: screen.notes.some(n => /politics, religion/.test(n)),
-    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited, nameGiven: nameIn(saidNow),
+    gauges: gauged.gauges, gaugeChanges: gauged.changes, questions, readFailed, invited, nameGiven: nameIn(saidNow), confirmPick,
     subDays: fanUuid ? (fan.registered_at ? Math.floor((now.getTime() - Date.parse(fan.registered_at)) / 86400_000) : null) : (type?.id === 'new_sub' ? 0 : null),
   });
   // round 4, F3: a feeling she says he caused is only earned by a compliment or a flirt of his in this message
@@ -1810,7 +1813,7 @@ const INVITES_LEAD = /\b(?:i'?m (?:all|fully|completely|totally) yours|i'?m your
 // A flat line (research: dead ends end chats): no question, nothing of hers, a handful of words; nothing for him to answer.
 // Checked on the talk moments only, when a question was cut or his own reply was short.
 const OF_HERS = /\b(?:i|i'?m|i'?ve|i'?d|i'?ll|my|me|mine|we|us|here)\b/i;
-const TALK_GOALS = new Set(['chat', 'get_to_know', 'curious', 'share', 'flirt', 'sexy_vibe', 'welcome_new', 'welcome_back', 'dry_ask']);
+const TALK_GOALS = new Set(['chat', 'get_to_know', 'curious', 'share', 'flirt', 'sexy_vibe', 'welcome_new', 'welcome_back', 'dry_ask', 'distract', 'confirm_pick']);
 const wordCount = (t) => (String(t).match(/[\p{L}\p{N}']+/gu) || []).length;
 function flatLine(list) {
   const text = list.join(' ');
@@ -1825,6 +1828,8 @@ const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))
 const DOOR = /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i;
 // round 4, H3: brushing his feeling off, advice he didn't ask for, and his asking for it (scripts/probes/round4-patterns.cjs)
 const LONELY_HOOK = /\b(?:(?:get|gets|getting|so|kinda|bit)\s+lonely|nobody (?:talks|texts) (?:to )?me|keep me company|i need (?:you|someone)|don'?t leave me)\b/i;
+const TEASING_LINE = /\b(?:(?:just|only)\s+(?:teasing|joking|kidding|playing)|was\s+teasing|i\s+was\s+joking|lighten\s+up|relax|chill|can'?t\s+take\s+a\s+joke|don'?t\s+take\s+it\s+(?:so\s+)?(?:seriously|personally))\b/i;
+const ASSUMES_FEELING = /\b(?:you\s+must\s+(?:be|feel)|bet\s+you(?:'re|\s+are|\s+feel)|i\s+bet\s+(?:you'?re|that'?s)|you'?re\s+probably|that\s+must\s+(?:be|feel)|must\s+be)\s+(?:so\s+|really\s+|a\s+bit\s+|pretty\s+|such\s+a\s+)?(?:relieved|relief|thrilled|excited|happy|gutted|devastated|scared|terrified|nervous|free|over\s+the\s+moon|heartbroken|crushed|glad|sad|stressed|exhausting|exciting|scary|a\s+relief)\b/i;
 const DISMISS = /\b(?:don'?t\s+worry|it'?ll\s+(?:be|get)\s+(?:ok(?:ay)?|fine|better|alright)|everything\s+happens\s+for\s+a\s+reason|look\s+on\s+the\s+bright\s+side|cheer\s+up|could\s+be\s+worse|you'?ll\s+be\s+(?:fine|ok(?:ay)?)|it'?s\s+not\s+that\s+bad|it\s+takes\s+time|stay\s+strong|one\s+day\s+at\s+a\s+time|at\s+least\s+you)\b/i;
 const ADVICE = /\b(?:you\s+should|you\s+need\s+to|you\s+have\s+to|you\s+gotta|try\s+to|have\s+you\s+tried|why\s+don'?t\s+you|maybe\s+you\s+(?:could|should))\b/i;
 const ADVICE_ASKED = /\b(?:what\s+(?:should|would|do)\s+(?:i|you)\s+do|any\s+(?:advice|tips|ideas)|what\s+would\s+you\s+do|help\s+me|tell\s+me\s+what\s+to\s+do|what\s+do\s+you\s+think\s+i\s+should)\b/i;
@@ -1867,7 +1872,7 @@ const COOLING_READ = /\b(?:dull|boring|bored|too much|annoyed|irritated|pushing 
 // round 4: replies with no pet name (F5) and replies with no name of his (G1: the ask, the price, right after a no)
 const NO_PET_GOALS = new Set(['comfort', 'reassure', 'calm', 'ease_off', 'honest_no', 'why_not', 'goodbye', 'dry_bye']);
 const NO_NAME_GOALS = new Set(['offer', 'first_offer', 'cheaper', 'steer_to_sale', 'direct_ask', 'readiness_check', 'point_to_ppv', 'why_not', 'answer_ppv']);
-const SERIOUS_STYLE = /loneliness as a hook|brushes his feeling off|advice he didn'?t ask for|says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+const SERIOUS_STYLE = /don'?t call it teasing|tells him how he must feel|loneliness as a hook|brushes his feeling off|advice he didn'?t ask for|says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2630,7 +2635,7 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // what he gave her (a compliment, an admission) is received, not brushed off
       if (BRUSH_OFF.test(draft.messages.join(' '))) now.style.push('Don\'t brush off what he gave you ("I get that a lot", "hope I live up to it"): receive it warmly and specifically.');
       // a pushback on her own line gets a light repair, not an excuse
-      if (base.plan?.repair && EXCUSE.test(draft.messages.join(' '))) now.style.push('He pushed back on your line: don\'t explain or excuse it ("I just thought…", "I assumed…"); own it lightly in one line and move on.');
+      if (base.plan?.repair && base.plan.repair_kind !== 'hurt' && EXCUSE.test(draft.messages.join(' '))) now.style.push('He pushed back on your line: don\'t explain or excuse it ("I just thought…", "I assumed…"); own it lightly in one line and move on.');
       // a dangling lead-in ("But I'm curious", "so tell me") left when a question was cut: finish the thought or drop it
       if (draft.messages.some(m => DANGLING.test(String(m).trim()))) now.style.push('A line trails off ("but I\'m curious", "so tell me"): finish the thought as a statement, or drop that line.');
       // a planned small thing of hers has to be there: a one-line quip isn't it
@@ -2719,6 +2724,11 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
       // round 4, I3: loneliness as a hook; I4: a compliment inside a selling message
       if (!base.plan?.hard && LONELY_HOOK.test(draft.messages.join(' '))) now.style.push('Don\'t use loneliness as a hook: share something light of yours instead.');
       if (draft.offer && Sf.COMPLIMENT.test(draft.messages.join(' '))) now.style.push('Keep the compliment out of the message with the PPV: it reads as a sales move there.');
+      // round 4, J2: he said it hurt: no "I was teasing", no "relax"; J3: no feeling assigned to his big change
+      if (base.plan?.repair_kind === 'hurt' && TEASING_LINE.test(draft.messages.join(' '))) now.style.push('He said your line hurt: don\'t call it teasing or tell him to relax; name what you said and own it plainly.');
+      if (base.plan?.open_feeling && ASSUMES_FEELING.test(draft.messages.join(' '))) now.style.push('It tells him how he must feel about the change: ask him instead ("how are you feeling about it?").');
+      // J1: a correction: the corrected thing said once, no sorry spiral
+      if (base.plan?.correction && (draft.messages.join(' ').match(/\b(?:sorry|apologi[sz]e|my bad|oops)\b/gi) || []).length > 1) now.style.push('He corrected you: one "my bad" at most, say the corrected thing once, then carry on.');
       // round 4, H3: in a hard moment, nothing that brushes his feeling off, and no advice he didn't ask for
       if (base.plan?.hard && DISMISS.test(draft.messages.join(' '))) now.style.push(`It brushes his feeling off ("${draft.messages.join(' ').match(DISMISS)[0]}"): name it and stay with it.`);
       if (base.plan?.hard && ADVICE.test(draft.messages.join(' ')) && !ADVICE_ASKED.test(voice?.his || latestText)) now.style.push('It gives advice he didn\'t ask for: stay with what he feels; ask if he wants ideas.');

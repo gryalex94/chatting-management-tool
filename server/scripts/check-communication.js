@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy,DISMISS,ADVICE,ADVICE_ASKED,LONELY_HOOK,joinStubs};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy,DISMISS,ADVICE,ADVICE_ASKED,LONELY_HOOK,joinStubs,TEASING_LINE,ASSUMES_FEELING};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -202,6 +202,19 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   const newFan = Plan.planReply({ level: { his: 2, max: 2, mood: 'horny', warm: true }, latest: ['fuck you look so good tonight'], profile: { ...profile, closeness: 'new' }, herReplies: 8, reading: { ...reading, doing: 'flirting' }, gauges: { heat: 60, mood: 70, rapport: 80, readiness: 40, doubt: 0, engagement: 80, surprise: 10 }, rand: () => 0 });
   check('I5 a playful challenge only with a close fan', hot.goal === 'tease' && hot.tension && hot.beats.some(b => /playful challenge/.test(b)) && !newFan.tension, { goal: hot.goal, beats: hot.beats, newFan: newFan.tension });
 
+  // round 4, Group J (Brooks's Talk via Codex's playbook)
+  const j1 = makePlan('Thursday, not Tuesday', { herLast: 'good luck with the interview on Tuesday!', reading: { ...reading, doing: 'correcting' } });
+  check('J1 a correction is accepted once, not repaired or explained', j1.correction && !j1.repair && !j1.clarify && j1.beats.some(b => /corrected you/.test(b)), { c: j1.correction, r: j1.repair, cl: j1.clarify, beats: j1.beats });
+  const j2 = makePlan('that was mean', { herLast: 'bet you say that to all the girls who can\'t cook', reading: { ...reading, doing: 'complaining' } });
+  check('J2 "that hurt" is owned plainly, never "I was teasing"', j2.repair && j2.repair_kind === 'hurt' && j2.beats.some(b => /never "I was teasing"/.test(b)) && audit.TEASING_LINE.test('relax, I was just teasing'), { r: j2.repair, kind: j2.repair_kind, beats: j2.beats });
+  const j3 = makePlan('I finally quit that job', { reading: { ...reading, doing: 'sharing', new: 'He quit his job', curious: 'What made you finally do it?' } });
+  check('J3 a big change with no feeling: she asks how he feels', j3.open_feeling && j3.ask.allowed && /how are you feeling/i.test(j3.reading?.curious || '') && audit.ASSUMES_FEELING.test('you must be so relieved'), { open: j3.open_feeling, ask: j3.ask, curious: j3.reading?.curious });
+  const j4 = makePlan('The interview went well, but the commute would be awful', { reading: { ...reading, doing: 'sharing' } });
+  check('J4 a mixed message gets both halves', j4.contrast && j4.beats.some(b => /both halves/.test(b)), { contrast: j4.contrast, beats: j4.beats });
+  const j5 = makePlan("It's been a rough day. Please distract me", { level: { his: 0, max: 0, mood: 'sad' }, reading: { ...reading, doing: 'venting' } });
+  check('J5 "distract me" turns hard mode off and gives a light topic', j5.goal === 'distract' && !j5.hard && !j5.sell.allowed, { goal: j5.goal, hard: j5.hard, sell: j5.sell });
+  const j6 = makePlan("I'll take that one", { sell: true, confirmPick: ['Blue set', 'Red set'], reading: { ...reading, doing: 'buying' } });
+  check('J6 a bare "that one" with two pieces on the table asks which', j6.goal === 'confirm_pick' && j6.ask.allowed && !j6.sell.allowed, { goal: j6.goal, ask: j6.ask, sell: j6.sell });
   check('a message that trails off joins the next one', same(audit.joinStubs(['Oh, I just meant', "You've got a dark sense of humour"]), ["Oh, I just meant you've got a dark sense of humour"]) && same(audit.joinStubs(['haha nice', 'what about you?']), ['haha nice', 'what about you?']));
   check('a pet name run into the next sentence goes', P.tidyMessages(['hey there, babe Glad you found me'], { emojis: 'none', recent: [], closeness: 'new' })[0] === 'hey there. Glad you found me');
 

@@ -481,8 +481,11 @@ function dropName(t, name) {
     // after a first word ("So Bob, what…", "hey Bob"): the word stays, his name goes (round 4)
     .replace(new RegExp(`^(\\s*(?:so|and|well|oh|ok(?:ay)?|hey|hi|aww*|haha|mm+|yes|yeah|but))\\s+${n}\\s*,\\s*`, 'i'), '$1 ')
     .replace(new RegExp(`\\b(hey|hi|hello|aww*|oh|thanks|thank you|night|morning)\\s+${n}\\b`, 'gi'), '$1');
-  if (out === t || out.trim().split(/\s+/).length < 2) return t;
-  return /^[A-Z]/.test(t) ? out.charAt(0).toUpperCase() + out.slice(1) : out;
+  // whatever is left anywhere else ("So tell me, babe, what…" in any spelling), unless it is his ("your baby")
+  const rest = out.replace(new RegExp(`(?<!\\b(?:my|your|his|her|a|the|that|this)\\s)(^|[\\s,])(?:${PETS})(?=[\\s,.!?…]|$)`, 'giu'), '$1').replace(/\s+,/g, ',').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ').replace(/^[\s,]+/, '').trim();
+  const final = /\p{L}/u.test(rest) ? rest : out;
+  if (final === t || !/\p{L}/u.test(final)) return t;
+  return /^[A-Z]/.test(t) ? final.charAt(0).toUpperCase() + final.slice(1) : final;
 }
 // A pet name said to him ("babe, …", "…, babe?", "hey babe"): left out when one of
 // her last 2 replies had one (a pet name in every reply sounds scripted).
