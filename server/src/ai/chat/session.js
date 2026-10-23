@@ -240,7 +240,7 @@ function startSession({ profile, state, away = null, now = new Date(), timeZone 
     // selling (A1–A7, E5): the cadence, a pause after a big spend, the first-sale path, what was done once
     cadence: cadence ? { every: cadence.every, text: cadence.text, due: cadence.due, next_in: cadence.next_in, why: cadence.why } : null,
     pause: pause ? { total: pause.total, until: pause.until, why: pause.why } : null,
-    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false, hot: false, hot_at: null, asked_about: [], gauges: null, open: [],
+    first_sale: { asked: false, held: 0 }, asked_ready: false, why_asked: false, reminded: false, cheaper_done: false, credit: null, dry_asked: false, dry_bye: false, pointed: false, hot: false, hot_at: null, asked_about: [], gauges: null, open: [], wishes: [], buy_no: false,
     taste_text: taste?.text || '', tw,
   };
 }
@@ -280,6 +280,9 @@ function resumeSession(s) {
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
     dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true, hot: s.hot === true,
     asked_about: (Array.isArray(s.asked_about) ? s.asked_about : []).map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-10),
+    // round 4 (H1, H2): his last three-wish reads, and a no to buying that holds selling for the conversation
+    wishes: (Array.isArray(s.wishes) ? s.wishes : []).filter(w => w && typeof w === 'object').map(w => ({ turn: Math.round(Number(w.turn) || 0), talk: ['+', '0', '-'].includes(w.talk) ? w.talk : '0', tell: ['+', '0', '-'].includes(w.tell) ? w.tell : '0', buy: ['+', '0', '-'].includes(w.buy) ? w.buy : '0' })).slice(-6),
+    buy_no: s.buy_no === true,
     gauges: G.readGauges(s.gauges), hot_at: Number.isInteger(s.hot_at) ? s.hot_at : null,
     open: (Array.isArray(s.open) ? s.open : []).map(o => ({ what: clean(o?.what).slice(0, 120), sure: Math.max(0, Math.min(1, Number(o?.sure) || 0)), turn: Number.isInteger(o?.turn) ? o.turn : 0 })).filter(o => o.what).slice(-4),
     credit: s.credit && typeof s.credit === 'object' && Number(s.credit.amount) > 0 ? { amount: Math.round(Number(s.credit.amount)), steps: Math.max(0, Math.min(2, Math.round(Number(s.credit.steps) || 0))), total: Math.max(0, Math.min(2, Math.round(Number(s.credit.total ?? s.credit.steps) || 0))), ticket: Math.max(10, Math.round(Number(s.credit.ticket) || 30)) } : null,

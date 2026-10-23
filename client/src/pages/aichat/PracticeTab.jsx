@@ -38,7 +38,9 @@ const MapLink = ({ onClick, active }) => (
 );
 
 // One chat bubble: him on the left, her on the right (with a link to its decision map).
-function Bubble({ fromFan, children, meta, tone, onMap, mapActive, onStar = null, starred = false }) {
+// how her line moved him, as you played him (round 4, H4): each mark cycles unmarked → up → down
+const MARKS = [['talk', 'Talk', 'he wants to keep talking'], ['tell', 'Tell', 'he tells her about himself'], ['buy', 'Buy', 'he wants her content']];
+function Bubble({ fromFan, children, meta, tone, onMap, mapActive, onStar = null, starred = false, onMark = null, marks = null }) {
   return (
     <div className={cn('flex flex-col gap-0.5', fromFan ? 'items-start' : 'items-end')}>
       <div className={cn('max-w-[85%] whitespace-pre-wrap rounded-2xl px-3 py-1.5 text-sm',
@@ -46,7 +48,7 @@ function Bubble({ fromFan, children, meta, tone, onMap, mapActive, onStar = null
         {children}
       </div>
       {meta && <span className={cn('max-w-[85%] whitespace-pre-line px-1 text-[11px] text-muted-foreground', !fromFan && 'text-right')}>{meta}</span>}
-      {(onMap || onStar) && (
+      {(onMap || onStar || onMark) && (
         <span className='flex items-center gap-2'>
           {onMap && <MapLink onClick={onMap} active={mapActive} />}
           {onStar && (
@@ -54,6 +56,20 @@ function Bubble({ fromFan, children, meta, tone, onMap, mapActive, onStar = null
               className={cn('inline-flex items-center gap-1 rounded px-1 text-[11px]', starred ? 'text-warn' : 'text-link hover:underline')}>
               <Star className={cn('size-3', starred && 'fill-current')} aria-hidden />{starred ? 'Starred' : 'Star it'}
             </button>
+          )}
+          {onMark && (
+            <span className='inline-flex items-center gap-0.5 border-l border-border pl-2'>
+              {MARKS.map(([k, label, means]) => {
+                const v = marks?.[k] || 0;
+                return (
+                  <button key={k} type='button' onClick={() => onMark(k)} aria-label={`${label}: ${v > 0 ? 'up' : v < 0 ? 'down' : 'not marked'}`}
+                    title={`${label}: did her line make ${means.replace(/^he /, 'him ').replace('wants', 'want').replace('tells', 'tell')}? Click for up, again for down, again to clear`}
+                    className={cn('rounded px-1 text-[11px]', v > 0 ? 'font-medium text-good' : v < 0 ? 'font-medium text-bad' : 'text-muted-foreground hover:text-foreground')}>
+                    {label}{v > 0 ? ' ▲' : v < 0 ? ' ▼' : ''}
+                  </button>
+                );
+              })}
+            </span>
           )}
         </span>
       )}
@@ -504,6 +520,12 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
     const t = setTimeout(() => { saveRun(); }, 1500);
     return () => clearTimeout(t);
   }, [saveRun, rounds.length]);
+  // how her line moved him (round 4, H4): up, down or unmarked for talk, tell and buy; saved with the conversation
+  const markReply = (roundId, kind) => setRounds(rs => rs.map(r => {
+    if (r.id !== roundId) return r;
+    const v = r.marks?.[kind] || 0;
+    return { ...r, marks: { ...(r.marks || {}), [kind]: v === 0 ? 1 : v === 1 ? -1 : 0 } };
+  }));
   // a kept reply you like: starred into her example library, where it counts more than the analysed chats
   const star = async (roundId) => {
     const id = runIdRef.current || await saveRun();
@@ -746,7 +768,9 @@ export default function PracticeTab({ page, writers, fanTypes = [], ready, onSpe
         <div key={`t${i}`} className='flex flex-col gap-2'>
           <Bubble fromFan={m.from === 'fan'} tone='border border-dashed border-current/30' meta={m.from === 'fan' ? 'you, writing as him' : m.note || null}
             onMap={m.roundId ? () => setMapId(m.roundId) : null} mapActive={!!m.roundId && mapId === m.roundId}
-            onStar={m.roundId && m.from === 'her' ? () => star(m.roundId) : null} starred={!!m.roundId && !!rounds.find(r => r.id === m.roundId)?.starred}>
+            onStar={m.roundId && m.from === 'her' ? () => star(m.roundId) : null} starred={!!m.roundId && !!rounds.find(r => r.id === m.roundId)?.starred}
+            onMark={m.roundId && m.from === 'her' && !test.slice(i + 1).some(x => x.roundId === m.roundId) ? (k) => markReply(m.roundId, k) : null}
+            marks={m.roundId ? rounds.find(r => r.id === m.roundId)?.marks : null}>
             {m.text}
             {m.tip && <span className={cn('flex items-center gap-1 text-xs text-good', m.text && 'mt-1')}><Coins className='size-3' aria-hidden />Tipped ${m.tip}</span>}
             {m.media && (

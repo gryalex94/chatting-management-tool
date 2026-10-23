@@ -43,7 +43,7 @@ const BEATS = {
   offer: ['say yes, tease what you have', 'attach the piece, in your own words'],
   steer_to_sale: ['react to what he said', 'steer lightly toward what you have'],
   readiness_check: ['tease what you have', 'the one question: is he alone, is he ready'],
-  comfort: ['reflect his specific words and name the feeling', 'one caring question, or just stay with him; no story of yours, no advice'],
+  comfort: ['name what he feels, in his words, and that it makes sense', 'one open question that invites him to say more (not "are you ok?"); no story of yours, no advice he didn\'t ask for'],
   reassure: ['take it lightly', 'reassure him it is really you, in your style'],
   calm: ['stay calm and warm', 'move on to something easier'],
   ease_off: ['ease off: back to normal, friendly talk'],
@@ -289,7 +289,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     curious: reading.curious && !politics && !joke && !askedBefore(reading.curious) && freshAsk(reading.curious) ? reading.curious : reading.odd && !politics && level.his < 2 ? 'What do you mean by that?' : '',
     // (once he is sexual, a sexual line fits; it counts as odd only when he tests or provokes her)
     odd: !!reading.odd && (level.his < 2 || ['testing', 'provoking'].includes(reading.doing)),
-    stance: politics ? 'deflect' : joke ? 'playful' : reading.stance, answers: reading.answers || '', thread: dead ? 'dead' : 'alive',
+    stance: politics ? 'deflect' : joke ? 'playful' : reading.stance, answers: reading.answers || '', thread: dead ? 'dead' : 'alive', wishes: reading.wishes || null,
   } : null;
   // he didn't get her last line ("what do you mean?"): she explains it, no question back (the curious question goes)
   const confusedNow = herReplies > 0 && !followUp && !PUSHBACK.test(said) && (!!repairKind(said, herLast) || (reading?.readings || []).some(r => /\b(?:asks her to explain|didn'?t (?:get|understand) her|misread her line|what she meant)\b/i.test(r.what) && r.sure >= 0.4));
@@ -306,7 +306,11 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     const warmNow = level.his >= 1 || ['chatty', 'joking', 'flirty', 'horny', 'romantic', 'curious'].includes(mood);
     const veryHorny = replyLevel(said) >= 3;                   // from his own words, not the planner's read
     // a new subscriber's path (A1): no PPV before the direct ask and his answer, whatever the moment brings
-    if (aim === 'first_sale' && !taste?.bought && ['declined', 'no_ask', 'asked'].includes(stage?.stage) && !(asks && stage.stage !== 'asked')) hold = stage.why;   // round 4, F1/F2
+    // round 4, H2: a no to buying holds every sale for the rest of the conversation (lifted when he asks or gets explicit himself)
+    if (session?.buy_no && !asks && !veryHorny) hold = 'he signalled no to buying: warm, no pushing this conversation unless he asks';
+    // the gate on a planned attempt: the PPV goes once he shows interest (his read says buy +, or he asks); the check or a steer comes first
+    else if (aim === 'sell' && !['readiness_check', 'steer_to_sale', 'cheaper', 'after_buy', 'lead_story', 'point_to_ppv', 'answer_ppv'].includes(g) && !asks && !inStory && reading?.wishes && reading.wishes.buy !== '+') hold = 'a planned attempt: the PPV goes once he shows interest; the readiness check or a steer first';
+    else if (aim === 'first_sale' && !taste?.bought && ['declined', 'no_ask', 'asked'].includes(stage?.stage) && !(asks && stage.stage !== 'asked')) hold = stage.why;   // round 4, F1/F2
     else if (aim === 'first_sale' && !taste?.bought && !['first_offer', 'offer'].includes(g)) hold = 'a new subscriber: no PPV before the direct ask and his answer (A1)';
     else if (g === 'after_buy') {
       if (!warmNow) hold = 'he\'s cooling off after the buy: no second offer (A4)';

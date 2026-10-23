@@ -131,6 +131,7 @@ function momentStep({ level, situations = [], herCount = 0, warmUp = 6, phase = 
       { label: 'Situations', value: situations.join(' · ') || 'none picked' },
       reading?.answers ? { label: 'His answer to her', value: { straight: 'a real answer', short: 'the bare minimum', joke: 'a joke: its meaning is plain, she plays along', dodge: 'he skips what she said' }[reading.answers] } : null,
       reading?.thread === 'dead' ? { label: 'The topic', value: 'ran out: she lets it go and brings up something new' } : null,
+      reading?.wishes ? { label: 'Her last line moved him', value: `talk ${reading.wishes.talk} · tell ${reading.wishes.tell} · buy ${reading.wishes.buy}` } : null,
       reading?.new ? { label: 'What\'s new', value: reading.new } : null,
       reading?.readings?.length ? { label: 'Could mean', value: reading.readings.map(r => `${r.what} (${Math.round(r.sure * 100)}%)`).join(' · ') } : null,
       reading?.curious ? { label: 'She\'d want to ask', value: reading.curious } : null,

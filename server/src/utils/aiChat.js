@@ -1085,6 +1085,12 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // he hands her the lead: that is the sexy vibe's answer, so a new subscriber's direct ask may come now
   const invited = INVITES_LEAD.test(saidNow);
   const sinceHot = Math.max(level.since, session.hot_at != null ? herTurns - session.hot_at : 0, invited && level.his >= 2 ? 3 : 0);
+  // round 4, H1/H2: his three-wish read joins the session; a no to buying holds selling until he asks or gets explicit himself
+  if (reading?.wishes && latest.length) session = { ...session, wishes: [...(session.wishes || []), { turn: herTurns, ...reading.wishes }].slice(-6) };
+  // (a first price objection isn't a no: it gets one cheaper piece, A5; a second one after that is, "let it go")
+  const objection = Sl.priceObjection(saidNow);
+  if ((reading?.wishes?.buy === '-' && (!objection || session.cheaper_done)) || (TALK_ONLY.test(saidNow) && !asksNow)) session = { ...session, buy_no: true };
+  if (session.buy_no && (asksNow || replyLevel(saidNow) >= 3)) session = { ...session, buy_no: false };
   // round 4, F1: his answer to the direct ask is read, not assumed; "I just want to talk", a no or "I'm broke" ends the path for
   // this conversation (A1: warm, no pushing); a second unclear answer counts as a no; he lifts it by asking or getting sexual himself
   let askAnswer = '';
@@ -1384,7 +1390,10 @@ async function savePracticeRun(orgId, creatorId, userId, raw = {}) {
     ...(m?.media && typeof m.media === 'object' ? { media: m.media } : {}), ...(Number(m?.tip) > 0 ? { tip: Math.round(Number(m.tip)) } : {}),
     ...(m?.roundId ? { roundId: text(m.roundId, 40) } : {}), ...(m?.label ? { label: text(m.label, 60) } : {}), ...(m?.note ? { note: text(m.note, 400) } : {}),
   }));
-  const turns = (Array.isArray(raw.turns) ? raw.turns : []).filter(t => t && typeof t === 'object').slice(-100);
+  const markOf = (v) => (v === 1 || v === -1 ? v : 0);
+  const turns = (Array.isArray(raw.turns) ? raw.turns : []).filter(t => t && typeof t === 'object').slice(-100)
+    // round 4, H4: the manager's marks on a reply: talk, tell and buy, each -1, 0 or 1
+    .map(t => (t.marks && typeof t.marks === 'object' ? { ...t, marks: { talk: markOf(t.marks.talk), tell: markOf(t.marks.tell), buy: markOf(t.marks.buy) } } : t));
   // the record stays under 3 MB: the oldest decision maps go first
   let size = JSON.stringify(turns).length;
   for (let i = 0; i < turns.length - 5 && size > 3_000_000; i += 1) {
@@ -1801,6 +1810,10 @@ const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))
 // A door: something he can pick up (a question, a word to him, a guess about him, an invitation).
 // round 4, F4: a door is something he can pick up (a question, a guess about him, a dare, an invitation); a bare "you" isn't
 const DOOR = /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i;
+// round 4, H3: brushing his feeling off, advice he didn't ask for, and his asking for it (scripts/probes/round4-patterns.cjs)
+const DISMISS = /\b(?:don'?t\s+worry|it'?ll\s+(?:be|get)\s+(?:ok(?:ay)?|fine|better|alright)|everything\s+happens\s+for\s+a\s+reason|look\s+on\s+the\s+bright\s+side|cheer\s+up|could\s+be\s+worse|you'?ll\s+be\s+(?:fine|ok(?:ay)?)|it'?s\s+not\s+that\s+bad|it\s+takes\s+time|stay\s+strong|one\s+day\s+at\s+a\s+time|at\s+least\s+you)\b/i;
+const ADVICE = /\b(?:you\s+should|you\s+need\s+to|you\s+have\s+to|you\s+gotta|try\s+to|have\s+you\s+tried|why\s+don'?t\s+you|maybe\s+you\s+(?:could|should))\b/i;
+const ADVICE_ASKED = /\b(?:what\s+(?:should|would|do)\s+(?:i|you)\s+do|any\s+(?:advice|tips|ideas)|what\s+would\s+you\s+do|help\s+me|tell\s+me\s+what\s+to\s+do|what\s+do\s+you\s+think\s+i\s+should)\b/i;
 const KNOWS_HIM = /\b(?:i\s+know\s+(?:you|what\s+you)\s+(?:like|love|want|need)|since\s+you\s+(?:always|usually|keep)|you\s+always\s+(?:go\s+for|like|want)|guys\s+like\s+you|your\s+type\s+(?:always|loves?))\b/i;
 const NAME_GIVEN = /\b(?:[Mm]y\s+name(?:'?s|\s+is)|[Nn]ame'?s|[Cc]all\s+me)\s+([A-Za-z]{2,15})\b|\bI'?m\s+([A-Z][a-z]{1,14})\b/;
 const LATE_NAME = /\b(?:love|like|cute|nice|great|lovely|cool|sexy)\s+(?:that\s+|the\s+|your\s+)?name\b|\bname\s+suits\s+you\b/i;
@@ -1840,7 +1853,7 @@ const COOLING_READ = /\b(?:dull|boring|bored|too much|annoyed|irritated|pushing 
 // round 4: replies with no pet name (F5) and replies with no name of his (G1: the ask, the price, right after a no)
 const NO_PET_GOALS = new Set(['comfort', 'reassure', 'calm', 'ease_off', 'honest_no', 'why_not', 'goodbye', 'dry_bye']);
 const NO_NAME_GOALS = new Set(['offer', 'first_offer', 'cheaper', 'steer_to_sale', 'direct_ask', 'readiness_check', 'point_to_ppv', 'why_not', 'answer_ppv']);
-const SERIOUS_STYLE = /says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
+const SERIOUS_STYLE = /brushes his feeling off|advice he didn'?t ask for|says the claim again|his message didn'?t cause|subscribed today|already asked him that|asked you why|paid you a compliment|mood of the day is colour|question doesn'?t make sense here|welcome him and ask|brush off|pushed back on your line|has to ask the one thing|has to ask him what|answer it first|photos you send next|handed you the lead|doesn'?t react to what'?s in his|only repeats his words/i;
 const PROMISE_ONLY = /\b(?:i'?ve got (?:a few |some |so many |plenty of )?(?:ideas|plans)|i have (?:a few |some |so many )?(?:ideas|plans) for you|you'?ll (?:see|find out)|wait and see|we'?ll see|let me think about (?:it|that)|all in good time|patience)\b/i;
 // he cools the sexting flow (deep dive): slows it down, isn't in the mood, changes the subject
 const COOLS = /\b(?:slow down|too fast|going (?:too )?fast|not (?:now|tonight|today|in the mood|really in the mood)|some other time|maybe later|later maybe|let'?s (?:talk|chat) about something else|change (?:the|of) subject|that'?s enough|enough for now|stop(?: it)?|chill|relax|calm down|not (?:really )?(?:into|feeling) (?:it|this|that)|no thanks|nah)\b/i;
@@ -2680,6 +2693,9 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         // a reply all about her ("I love how names travel makes me want to try some rooibos tea again"): no door for him
         now.style.push('It gives him nothing to answer: it is all about you. Say something to him he can pick up (a guess about him, "bet you…", "you seem…", or tell him something and hand it back).');
       }
+      // round 4, H3: in a hard moment, nothing that brushes his feeling off, and no advice he didn't ask for
+      if (base.plan?.hard && DISMISS.test(draft.messages.join(' '))) now.style.push(`It brushes his feeling off ("${draft.messages.join(' ').match(DISMISS)[0]}"): name it and stay with it.`);
+      if (base.plan?.hard && ADVICE.test(draft.messages.join(' ')) && !ADVICE_ASKED.test(voice?.his || latestText)) now.style.push('It gives advice he didn\'t ask for: stay with what he feels; ask if he wants ideas.');
       // round 4, G2: after two questions in a row a question has to follow him
       const qNow = questionSentences(draft.messages);
       if (base.plan?.ask?.follow_only && qNow.length && !qNow.some(q => followsHim(q, latestText))) now.style.push('Your question changes the subject after two questions in a row: ask about what he just said, or no question.');

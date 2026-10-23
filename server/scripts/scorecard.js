@@ -108,6 +108,29 @@ const inBand = (v, [lo, hi]) => (v == null ? '' : v < lo ? ' ▼ low' : v > hi ?
   row('Declared feeling (I care, I miss you)', declared, 'declared', '   target ≤ 10%');
   row('Compliment', compliment, 'compliment', '   target ≤ 5%');
   console.log(`${'Three questions in a row'.padEnd(34)} ${pct(runs3, windows).padStart(6)}  (${wilson(runs3, windows)}, of ${windows} runs of three in saved chats)${windows ? inBand(100 * runs3 / windows, BANDS.three_in_a_row) : ''}   humans about 5%`);
+  // round 4, H4: the manager's marks in Practice (talk, tell, buy: up or down), by goal; with the reader's own read beside them
+  const marked = [];
+  for (const r of runs || []) for (const t of r.turns || []) if (t.marks && Object.values(t.marks).some(Boolean)) marked.push(t);
+  if (marked.length) {
+    console.log(`\nYour marks in Practice (${marked.length} replies marked):`);
+    const byGoal = {};
+    for (const t of marked) { const g = t.used?.plan?.goal || '?'; (byGoal[g] ||= []).push(t); }
+    for (const [g, list] of Object.entries(byGoal).sort((a, b) => b[1].length - a[1].length)) {
+      const cnt = (k, v) => list.filter(t => t.marks[k] === v).length;
+      console.log(`  ${g.padEnd(16)} ${String(list.length).padStart(3)} marked · talk ${cnt('talk', 1)}▲ ${cnt('talk', -1)}▼ · tell ${cnt('tell', 1)}▲ ${cnt('tell', -1)}▼ · buy ${cnt('buy', 1)}▲ ${cnt('buy', -1)}▼`);
+    }
+    // the reader reads, with his NEXT message, what her line did: compare your mark on a reply with the read of the turn after it
+    let agree = 0, compared = 0;
+    for (const r of runs || []) {
+      const ts = r.turns || [];
+      for (let i = 0; i < ts.length - 1; i += 1) {
+        const m = ts[i].marks, w = ts[i + 1].used?.plan?.reading?.wishes;
+        if (!m || !w) continue;
+        for (const k of ['talk', 'tell', 'buy']) { if (!m[k]) continue; compared += 1; if ((m[k] > 0 && w[k] === '+') || (m[k] < 0 && w[k] === '-')) agree += 1; }
+      }
+    }
+    if (compared) console.log(`  the reader agreed with your mark ${pct(agree, compared)} of the time (${agree} of ${compared})`);
+  }
   // the main move, labelled the way the human library was (the other session's prompt, word for word)
   if (MOVES > 0 && or.configured()) {
     const SYSTEM = 'Label the conversational move of the LAST reply.\n\nYou see a short excerpt of a casual text chat between a FAN and a CREATOR, then the LAST reply, written by the CREATOR. The LAST reply may be made of several separate messages sent in a row; label it as one reply.\n\nPick ONE primary move for the LAST reply and, only if the reply clearly does a second thing, one secondary move. Moves:\n- question_followup: asks about something the partner just said\n- question_new: asks a question that opens a new topic (incl. "what about you?/wbu")\n- answer: directly answers the partner\'s question\n- self_disclosure: shares own experience, day, story, feelings\n- opinion: states a view, preference, judgement or mild disagreement\n- reaction: short acknowledgement/backchannel/laughter ("haha", "oh nice", "omg")\n- tease_joke: playful teasing or humour\n- compliment: praise of the partner\n- empathy: sympathy/support for the partner\'s feelings\n- guess_about_partner: statement or assumption about the partner\n- callback: refers back to something said much earlier\n- closing: wrapping up, goodbye\n- other\n\nAlso say:\n- has_question: true if the LAST reply asks the partner anything (with or without a question mark)\n- small_talk: true if the excerpt is ordinary everyday chat; false if it is sexual or flirting toward sex, or about buying, selling, paying for or sending paid content\n\nAnswer with JSON only: {"primary": "<move>", "secondary": "<move or null>", "has_question": true|false, "small_talk": true|false}';

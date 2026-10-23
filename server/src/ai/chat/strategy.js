@@ -114,9 +114,10 @@ function readPrompt({ chat, money, selling = false, notes = [] }) {
           + '- asked: his open question(s) to her in his latest message(s), each as he put it, at most 3, [] if none.\n'
           + '- promised: anything she told him earlier in these messages that is still open ("I\'ll show you later", "remind me to tell you"), at most 2, [] if none.\n'
           + '- odd: true when his message does not fit a man chatting up a girl on her page (he talks about other men or his own body in a way that does not involve her, a non-sequitur, a provocation, a line that reads like a test), false when it fits, however blunt; a joke answer to her question is not odd. An edgy or dark joke about himself or his people (violence, stereotypes, "we like to explode") is him testing her reaction: doing "testing", odd true, with a reading "testing her" and one "a real joke".\n'
+          + '- wishes: how his latest message responds to HER LAST LINE, three separate reads, each "+", "0" or "-": talk ("+" he keeps it going: longer, asks back, enthusiastic; "-" shorter, dismissive, wants to stop), tell ("+" he tells her about himself; "-" he refuses or deflects a personal question), buy ("+" interest in seeing or buying her content: asks what she has, says yes to an offer, curious about her pictures; "-" he declines, says he just wants to talk, objects to a price, is irritated by selling). "0" when it does not move; all "0" when she said nothing yet.\n'
           + `- stance: the attitude that fits her reply, one of ${STANCES.join(', ')} (steady = warm and normal; curious = she wants to know more first; playful = tease it, don't take it seriously; match = he set the tone, go with it; deflect = don't take the bait, move it somewhere better; comfort = he needs care; firm = a clear boundary, kindly).\n`
           + (notes.length ? '- contradicts: if his latest message clearly contradicts one of the remembered notes (the note says he has a dog, now he says he has no pets), copy that note word for word; else "". New details that fit, or things he says about her, are not contradictions.\n' : '')
-          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "answers": "straight", "thread": "alive", "doing": "small_talk", "new": "", "readings": [], "curious": "", "asked": [], "promised": [], "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
+          + `Reply with JSON only: {"ids": ["…"], "level": 0, "mood": "chatty", "pulled_back": false, "answers": "straight", "thread": "alive", "doing": "small_talk", "new": "", "readings": [], "curious": "", "asked": [], "promised": [], "wishes": {"talk": "0", "tell": "0", "buy": "0"}, "odd": false, "stance": "steady"${notes.length ? ', "contradicts": ""' : ''}}`,
       ].filter(Boolean).join('\n\n'),
     },
   ];
@@ -134,6 +135,8 @@ function readReading(json) {
     answers, thread: json.thread === 'dead' ? 'dead' : 'alive',
     asked: (Array.isArray(json.asked) ? json.asked : []).map(x => text(x, 160)).filter(Boolean).slice(0, 3),
     promised: (Array.isArray(json.promised) ? json.promised : []).map(x => text(x, 160)).filter(Boolean).slice(0, 2),
+    // round 4, H1: what her last line did to his wish to talk, to tell her things, to buy (Hentona 2025)
+    wishes: json.wishes && typeof json.wishes === 'object' ? Object.fromEntries(['talk', 'tell', 'buy'].map(k => [k, ['+', '0', '-'].includes(String(json.wishes[k])) ? String(json.wishes[k]) : '0'])) : null,
   };
 }
 

@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy,DISMISS,ADVICE,ADVICE_ASKED};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -176,6 +176,19 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   check('G4 repairs by kind', Plan.repairKind("what's a platz?", 'Would you like a platz?') === 'term' && Plan.repairKind("what's that?", 'x') === 'that' && Plan.repairKind('like what?', 'x') === 'example' && Plan.repairKind('come again?', 'x') === 'repeat' && Plan.repairKind('What do you mean?', 'x') === 'whole' && Plan.repairKind('nice', 'x') === '');
   const term = makePlan("what's a platz?", { herLast: 'Would you like a platz, too?', reading: { ...reading, doing: 'asking', asked: ["what's a platz?"] } });
   check('G4 a word of hers gets its meaning, and her question may come again', term.clarify_kind === 'term' && /"platz" means/.test(term.answer_first) && term.ask.allowed, { kind: term.clarify_kind, first: term.answer_first, ask: term.ask });
+
+  // round 4, Group H
+  const strat = req('./server/src/ai/chat/strategy');
+  check('H1 the three wishes are read and checked', same(strat.readReading({ doing: 'small_talk', wishes: { talk: '+', tell: 'x', buy: '-' } }).wishes, { talk: '+', tell: '0', buy: '-' }));
+  Object.assign(reading, { wishes: { talk: '+', tell: '0', buy: '-' } });
+  let h2 = await A.reply('org', 'creator', { madeUp: { name: 'Hank', type: 'spender' }, test: [{ from: 'fan', text: 'hey' }, { from: 'her', text: 'hey you, want to see something?' }, { from: 'fan', text: 'nah not today' }], selling: false, planOnly: true });
+  const keep = h2.used.session.buy_no;
+  Object.assign(reading, { wishes: { talk: '+', tell: '0', buy: '0' } });
+  h2 = await A.reply('org', 'creator', { madeUp: { name: 'Hank', type: 'spender' }, test: [{ from: 'fan', text: 'hey' }, { from: 'her', text: 'hey you, want to see something?' }, { from: 'fan', text: 'nah not today' }, { from: 'her', text: 'no worries' }, { from: 'fan', text: 'so how was your day' }], selling: false, planOnly: true, session: h2.used.session });
+  const braked = Plan.planReply({ level: { his: 1, max: 1, mood: 'chatty', warm: true }, latest: ['so how was your day'], profile, herReplies: 6, sell: true, session: { aim: 'sell', buy_no: true }, reading: { ...reading }, rand: () => 0 });
+  check('H2 a no to buying holds selling for the conversation, kept between replies', keep === true && h2.used.session.buy_no === true && !braked.sell.allowed && /signalled no to buying/.test(braked.sell.why || ''), { keep, buyNo: h2.used.session.buy_no, sell: braked.sell });
+  Object.assign(reading, { wishes: null });
+  check('H3 brushing him off and unasked advice are caught', audit.DISMISS.test("don't worry, it'll be okay") && audit.ADVICE.test('you should talk to her') && audit.ADVICE_ASKED.test('what should I do?') && !audit.DISMISS.test("that sounds really lonely, I'm sorry"));
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);

@@ -86,6 +86,10 @@ function updateGauges(prev, ctx = {}) {
   if (ctx.notBought) move('readiness', g.readiness - 25, 'he passed on her last PPV');
   if (ctx.objection) move('readiness', g.readiness - 20, 'he says it is too much');
   if (ctx.broke) move('readiness', 0, 'he says he cannot spend now');
+  // round 4, H1: what her last line did to his wish to buy and to talk
+  if (reading?.wishes?.buy === '+') move('readiness', g.readiness + 20, 'he showed interest in her content');
+  if (reading?.wishes?.buy === '-' && !ctx.declined) move('readiness', g.readiness - 30, 'he signalled no to buying');
+  if (reading?.wishes?.talk === '-') move('engagement', g.engagement - 10, 'her last line cooled him');
   if (ctx.declined && !ctx.broke) move('readiness', Math.min(g.readiness, 5), 'he said he just wants to talk, or not now (A1)');
   if (session?.pause) move('readiness', Math.min(g.readiness, 10), 'the pause after his big spend (A7)');
   if (session?.no_sell) move('readiness', Math.min(g.readiness, 10), 'no selling this conversation (B3)');
