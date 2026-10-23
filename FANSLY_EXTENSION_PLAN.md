@@ -167,3 +167,8 @@ The panel only reads from our server and writes our notes; it never sends anythi
 - **Across the agency** lists Fansly pages only, without platform labels; other platforms wait until fans can be matched surely.
 - **AI summary** is empty until Generate is pressed; Generate / Regenerate always writes a new one.
 - **Incomplete chat warning** (060, extension 0.6.1): a chat is marked complete once Fansly returns a page shorter than it asked for (its first message is reached, also an empty page after exactly full ones). Until then the panel warns "Chat not fully recorded: N messages, back to <date>; scroll up to his first message once", and the AI summary says it reads only the recorded part. Chats recorded before 0.6.1 show the warning until scrolled once more.
+
+## 24 Oct, late: the two stray Fansly pages (extension 0.6.3)
+- **Where they came from.** On the first day the extension guessed which Fansly account it was on from the first media item of a chat page. In RA7X's and Gisus07's chats that item was a photo the fan had sent, so one batch each was filed under the fan's id, and the server made a page for it ("Fansly 299776", "Fansly 308161").
+- **Fixed.** The account now comes only from proof: Fansly's own "who am I" answer, or a message this browser sent. The server creates a page only for an account a batch proves; a guess never creates one.
+- **Cleaned up.** Their 135 messages were replayed into corarossi from the raw copies (all present, sides right), 4 items moved, sales re-matched; then the two accounts, their pages and their six auto-made shifts were deleted.

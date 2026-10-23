@@ -37,21 +37,33 @@ function itemPrice(item) {
 }
 
 /** Which of these two account ids is the creator: the one that owns the media / started the thread list. */
+/**
+ * Which Fansly account a batch is about, from proof only: Fansly's "who am I" answer, or
+ * a message this browser sent. (Guessing from a chat's media once filed two fans' chats
+ * as pages of their own on 23 Oct: a fan's own photo was the first media in his chat.)
+ */
 function inferAccountId(events) {
   for (const e of events) {
     const d = e?.data || {};
     if (e.kind === 'me' && d.id) return str(d.id);
-    if (e.kind === 'groups' && d.data?.[0]?.account_id) return str(d.data[0].account_id);
-    if (e.kind === 'messages' && d.accountMedia?.[0]?.accountId) return str(d.accountMedia[0].accountId);
     if (e.kind === 'sent' && d.senderId) return str(d.senderId);
-    if (e.kind === 'media_created' && Array.isArray(d) && d[0]?.accountId) return str(d[0].accountId);
   }
   return null;
+}
+/** The account ids a batch proves: only these may create a new page. */
+function provenAccountIds(events) {
+  const ids = new Set();
+  for (const e of events || []) {
+    if (e.kind === 'me' && e.data?.id) ids.add(str(e.data.id));
+    if (e.kind === 'sent' && e.data?.senderId) ids.add(str(e.data.senderId));
+  }
+  return ids;
 }
 
 // ---------- lookups with short caches (one process, many batches a minute) ----------
 const accountCache = new Map();            // `${org}:${fanslyId}` → { at, row }
 const forgetAccount = (orgId, fanslyId) => accountCache.delete(`${orgId}:${fanslyId}`);
+// `hint.create === false`: an account not recorded yet is not created (returns null)
 async function ensureAccount(orgId, fanslyId, hint = {}) {
   const key = `${orgId}:${fanslyId}`;
   const hit = accountCache.get(key);
@@ -61,6 +73,7 @@ async function ensureAccount(orgId, fanslyId, hint = {}) {
     if (error) throw error;
     acc = data;
   }
+  if (!acc && hint.create === false) return null;
   if (!acc) {
     // A new Fansly account: give it a page of its own (platform fansly), named after the username for now.
     const name = hint.username ? `${hint.username} (Fansly)` : `Fansly ${fanslyId.slice(-6)}`;
@@ -646,4 +659,4 @@ async function sweepPresence(orgId) {
   if (data?.length) await supabaseAdmin.from('fansly_presence').update({ ended_at: new Date().toISOString(), ended_reason: 'timeout' }).in('id', data.map(r => r.id));
 }
 
-module.exports = { applyEvents, inferAccountId, ensureAccount, forgetAccount, chatterFor, pagesFor, mayWork, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };
+module.exports = { applyEvents, inferAccountId, provenAccountIds, ensureAccount, forgetAccount, chatterFor, pagesFor, mayWork, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };

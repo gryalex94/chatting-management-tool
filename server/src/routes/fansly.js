@@ -68,7 +68,9 @@ async function accountFor(req, events) {
   const given = req.body?.account && req.body.account.id ? String(req.body.account.id) : null;
   const fanslyId = given || F.inferAccountId(events || []);
   if (!fanslyId) return null;
-  return F.ensureAccount(req.user.organisationId, fanslyId, { username: req.body?.account?.username, displayName: req.body?.account?.displayName });
+  // a page is only ever created for an account Fansly itself named as the signed-in one (or that sent a message here)
+  const create = F.provenAccountIds(events).has(fanslyId);
+  return F.ensureAccount(req.user.organisationId, fanslyId, { username: req.body?.account?.username, displayName: req.body?.account?.displayName, create });
 }
 
 // GET /api/fansly/me → who is signed in, their chatter row, the accounts this organisation records

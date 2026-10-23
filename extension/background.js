@@ -71,9 +71,8 @@ async function panelApi(method, path, body) {
 // ---- learning which Fansly account this browser shows ----
 function noteAccount(kind, data) {
   let id = null, username = null;
+  // only proof: Fansly's own "who am I" answer, or a message this browser sent (never a chat's media, which can be the fan's)
   if (kind === 'me' && data && data.id) { id = data.id; username = data.username || null; }
-  else if (kind === 'groups' && data && data.data && data.data[0]) id = data.data[0].account_id;
-  else if (kind === 'messages' && data && data.accountMedia && data.accountMedia[0]) id = data.accountMedia[0].accountId;
   else if (kind === 'sent' && data) id = data.senderId;
   if (id && String(id) !== state.accountId) { state.accountId = String(id); state.accountUsername = username; state.needAccount = false; saveState(); }
   else if (id && username && !state.accountUsername) { state.accountUsername = username; saveState(); }
