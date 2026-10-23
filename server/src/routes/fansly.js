@@ -380,23 +380,23 @@ router.post('/recount', async (req, res) => {
 
 // ---------- per page: the owner's credit rules and the AI profile that writes the suggestions ----------
 
-/** The pages that have an AI profile (Her profile in AI chat): any of them can write for a Fansly page. */
-async function aiPages(orgId) {
-  const { data } = await supabaseAdmin.from('ai_personas').select('creator_id, profile, creators(name, organisation_id)').limit(200);
-  return (data || []).filter(p => p.creators?.organisation_id === orgId && p.profile?.name).map(p => ({ creator_id: p.creator_id, page: p.creators.name, name: p.profile.name }));
-}
-
 // GET /api/fansly/accounts/:id/settings
 router.get('/accounts/:id/settings', async (req, res) => {
   try {
-    const { data: a, error } = await supabaseAdmin.from('fansly_accounts').select('id, username, credit_rules, ai_creator_id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    const { data: a, error } = await supabaseAdmin.from('fansly_accounts').select('id, username, credit_rules, creator_id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
     if (error) throw error;
     if (!a) return res.status(404).json({ error: 'No such Fansly page' });
-    res.json({ credit_rules: Stats.rulesOf(a.credit_rules), defaults: Stats.DEFAULT_RULES, ai_creator_id: a.ai_creator_id, ai_pages: await aiPages(req.user.organisationId).catch(() => []) });
+    // the creator profile the suggested replies use: this page's own, or the page it is linked to
+    const AI = require('../utils/aiChat');
+    const owner = a.creator_id ? await AI.profileOwner(req.user.organisationId, a.creator_id) : null;
+    const { data: persona } = owner ? await supabaseAdmin.from('ai_personas').select('profile').eq('creator_id', owner).eq('organisation_id', req.user.organisationId).maybeSingle() : { data: null };
+    const { data: ownerPage } = owner && owner !== a.creator_id ? await supabaseAdmin.from('creators').select('name, platform').eq('id', owner).maybeSingle() : { data: null };
+    res.json({ credit_rules: Stats.rulesOf(a.credit_rules), defaults: Stats.DEFAULT_RULES, creator_id: a.creator_id,
+      profile: { has: !!String(persona?.profile?.name || '').trim(), name: persona?.profile?.name || null, linked_to: ownerPage ? { name: ownerPage.name, platform: ownerPage.platform } : null } });
   } catch (e) { fail(res, e, 'load the settings'); }
 });
 
-// POST /api/fansly/accounts/:id/settings { credit_rules?, ai_creator_id? } — owner / admin only
+// POST /api/fansly/accounts/:id/settings { credit_rules? } — owner / admin only
 router.post('/accounts/:id/settings', requireMinRole('admin'), async (req, res) => {
   try {
     const { data: a } = await supabaseAdmin.from('fansly_accounts').select('id, credit_rules').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
@@ -407,11 +407,6 @@ router.post('/accounts/:id/settings', requireMinRole('admin'), async (req, res) 
       const next = Stats.rulesOf(req.body.credit_rules);
       rulesChanged = JSON.stringify(next) !== JSON.stringify(Stats.rulesOf(a.credit_rules));
       patch.credit_rules = next;
-    }
-    if (req.body?.ai_creator_id !== undefined) {
-      const id = req.body.ai_creator_id || null;
-      if (id && !(await aiPages(req.user.organisationId)).some(p => p.creator_id === id)) return res.status(400).json({ error: 'That page has no AI profile' });
-      patch.ai_creator_id = id;
     }
     if (Object.keys(patch).length) {
       const { error } = await supabaseAdmin.from('fansly_accounts').update(patch).eq('id', a.id);

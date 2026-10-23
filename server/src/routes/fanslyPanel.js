@@ -19,6 +19,15 @@ const Agency = require('../utils/fanAgency');
  * a clicked script only lands in the message box, and the chatter sends it.
  */
 const panel = express.Router();
+
+/** Does this page have a creator profile (its own, or the linked page's)? */
+async function hasProfile(orgId, creatorId) {
+  if (!creatorId) return false;
+  const AI = require('../utils/aiChat');
+  const owner = await AI.profileOwner(orgId, creatorId);
+  const { data } = await supabaseAdmin.from('ai_personas').select('profile').eq('creator_id', owner).eq('organisation_id', orgId).maybeSingle();
+  return !!String(data?.profile?.name || '').trim();
+}
 const scripts = express.Router();
 
 const STAGES = ['opener', 'warmup', 'sexting', 'ppv_pitch', 'after_no', 'reengage', 'custom', 'aftercare', 'other'];
@@ -40,7 +49,7 @@ const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a,
 async function accountOf(req, fanslyAccountId) {
   const id = String(fanslyAccountId || '');
   if (!/^\d{5,25}$/.test(id)) return null;
-  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, ai_creator_id, tiers, creators(name)')
+  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, tiers, creators(name)')
     .eq('organisation_id', req.user.organisationId).eq('fansly_account_id', id).maybeSingle();
   if (!data) return null;
   return { ...data, assigned: await F.mayWork(req.user, data) };
@@ -154,7 +163,8 @@ panel.get('/fan', async (req, res) => {
       since = pres?.[0]?.started_at || null;
     }
     const shift = { user: req.user.name || req.user.email, since, shift: nowShift ? { start: nowShift.start_time, end: nowShift.end_time, timezone: nowShift.timezone } : null };
-    const page = { id: account.id, username: account.username, name: account.creators?.name || account.username, ai: !!account.ai_creator_id };
+    // suggested replies use this Fansly page's own creator profile (or the page it is linked to)
+    const page = { id: account.id, username: account.username, name: account.creators?.name || account.username, ai: await hasProfile(req.user.organisationId, account.creator_id) };
     if (!account.assigned) return res.json({ found: false, reason: 'not_assigned', message: NOT_ASSIGNED, page, shift });
     if (!fan) return res.json({ found: false, reason: 'fan', page, shift });
 
@@ -404,7 +414,7 @@ panel.post('/suggest', async (req, res) => {
     if (!account) return;
     const fanId = String(req.body?.fan || '');
     if (!/^\d{5,25}$/.test(fanId)) return res.status(404).json({ error: 'No such fan on this page' });
-    if (!account.ai_creator_id) return res.status(409).json({ error: 'No AI profile is picked for this page yet. A manager picks it on the Fansly dashboard (Pages, Settings).' });
+    if (!account.creator_id || !(await hasProfile(req.user.organisationId, account.creator_id))) return res.status(409).json({ error: 'This page has no creator profile yet. A manager fills it in: AI chat, with Fansly picked and this page chosen, then Her profile.' });
     const AI = require('../utils/aiChat');
     // the last suggestion for him in this conversation carries the engine's plan forward
     const { data: prev } = await supabaseAdmin.from('fansly_ai_drafts').select('id, session, status, created_at').eq('account_id', account.id).eq('fan_account_id', fanId)
@@ -415,10 +425,10 @@ panel.post('/suggest', async (req, res) => {
     if (last && ['shown', 'inserted'].includes(last.status)) await supabaseAdmin.from('fansly_ai_drafts').update({ status: 'discarded', decided_at: new Date().toISOString() }).eq('id', last.id);
     const opts = { fanUuid: fanId, fansly: { accountId: account.id }, session };
     let out;
-    try { out = await AI.reply(req.user.organisationId, account.ai_creator_id, opts); }
+    try { out = await AI.reply(req.user.organisationId, account.creator_id, opts); }
     catch (e) {
       // he hasn't written since our last message: she writes first (a nudge)
-      if (/no message from him/i.test(e.message)) out = await AI.reply(req.user.organisationId, account.ai_creator_id, { ...opts, followUp: true });
+      if (/no message from him/i.test(e.message)) out = await AI.reply(req.user.organisationId, account.creator_id, { ...opts, followUp: true });
       else throw e;
     }
     const chatterId = await F.chatterFor(req.user).catch(() => null);

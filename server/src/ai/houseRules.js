@@ -118,7 +118,9 @@ const DRAFT_SCHEMA = {
 async function proposeRules(orgId, feedback, existing, pages, { model = 'sonnet' } = {}) {
   // The live page wins when an old copy shares its name.
   const pageByName = {};
-  for (const p of pages || []) { const k = p.name.toLowerCase().trim(); if (p.is_active !== false || !pageByName[k]) pageByName[k] = p; }
+  // these rules are for the OnlyFans chatter reviews: only OnlyFans pages (the same creator's Fansly or
+  // Fanvue page is a separate page with its own facts, and must not take an OnlyFans page's place by name)
+  for (const p of (pages || []).filter(x => (x.platform || 'onlyfans') === 'onlyfans')) { const k = p.name.toLowerCase().trim(); if (p.is_active !== false || !pageByName[k]) pageByName[k] = p; }
   const pageName = Object.fromEntries((pages || []).map(p => [p.id, p.name]));
 
   // Required here, not at the top: the review module loads this one.
@@ -186,7 +188,7 @@ async function draftRules(orgId, { model = 'sonnet' } = {}) {
 
     const [{ data: existing, error: rulesErr }, { data: pages }] = await Promise.all([
       supabaseAdmin.from('ai_rules').select('id, creator_id, rule, status').eq('organisation_id', orgId).in('status', ['active', 'proposed', 'rejected']),
-      supabaseAdmin.from('creators').select('id, name, is_active, ai_context, ai_instructions').eq('organisation_id', orgId),
+      supabaseAdmin.from('creators').select('id, name, is_active, platform, ai_context, ai_instructions').eq('organisation_id', orgId),
     ]);
     if (rulesErr) throw new Error('Run migration 024 (AI rules) in Supabase first');
     const rows = await proposeRules(orgId, feedback, existing || [], pages || [], { model });

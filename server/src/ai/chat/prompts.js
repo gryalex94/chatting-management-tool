@@ -223,7 +223,16 @@ function cardText(card = [], money = null, timeZone = DEFAULT_TZ, now = new Date
  * the agency's good chats ({ moment, him, reply }), `level` = how sexual it may
  * get ({ his, mood, max }), `timeZone` = hers, `now` = Date.
  */
-function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], rules = [], diary = [], mood = '', timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [], candidates = 1 }) {
+// The prompts were written for Fanvue's AI creator: on another platform, or for a real creator, the wording follows.
+const PLATFORM_NAME = { fanvue: 'Fanvue', fansly: 'Fansly', onlyfans: 'OnlyFans' };
+function onPlatform(text, platform = 'fanvue', ai = true) {
+  let t = String(text);
+  if (platform && platform !== 'fanvue') t = t.replace(/\bFanvue\b/g, PLATFORM_NAME[platform] || platform);
+  if (!ai) t = t.replace(/\ban AI character on\b/g, 'a creator on').replace(/\ban AI creator\b/g, 'a creator');
+  return t;
+}
+
+function replyPrompt({ platform = 'fanvue', ai = true, profile, fan = {}, card = [], money = null, story = '', chat = [], notes = [], situations = '', library = [], level = null, voice = null, sexting = null, plan = null, lessons = [], rules = [], diary = [], mood = '', timeZone = DEFAULT_TZ, now = new Date(), retry = null, selling = false, content = '', sales = [], candidates = 1 }) {
   const parts = [`Now: ${when(now.toISOString(), timeZone)} (your local time; he may live somewhere else, so you don't know his time unless he says it).`];
   const about = cardText(card, money, timeZone, now);
   parts.push(`# About him\n${fan.name ? `He goes by: ${fan.name}\n` : ''}${about || 'You don\'t have notes on him yet.'}`);
@@ -291,8 +300,8 @@ function replyPrompt({ profile, fan = {}, card = [], money = null, story = '', c
   if (retry) now_.push(`Your last draft was turned down because: ${retry} Write a new reply that keeps to the rules.`);
   parts.push(`# Right now\n${now_.map(n => `- ${n}`).join('\n')}${now_.length ? '\n' : ''}${candidates > 1 ? `Write ${candidates} different replies to his latest message(s), as a JSON array of ${candidates} answer objects in the format above: different in shape (one may ask something, another not; different openers, different lengths), each a reply you could really send. The best one is picked for you.` : 'Write your next reply to his latest message(s).'}`);
   return [
-    { role: 'system', content: systemText(profile, { selling, story: !!sexting?.on }) },
-    { role: 'user', content: parts.join('\n\n') },
+    { role: 'system', content: onPlatform(systemText(profile, { selling, story: !!sexting?.on }), platform, ai) },
+    { role: 'user', content: onPlatform(parts.join('\n\n'), platform, ai) },
   ];
 }
 
@@ -793,4 +802,5 @@ function addTypo(list, { chance = 1 / 15, fixChance = 0.5, rand = Math.random } 
   return { messages: out, typo: { word: w, fixed } };
 }
 
-module.exports = { parseJsonObjects, readReplies, splitBubbles, surfacePass, outfitClash, EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };
+module.exports = {
+  onPlatform, parseJsonObjects, readReplies, splitBubbles, surfacePass, outfitClash, EMOJI_CHANCE, HOUSE_RULES, CHAT_GUIDE, PROFILE_FIELDS, GENERATE_OPTIONS, FACT_KINDS, TIME_ZONES, DEFAULT_TZ, LEVELS, STAGES, BEATS, replyPrompt, maxLevel, memoryPrompt, profilePrompt, generatePrompt, parseJsonObject, readReply, readScene, sceneLine, tidyMessages, unQuestion, dropSentences, addTypo, chatLine };

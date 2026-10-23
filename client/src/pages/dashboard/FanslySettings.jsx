@@ -28,7 +28,6 @@ export default function FanslySettings({ account, onClose, canEdit }) {
     try {
       const r = await api.post(`/api/fansly/accounts/${account.id}/settings`, {
         credit_rules: { mass_ppv: s.credit_rules.mass_ppv, late_days: s.late === '' ? null : Number(s.late), tip_hours: Number(s.credit_rules.tip_hours) },
-        ai_creator_id: s.ai_creator_id || null,
       });
       toast.success(r.data.recounting ? 'Saved. Sales are being matched again with the new rules; numbers update in a minute.' : 'Saved');
       onClose(true);
@@ -74,16 +73,12 @@ export default function FanslySettings({ account, onClose, canEdit }) {
               </div>
             </div>
             <p className='text-xs text-muted-foreground'>Wall purchases, subscriptions, renewals, stream tickets and referrals are never credited to a chatter. A refund comes off whoever the sale was credited to.</p>
-            <div className='grid gap-1.5'>
-              <Label>AI profile for suggested replies</Label>
-              <Select value={s.ai_creator_id || 'none'} onValueChange={v => setS(x => ({ ...x, ai_creator_id: v === 'none' ? null : v }))} disabled={!canEdit}>
-                <SelectTrigger className='w-full'><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='none'>None: no suggestions on this page</SelectItem>
-                  {s.ai_pages.map(p => <SelectItem key={p.creator_id} value={p.creator_id}>{p.name} ({p.page})</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className='text-xs text-muted-foreground'>Profiles come from AI chat, Her profile. Pick the one that is the same creator as this Fansly page.</p>
+            <div className='grid gap-1.5 rounded-md border px-3 py-2 text-sm'>
+              <Label>Creator profile for suggested replies</Label>
+              {s.profile?.has
+                ? <p>Uses {s.profile.linked_to ? <>the profile of <b>{s.profile.linked_to.name}</b> ({s.profile.linked_to.platform}), linked as the same creator</> : <>this page&apos;s own profile (<b>{s.profile.name}</b>)</>}.</p>
+                : <p className='text-amber-600'>This page has no creator profile yet, so there are no suggested replies.</p>}
+              <p className='text-xs text-muted-foreground'>Each page has its own profile, kept apart from her pages on other platforms. Fill it in, or link it to the same creator&apos;s page, in AI chat (with Fansly picked in the menu, this page chosen), Her profile.</p>
             </div>
           </div>
         )}

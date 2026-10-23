@@ -28,7 +28,8 @@ export const NAV_GROUPS = [
       { url: '/daily', title: 'Daily Check', icon: ShieldCheck },
       { url: '/tasks', title: 'Tasks', icon: ListChecks },
       { url: '/rules', title: 'AI Rules', icon: BookCheck },
-      { url: '/ai-chat', title: 'AI chat', icon: Bot, managerOnly: true, platform: 'fanvue' },
+      // every page on every platform has its own creator profile here (the reply engine writes from it)
+      { url: '/ai-chat', title: 'AI chat', icon: Bot, managerOnly: true },
     ],
   },
   {

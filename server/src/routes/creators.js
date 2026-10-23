@@ -208,9 +208,14 @@ router.post('/:id/merge', requireMinRole('admin'), async (req, res) => {
     if (sourceId === targetId) return res.status(400).json({ error: 'Cannot merge a page into itself' });
 
     const orgId = req.user.organisationId;
-    const target = await ownedBy('creators', targetId, orgId, 'id, name, merged_into');
-    const source = await ownedBy('creators', sourceId, orgId, 'id, name, merged_into');
+    const target = await ownedBy('creators', targetId, orgId, 'id, name, merged_into, platform');
+    const source = await ownedBy('creators', sourceId, orgId, 'id, name, merged_into, platform');
     if (!target || !source) return res.status(404).json({ error: 'Page not found' });
+    // pages stay apart per platform: a group (team) is one platform; the same creator on two
+    // platforms shares her creator profile through a link instead (AI chat → Her profile)
+    if ((target.platform || 'onlyfans') !== (source.platform || 'onlyfans')) {
+      return res.status(400).json({ error: `${source.name} is on ${source.platform || 'onlyfans'} and ${target.name} on ${target.platform || 'onlyfans'}: pages on different platforms can't be merged. To use one creator profile for both, link it in AI chat, Her profile.` });
+    }
 
     // The group is always anchored on a top-level page. If the target is itself
     // a member of a group, anchor on that group's primary instead.

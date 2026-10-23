@@ -42,6 +42,16 @@ router.put('/pages/:creatorId/profile', async (req, res) => {
   } catch (e) { fail(res, e, 'save her profile'); }
 });
 
+// PUT /api/ai-chat/pages/:creatorId/profile-link { from: <page id> | null } — this page uses another
+// page's creator profile (the same creator on another platform), or its own again (null)
+router.put('/pages/:creatorId/profile-link', async (req, res) => {
+  try {
+    const from = req.body?.from || null;
+    if (from && !UUID_RE.test(String(from))) return res.status(400).json({ error: 'Pick a page' });
+    res.json(await A.linkProfile(org(req), req.params.creatorId, from));
+  } catch (e) { fail(res, e, 'link the profile'); }
+});
+
 // POST /api/ai-chat/pages/:creatorId/profile/draft — the AI drafts her profile from
 // her own past messages (not saved; about 1 cent).
 router.post('/pages/:creatorId/profile/draft', async (req, res) => {

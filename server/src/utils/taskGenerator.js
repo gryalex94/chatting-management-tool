@@ -70,9 +70,16 @@ const TENURE_MIN_SEV = { new: 'low', learning: 'medium', experienced: 'high' };
 // Page name -> page ID. Old merged/renamed pages can share a name with the live
 // one ("Tania" twice); the active page must win, or tasks land on the old copy,
 // which has no Infloww page ID (no "Open in Infloww" button).
+// Pages stay apart per platform: these findings come from OnlyFans (Infloww) chats, so when
+// the same creator has a page of that name on another platform too, the OnlyFans page wins.
+const _rank = (c) => (c.is_active !== false ? 2 : 0) + ((c.platform || 'onlyfans') === 'onlyfans' ? 1 : 0);
 function setPageByName(map, c) {
   const k = _norm(c.name);
-  if (c.is_active !== false || !map[k]) map[k] = c.id;
+  if (!map[k] || _rank(c) >= (map.__rank?.[k] ?? -1)) {
+    map[k] = c.id;
+    Object.defineProperty(map, '__rank', { value: map.__rank || {}, enumerable: false, writable: true });
+    map.__rank[k] = _rank(c);
+  }
 }
 
 function tenureTier(createdAt, onDate) {
@@ -274,7 +281,7 @@ function bundleCoaching(candidates, reportDate) {
 async function buildTasksForDate(orgId, reportDate) {
   // name lookups
   const [{ data: creators }, { data: chatters }] = await Promise.all([
-    supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId),
+    supabaseAdmin.from('creators').select('id, name, is_active, platform').eq('organisation_id', orgId),
     supabaseAdmin.from('chatters').select('id, name, created_at').eq('organisation_id', orgId),
   ]);
   const creatorNameById = {}; const creatorIdByName = {};
@@ -556,7 +563,7 @@ async function buildSpenderDevelopmentTasks(orgId, reportDate, opts = {}) {
   // a fan's sale rows (which used to mis-bucket them into "Unassigned page"), and
   // we skip rows whose creator_name is blank.
   const users = stalling.map(s => s.username);
-  const { data: creators } = await supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId);
+  const { data: creators } = await supabaseAdmin.from('creators').select('id, name, is_active, platform').eq('organisation_id', orgId);
   const creatorIdByName = {}; const creatorNameById = {};
   (creators || []).forEach(c => { creatorNameById[c.id] = c.name; setPageByName(creatorIdByName, c); });
 
@@ -681,7 +688,7 @@ async function buildTasksForChatterEval(orgId, reportDate, chatterId, evalType, 
   const src = SOURCE[evalType] || 'sales';
   const [{ data: ch }, { data: creators }, ignoreSet] = await Promise.all([
     supabaseAdmin.from('chatters').select('name').eq('id', chatterId).eq('organisation_id', orgId).maybeSingle(),
-    supabaseAdmin.from('creators').select('id, name, is_active').eq('organisation_id', orgId),
+    supabaseAdmin.from('creators').select('id, name, is_active, platform').eq('organisation_id', orgId),
     loadIgnoreSet(orgId),
   ]);
   if (!ch) return { created: 0, updated: 0 };                  // not this organisation's chatter

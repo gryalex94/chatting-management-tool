@@ -86,42 +86,89 @@ async function logUsage(orgId, kind, model, usage, { creatorId = null, fanUuid =
 }
 
 // ── Pages, profile ───────────────────────────────────────────────────────────
-/** A Fanvue page of the organisation and its connected account. */
-async function pageAccount(orgId, creatorId) {
-  const { data: page } = await supabaseAdmin.from('creators').select('id, name, organisation_id').eq('id', creatorId).maybeSingle();
+/**
+ * A page of the organisation (any platform: each page has its own creator profile) and,
+ * when it has one, its Fanvue account. `fanvue: true`: the work needs Fanvue's data
+ * (real fans, fan memory, her Fanvue history), so a page without a Fanvue account is refused.
+ * Without one, `account.id` is null.
+ */
+async function pageAccount(orgId, creatorId, { fanvue = false } = {}) {
+  const { data: page } = await supabaseAdmin.from('creators').select('id, name, organisation_id, platform, profile_from').eq('id', creatorId).maybeSingle();
   if (!page || page.organisation_id !== orgId) throw new AiChatError('Page not found', 404);
   const { data: account } = await supabaseAdmin.from('fanvue_accounts').select('id, handle, display_name, is_ai_creator')
     .eq('organisation_id', orgId).eq('creator_id', creatorId).maybeSingle();
-  if (!account) throw new AiChatError('This page isn\'t linked to a Fanvue account', 409);
-  return { page, account };
+  if (!account && fanvue) throw new AiChatError('This works with a Fanvue page\'s own data: this page isn\'t linked to a Fanvue account', 409);
+  return { page, account: account || { id: null, handle: null, display_name: null, is_ai_creator: false } };
+}
+const fanvuePage = (orgId, creatorId) => pageAccount(orgId, creatorId, { fanvue: true });
+
+/**
+ * Whose creator profile a page uses: its own, or (linked by a manager) another page's,
+ * typically the same creator on another platform. Links never chain: a link always points
+ * at a page that has its own profile.
+ */
+async function profileOwner(orgId, creatorId) {
+  const { data: page } = await supabaseAdmin.from('creators').select('id, organisation_id, profile_from').eq('id', creatorId).maybeSingle();
+  if (!page || page.organisation_id !== orgId) return creatorId;
+  if (!page.profile_from) return page.id;
+  const { data: owner } = await supabaseAdmin.from('creators').select('id, organisation_id').eq('id', page.profile_from).maybeSingle();
+  return owner && owner.organisation_id === orgId ? owner.id : page.id;
+}
+
+/** Link a page to another page's profile (`fromId`), or back to its own (null). */
+async function linkProfile(orgId, creatorId, fromId) {
+  const { page } = await pageAccount(orgId, creatorId);
+  if (!fromId) {
+    const { error } = await supabaseAdmin.from('creators').update({ profile_from: null }).eq('id', page.id);
+    check(error);
+    return getProfile(orgId, creatorId);
+  }
+  if (fromId === page.id) throw new AiChatError('A page can\'t share its own profile with itself');
+  const { page: from } = await pageAccount(orgId, fromId);
+  const owner = from.profile_from ? await profileOwner(orgId, from.id) : from.id;
+  if (owner === page.id) throw new AiChatError('That page already uses this page\'s profile');
+  // pages that used this page's profile follow it to the new one (no chains)
+  const { error: e1 } = await supabaseAdmin.from('creators').update({ profile_from: owner }).eq('organisation_id', orgId).eq('profile_from', page.id);
+  check(e1);
+  const { error } = await supabaseAdmin.from('creators').update({ profile_from: owner }).eq('id', page.id);
+  check(error);
+  return getProfile(orgId, creatorId);
 }
 
 /** The organisation's Fanvue pages, whether each has a profile, and what's set up on the server. */
+// Every page of the organisation, on every platform: each has (or can have) its own creator profile.
 async function pages(orgId) {
-  const { data: accs, error } = await supabaseAdmin.from('fanvue_accounts').select('id, handle, display_name, is_ai_creator, creator_id')
-    .eq('organisation_id', orgId).not('creator_id', 'is', null);
+  const { data: rows, error } = await supabaseAdmin.from('creators').select('id, name, platform, profile_from, is_active').eq('organisation_id', orgId).order('name');
   if (error) throw new Error(error.message);
-  const ids = accs.map(a => a.creator_id);
-  const [{ data: rows }, persona] = await Promise.all([
-    ids.length ? supabaseAdmin.from('creators').select('id, name').in('id', ids) : { data: [] },
-    ids.length ? supabaseAdmin.from('ai_personas').select('creator_id, profile, settings, updated_at').in('creator_id', ids) : { data: [] },
-  ]);
-  const name = Object.fromEntries((rows || []).map(r => [r.id, r.name]));
+  const { data: fva } = await supabaseAdmin.from('fanvue_accounts').select('handle, display_name, is_ai_creator, creator_id').eq('organisation_id', orgId).not('creator_id', 'is', null);
+  const fv = Object.fromEntries((fva || []).map(a => [a.creator_id, a]));
+  const live = (rows || []).filter(r => r.is_active !== false || fv[r.id]);
+  const ids = live.map(r => r.id);
+  const persona = ids.length ? await supabaseAdmin.from('ai_personas').select('creator_id, profile, settings, updated_at').in('creator_id', ids) : { data: [] };
   const prof = Object.fromEntries((persona.data || []).map(p => [p.creator_id, p]));
+  const byId = Object.fromEntries(live.map(r => [r.id, r]));
+  const owner = (r) => (r.profile_from && byId[r.profile_from] ? r.profile_from : r.id);
   return {
     ready: { tables: !persona.error || !tableMissing(persona.error), writer: or.configured(), checker: !!process.env.ANTHROPIC_API_KEY },
     writers: or.WRITERS.map(({ id, label }) => ({ id, label })),
     default_writer: or.DEFAULT_WRITER,
     fan_types: FAN_TYPES,
-    pages: accs.map(a => ({
-      creator_id: a.creator_id, name: name[a.creator_id] || a.display_name || a.handle, handle: a.handle, is_ai_creator: a.is_ai_creator,
-      has_profile: !!clean(prof[a.creator_id]?.profile?.name), writer: prof[a.creator_id]?.settings?.writer || or.DEFAULT_WRITER,
-    })),
+    pages: live.map(r => {
+      const a = fv[r.id], o = owner(r);
+      return {
+        creator_id: r.id, name: r.name || a?.display_name || a?.handle, platform: r.platform || 'onlyfans', handle: a?.handle || null, is_ai_creator: !!a?.is_ai_creator,
+        fanvue: !!a,                                        // real fans, fan memory and the blind test need a Fanvue account
+        profile_from: o !== r.id ? { creator_id: o, name: byId[o]?.name, platform: byId[o]?.platform } : null,
+        has_profile: !!clean(prof[o]?.profile?.name), writer: prof[o]?.settings?.writer || or.DEFAULT_WRITER,
+      };
+    }),
   };
 }
 
+// The profile a page uses: its own, or the linked page's. The row's creator_id is the owner (writes go there).
 async function loadPersona(orgId, creatorId) {
-  const { data, error } = await supabaseAdmin.from('ai_personas').select('*').eq('creator_id', creatorId).maybeSingle();
+  const owner = await profileOwner(orgId, creatorId);
+  const { data, error } = await supabaseAdmin.from('ai_personas').select('*').eq('creator_id', owner).maybeSingle();
   check(error);
   return data && data.organisation_id === orgId ? data : null;
 }
@@ -142,11 +189,20 @@ function cleanProfile(p = {}) {
   return out;
 }
 
+/** The page whose profile this page uses, when linked: { creator_id, name, platform }. */
+async function linkedFrom(orgId, page) {
+  const owner = page.profile_from ? await profileOwner(orgId, page.id) : page.id;
+  if (owner === page.id) return null;
+  const { data } = await supabaseAdmin.from('creators').select('id, name, platform').eq('id', owner).maybeSingle();
+  return data ? { creator_id: data.id, name: data.name, platform: data.platform } : null;
+}
+
 async function getProfile(orgId, creatorId) {
   const { page, account } = await pageAccount(orgId, creatorId);
   const p = await loadPersona(orgId, creatorId);
   return {
-    page: { creator_id: page.id, name: page.name, handle: account.handle, is_ai_creator: account.is_ai_creator },
+    page: { creator_id: page.id, name: page.name, platform: page.platform, handle: account.handle, is_ai_creator: account.is_ai_creator, fanvue: !!account.id },
+    profile_from: await linkedFrom(orgId, page),
     profile: p?.profile || null, writer: p?.settings?.writer || or.DEFAULT_WRITER, typing: p?.settings?.typing || 'normal', emojis: p?.settings?.emojis || 'rarely',
     timezone: p?.settings?.timezone || P.DEFAULT_TZ, time_zones: P.TIME_ZONES,
     drafted_at: p?.drafted_at || null, updated_at: p?.updated_at || null,
@@ -165,7 +221,7 @@ async function saveProfile(orgId, creatorId, { profile, writer, typing, emojis, 
   const cur = await loadPersona(orgId, creatorId);
   const now = new Date().toISOString();
   const { error } = await supabaseAdmin.from('ai_personas').upsert({
-    creator_id: creatorId, organisation_id: orgId, profile: clean_,
+    creator_id: await profileOwner(orgId, creatorId), organisation_id: orgId, profile: clean_,
     settings: {
       ...(cur?.settings || {}), writer: writer || cur?.settings?.writer || or.DEFAULT_WRITER,
       typing: typing || cur?.settings?.typing || 'normal',
@@ -214,7 +270,7 @@ async function generateProfile(orgId, creatorId, raw = {}) {
   const persona = await loadPersona(orgId, creatorId);
   const model = persona?.settings?.writer || or.DEFAULT_WRITER;
   let own = [];
-  if (raw.use_history) {
+  if (raw.use_history && account.id) {
     const rows = await all(() => supabaseAdmin.from('fanvue_messages').select('text, sent_at').eq('account_id', account.id).eq('from_fan', false)
       .in('type', TEAM_TYPES).not('text', 'is', null).order('sent_at').order('uuid'));
     own = spread(distinct(rows.map(m => m.text)).map(t => t.slice(0, 300)), 120);
@@ -240,7 +296,7 @@ async function generateProfile(orgId, creatorId, raw = {}) {
  */
 async function draftProfile(orgId, creatorId) {
   if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
-  const { account } = await pageAccount(orgId, creatorId);
+  const { account } = await fanvuePage(orgId, creatorId);
   const persona = await loadPersona(orgId, creatorId);
   const model = persona?.settings?.writer || or.DEFAULT_WRITER;
   const [own, mass, welcome] = await Promise.all([
@@ -447,6 +503,7 @@ async function memoryRow(accountId, fanUuid) {
 /** The fans who ever wrote, newest first, with how far their memory goes. */
 async function fans(orgId, creatorId) {
   const { account } = await pageAccount(orgId, creatorId);
+  if (!account.id) return [];                                   // no Fanvue account: no real fans to list (Practice uses made-up ones)
   const [list, people, mem, earn] = await Promise.all([
     supabaseAdmin.rpc('ai_chat_fans', { p_account: account.id }),
     all(() => supabaseAdmin.from('fanvue_fans').select('fan_uuid, handle, display_name, nickname, is_top_spender').eq('account_id', account.id).order('fan_uuid')),
@@ -471,7 +528,7 @@ async function fans(orgId, creatorId) {
 
 /** One fan: names, memory, money and the latest messages (for the tool's screens). */
 async function fanDetail(orgId, creatorId, fanUuid) {
-  const { account } = await pageAccount(orgId, creatorId);
+  const { account } = await fanvuePage(orgId, creatorId);
   const [person, mem, { chat, money }, persona, pageUsd] = await Promise.all([fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid), loadPersona(orgId, creatorId), pageMonthly(account.id)]);
   if (!chat.length) throw new AiChatError('No chat with this fan', 404);
   const win = windowFor(chat);             // exactly what the writer reads
@@ -553,7 +610,7 @@ function madeUpNotes(text, timeZone = P.DEFAULT_TZ, now = new Date()) {
 
 /** A manager's corrections to a fan's memory: { facts: [{ id, kind, note, locked }], summary }. */
 async function saveMemory(orgId, creatorId, fanUuid, { facts, summary }) {
-  const { account } = await pageAccount(orgId, creatorId);
+  const { account } = await fanvuePage(orgId, creatorId);
   const cur = await memoryRow(account.id, fanUuid);
   const now = new Date().toISOString();
   // when he said each thing stays as it was; a note the manager adds counts from now
@@ -576,7 +633,7 @@ async function saveMemory(orgId, creatorId, fanUuid, { facts, summary }) {
  */
 async function buildMemory(orgId, creatorId, fanUuid, { full = false } = {}) {
   if (!or.configured()) throw new AiChatError('Add OPENROUTER_API_KEY to the server settings first', 409);
-  const { account } = await pageAccount(orgId, creatorId);
+  const { account } = await fanvuePage(orgId, creatorId);
   const [persona, person, mem, { chat }] = await Promise.all([
     loadPersona(orgId, creatorId), fanRow(account.id, fanUuid), memoryRow(account.id, fanUuid), loadChat(account.id, fanUuid),
   ]);
@@ -670,7 +727,7 @@ async function promoteFacts(orgId, creatorId, accountId) {
   if (!list.length) return 0;
   const facts = [...(persona.profile?.facts || []), ...list.map(d => d.text)].slice(-60);
   const keys = [...promoted, ...list.map(d => normText(d.text))].slice(-200);
-  const { error } = await supabaseAdmin.from('ai_personas').update({ profile: { ...(persona.profile || {}), facts }, settings: { ...(persona.settings || {}), promoted: keys }, updated_at: new Date().toISOString() }).eq('creator_id', creatorId);
+  const { error } = await supabaseAdmin.from('ai_personas').update({ profile: { ...(persona.profile || {}), facts }, settings: { ...(persona.settings || {}), promoted: keys }, updated_at: new Date().toISOString() }).eq('creator_id', persona.creator_id);
   check(error);
   diaryCache.delete(`${orgId}|${creatorId}`);
   console.log(`[ai-chat] ${list.length} of her facts moved into her profile (told to 3+ fans)`);
@@ -892,6 +949,7 @@ async function addStarterContent(orgId, creatorId) {
 // What the page earned in the last 30 days (small pages halve the spender bars: Q17b), kept a few minutes.
 const earned = new Map();
 async function pageMonthly(accountId) {
+  if (!accountId) return null;                                   // no Fanvue account: no Fanvue earnings
   const hit = earned.get(accountId);
   if (hit && Date.now() - hit.at < 10 * 60_000) return hit.usd;
   let usd = null;
@@ -913,7 +971,9 @@ async function pageMonthly(accountId) {
 async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [], models = [], selling = false, followUp = false, whatIf = null, planOnly = false, learned = [], session: sentSession = null, outcome = null, fansly = null }) {
   libraryRows(orgId).catch(() => {});                       // the example library loads while the reader reads
   const FX = fansly ? require('./fanslyAi') : null;
-  const { account } = fansly ? await FX.page(orgId, fansly.accountId) : await pageAccount(orgId, creatorId);
+  const { account, page: thisPage } = fansly ? { ...(await FX.page(orgId, fansly.accountId)), page: null } : await pageAccount(orgId, creatorId, { fanvue: !!fanUuid });
+  // the platform she is on: the wording of her prompts follows it ("on Fansly", "a creator" for a real person)
+  const platformOf = fansly ? 'fansly' : thisPage?.platform || 'fanvue';
   // what he did after her previous reply (Practice: as you played him): the outcomes log (B7)
   if (outcome && typeof outcome === 'object' && clean(outcome.happened) && !whatIf && !planOnly) {
     supabaseAdmin.from('ai_outcomes').insert({
@@ -1297,6 +1357,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
   // the rules you approved from your marks (C2): the writer reads them with every reply
   const approvedRules = (await loadRules(orgId, creatorId)).filter(x => !x.goal || x.goal === replyPlan.goal);
   const base = {
+    platform: platformOf, ai: !!account.is_ai_creator,
     profile: persona.profile, fan, card, money, story: long ? story : '', chat: win.messages,
     notes: [type?.approach, ...screen.notes, ...momentNotes].filter(Boolean),
     situations: strategy.situationGuide(plan.ids), library, level, voice, sexting, noOffer, plan: replyPlan, timeZone, now, diary, mood: session.mood_day, media: latestSeen,
@@ -1738,7 +1799,8 @@ const normText = (t) => clean(t).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').
 async function diaryOf(orgId, creatorId, accountId, persona) {
   const off = new Set((persona?.settings?.diary_off || []).map(normText));
   const own = (persona?.profile?.facts || []).map(clean).filter(Boolean);
-  const rows = await all(() => supabaseAdmin.from('ai_fan_memory').select('fan_uuid, facts').eq('account_id', accountId).order('fan_uuid'));
+  // what she told her Fanvue fans (only a Fanvue page has fan memory)
+  const rows = accountId ? await all(() => supabaseAdmin.from('ai_fan_memory').select('fan_uuid, facts').eq('account_id', accountId).order('fan_uuid')) : [];
   const seen = new Map(own.map(t => [normText(t), { text: t, said_at: null, fans: 0, profile: true }]));
   for (const r of rows) {
     for (const f of r.facts || []) {
@@ -1754,7 +1816,7 @@ async function diaryOf(orgId, creatorId, accountId, persona) {
   return list;
 }
 async function loadDiary(orgId, creatorId, accountId, persona) {
-  const key = `${orgId}|${creatorId}`;
+  const key = `${orgId}|${creatorId}|${accountId || 'none'}`;          // per account: a Fansly suggestion and her practice room don't share it
   const hit = diaryCache.get(key);
   if (hit && Date.now() - hit.at < 2 * 60_000) return hit.list;
   let list = [];
@@ -1780,7 +1842,7 @@ async function saveServices(orgId, creatorId, { services = {}, session_total: to
     next[k] = { on: s.on !== false, min: Number(s.min) > 0 ? Math.round(Number(s.min)) : Sv.SERVICES[k].min };
   }
   next.session_total = Number(total) > 0 ? Math.round(Number(total)) : 250;
-  const { error } = await supabaseAdmin.from('ai_personas').update({ settings: { ...(cur.settings || {}), services: next }, updated_at: new Date().toISOString() }).eq('creator_id', creatorId);
+  const { error } = await supabaseAdmin.from('ai_personas').update({ settings: { ...(cur.settings || {}), services: next }, updated_at: new Date().toISOString() }).eq('creator_id', cur.creator_id);
   check(error);
   return getServices(orgId, creatorId);
 }
@@ -1973,7 +2035,7 @@ async function setDiaryFact(orgId, creatorId, text, off) {
   if (!k) throw new AiChatError('Which fact?');
   const list = (cur.settings?.diary_off || []).filter(t => normText(t) !== k);
   if (off) list.push(clean(text).slice(0, 200));
-  const { error } = await supabaseAdmin.from('ai_personas').update({ settings: { ...(cur.settings || {}), diary_off: list }, updated_at: new Date().toISOString() }).eq('creator_id', creatorId);
+  const { error } = await supabaseAdmin.from('ai_personas').update({ settings: { ...(cur.settings || {}), diary_off: list }, updated_at: new Date().toISOString() }).eq('creator_id', cur.creator_id);
   check(error);
   diaryCache.delete(`${orgId}|${creatorId}`);
   return { facts: await diaryOf(orgId, creatorId, account.id, { ...cur, settings: { ...(cur.settings || {}), diary_off: list } }) };
@@ -2914,11 +2976,11 @@ async function usage(orgId) {
 
 module.exports = {
   loadRules, listRules, decideRule, draftRules, weeklyReport,
-  AiChatError, NOT_READY, pages, getProfile, saveProfile, draftProfile, generateProfile, fans, fanDetail, saveMemory,
+  AiChatError, NOT_READY, pages, getProfile, saveProfile, linkProfile, profileOwner, draftProfile, generateProfile, fans, fanDetail, saveMemory,
   buildMemory, buildAllMemory, memoryJob, reply, usage, contentList, saveContent, deleteContent, addStarterContent, suggestContent,
   saveFeedback, listFeedback, setFeedbackActive, refreshMemories, checkScore, diary, setDiaryFact, lookAt, describeFanMedia, getServices, saveServices, listRequests, decideRequest,
   savePracticeRun, listPracticeRuns, getPracticeRun, deletePracticeRun, starPracticeReply,
   _test: { windowFor, moneyOf, cleanProfile, cleanFacts, sourced, madeUpNotes, herReplies, hisNames, noQuestionWhy, lastPpv, ppvNotes },
   // for the blind test (utils/aiDuels.js)
-  _engine: { pageAccount, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
+  _engine: { pageAccount: fanvuePage, loadPersona, windowFor, screenLatest, briefing, pickSituations, libraryExamples, writeOne, voiceFor, herReplies, logUsage, all, isMass, TEAM_TYPES, mediaFor, chatOf, asOf, moneyOf, loadContent },
 };
