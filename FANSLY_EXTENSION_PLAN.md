@@ -69,3 +69,34 @@ Not in scope: anything that posts to Fansly (sending, pricing, notes, mass messa
 1. The four decisions above, or "defaults".
 2. Which page(s) go first.
 3. AdsPower (or Anty) installed, the test profile logged in, and a chatter who will test with you.
+
+## Additions of 24 Oct (owner's requirements)
+
+**Account types.** The tool already has these roles: owner, admin, head manager, manager, chatter, VA. The extension and the Fansly pages use the same accounts, mapped like this:
+- **Owner** (owner / admin): everything, including payouts, rates, which chat sales count, and who may install the extension on which page.
+- **Chatting manager** (head manager / manager): all chatters and pages they are assigned to, live view of who is chatting where, reports, notes, the AI settings; no payout rates.
+- **Chatter**: only their own shifts, numbers and notes; the extension works only for pages they are assigned to.
+The extension refuses to record unless someone is logged in, and shows who on every screen.
+
+**Every sender is tracked, always.** Each message, PPV and note carries the chatter who was logged into the extension on that browser at that moment, plus the shift it falls into. When nobody is logged in the page is still recorded, but the row is marked "unattributed" and the manager's view flags it. Two people logged into the same page at once is flagged too. Mass messages are attributed to whoever sent them, kept apart from chat messages in every report.
+
+**Sales are always captured, tips included.** Two independent sources so nothing is missed: the live purchase event in the browser (seconds) and the earnings ledger (complete, pulled every night and on demand). Each row in `fansly_transactions` is classified:
+- **chat PPV**: the sold item is an attachment of a message sent to that fan in a chat → credited to the chatter who sent that message.
+- **chat tip**: the tip sits on a chat message or arrives in that chat → credited to the chatter on shift in that chat at that time.
+- **wall / post purchase, subscription, renewal, locked text on the wall, stream ticket, referral**: recorded with the full amount for page statistics, **not credited to any chatter's salary**. The rule: credit only what can be traced to a message a chatter sent or a chat they were working.
+- **refund / chargeback**: subtracted from the chatter it was credited to.
+Edge cases are settled by a rule the owner can change per page: a mass-message PPV bought later (default: credited to the sender of the mass message), a chat PPV bought days after the shift ended (default: credited to the sender, counted on the day of purchase).
+
+**Reports and payouts.** One daily summary per chatter per page: messages sent, fans spoken to, PPVs sent / sold / sell rate, chat PPV net, tips net, refunds, median reply time, time on shift. Payroll takes these lines through the existing per-platform rates (platform = fansly), with the owner's rules above baked in, so no spreadsheet step remains. Page view: all revenue by type (chat, wall, subscriptions, tips), top fans, new paying fans, expired subscriptions.
+
+**Notes sidebar with AI help.** The side panel (piece 3) holds the fan's notes: what previous shifts wrote, Fansly's own note on the fan (mirrored), and an AI summary of the fan from the chat history ("what he likes, what he bought, what he said no to, open promises"), refreshed when the chat changes. Chatters add notes in the panel; the AI can suggest a note after a long conversation ("add: he travels to Prague in November"). Notes live in our database and never leave it.
+
+**Everything is stored.** Every chat a chatter opens is recorded in full, including the older messages the page loads when they scroll. The thread list, the fan profiles, the subscriber list with tiers and dates, the follower list, the custom lists and their members, the vault items used as PPVs, the ledger and the notifications are all mirrored into Supabase with the raw JSON kept, so a report can be rebuilt later without touching Fansly again.
+
+### Table changes from these additions
+- `fansly_messages`: add `chatter_id`, `shift_id`, `attribution` (logged_in / unattributed / conflict).
+- `fansly_transactions`: add `category` (chat_ppv / chat_tip / wall / subscription / other / refund), `credited_chatter_id`, `credited_message_id`, `credited_rule`.
+- `fansly_presence`: who was logged into which page's browser, from when to when (the ground truth for attribution and for "who is online now").
+- `fansly_lists`, `fansly_list_members`, `fansly_subscriptions`, `fansly_followers`: the mirrored lists.
+- `fansly_fan_summaries`: the AI summary per fan, with the message it was last built from.
+- `fansly_daily`: the per-chatter per-page daily summary that reports and payroll read.
