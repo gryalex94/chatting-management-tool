@@ -139,7 +139,7 @@ correlationAccountId = the FAN who paid
 createdAt (ms), status (2 = settled, 1 = pending), walletId, receiverId (creator)
 ```
 `amount` is already NET to the creator in thousandths of a dollar: 23992 = $23.99 net of a $29.99 sale.
-Transaction `type` (the app's own labels): **2110 Media, 2116 Media Sets (bundles), 7101 Tips, 15001 Subscriptions**; legacy 2010/2016/7001.
+Transaction `type` (the app's own full label map): 2110 Media, 2116 Media Sets (bundles), 7101 Tips, 15001 Subscriptions, 32101 Locked Text, 45101 Stream Tickets, 18001/18002 Referrals, 24101 Leaderboard Prize Money, 6101 Refunds; legacy 2010 / 2016 / 7001 / 32001 / 45001.
 The `aggregationData.accountMedia/.accountMediaBundles` entries carry the item's price and media, `accounts` carries the fans' usernames, and `subscriptionHistory` carries the tier, price and ends-at of a sub sale.
 Per-fan: GET /account/wallets/earnings/transactions/accounts?correlationAccountId=&before=&after=&cursor=&limit= (cursor paged). GET /account/wallets/earnings → {pendingBalance}.
 
