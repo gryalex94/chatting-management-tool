@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Chrome, CircleAlert, Radio } from 'lucide-react';
+import { CircleAlert, MonitorSmartphone, Radio } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/services/api';
 import { Badge } from '@/components/ui/badge';
@@ -71,7 +71,7 @@ export default function FanslyDashboard() {
               <p className='mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>In the account now</p>
               {a.online.length ? (
                 <ul className='space-y-1 text-sm'>
-                  {a.online.map(p => <li key={p.device + p.since} className='flex items-center gap-2'><Chrome className='size-3.5 text-muted-foreground' />{p.name}{p.chatter && p.chatter !== p.name ? ` (${p.chatter})` : ''}<span className='text-muted-foreground'>· {since(p.since)}</span></li>)}
+                  {a.online.map(p => <li key={p.device + p.since} className='flex items-center gap-2'><MonitorSmartphone className='size-3.5 text-muted-foreground' />{p.name}{p.chatter && p.chatter !== p.name ? ` (${p.chatter})` : ''}<span className='text-muted-foreground'>· {since(p.since)}</span></li>)}
                 </ul>
               ) : <p className='text-sm text-muted-foreground'>No browser with the extension is on this account.</p>}
               {a.online.length > 1 && <p className='mt-2 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> Two people are logged in at once. Sends are credited to whoever&apos;s browser sent them.</p>}
