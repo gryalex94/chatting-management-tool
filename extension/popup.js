@@ -22,6 +22,8 @@ async function render() {
   $('queue').textContent = String(st.queue || 0);
   $('lastSent').textContent = ago(s.lastFlushAt);
   $('total').textContent = String(s.sentTotal || 0);
+  $('ledger').textContent = ago(s.lastLedgerAt);
+  $('ledgerHint').hidden = !!(s.lastLedgerAt && Date.now() - s.lastLedgerAt < 24 * 3600 * 1000);
   $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '');
 }
 

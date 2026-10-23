@@ -203,6 +203,16 @@ if (fanvueConfigured() && (process.env.RAILWAY_ENVIRONMENT_NAME || process.env.R
   console.log('[FanvueSync] hourly sync scheduled');
 }
 
+// Fansly: every night at 04:30 (and every 6 hours), match sales to their PPV
+// messages and recount the last three days of each account. Only on the live
+// server, so a laptop copy doesn't do the same work twice.
+if (process.env.RAILWAY_ENVIRONMENT_NAME || process.env.RAILWAY_ENVIRONMENT) {
+  const cron = require('node-cron');
+  const { refreshAll } = require('./src/utils/fanslyStats');
+  cron.schedule('30 4,10,16,22 * * *', () => { refreshAll(null, 3).catch(e => console.error('[Fansly] recount:', e.message)); }, { timezone: 'Europe/Amsterdam' });
+  console.log('[Fansly] recount scheduled');
+}
+
 // AI rules: every Monday morning, the week's dismissal notes are drafted into
 // rules for the owner to approve on the AI Rules page (src/ai/houseRules.js).
 if (process.env.ANTHROPIC_API_KEY) {

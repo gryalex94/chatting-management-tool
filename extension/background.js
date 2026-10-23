@@ -67,6 +67,7 @@ function noteAccount(kind, data) {
 async function enqueue(msg) {
   if (!KEEP.has(msg.kind)) return;
   noteAccount(msg.kind, msg.data);
+  if (msg.kind === 'ledger') { state.lastLedgerAt = Date.now(); saveState(); }      // the popup reminds to open Earnings once a day
   const body = JSON.stringify(msg.data);
   const h = hash(msg.kind + '|' + body);
   const now = Date.now();

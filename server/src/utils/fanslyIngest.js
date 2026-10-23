@@ -191,7 +191,7 @@ function fanRowFromAccount(ctx, a, extra = {}) {
  * chatterId, deviceId, shifts }.
  */
 async function applyEvents(ctx, events) {
-  const counts = {}; const errors = [];
+  const counts = {}; const errors = []; const touched = [];
   const bump = (k, n = 1) => { counts[k] = (counts[k] || 0) + n; };
   const messages = new Map();        // message id → row (last write wins within the batch, strongest attribution kept)
   const items = new Map();
@@ -310,9 +310,10 @@ async function applyEvents(ctx, events) {
           for (const t of d.data || []) {
             const net = dollars(t.amount);
             transactions.set(str(t.transactionId), { account_id: ctx.account.id, transaction_id: str(t.transactionId), type: t.type, type_label: LABEL[t.type] || String(t.type),
-              fan_account_id: str(t.correlationAccountId), item_id: [2110, 2116, 2010, 2016].includes(t.type) ? str(t.correlationId) : null,
+              fan_account_id: str(t.correlationAccountId), item_id: [2110, 2116, 2010, 2016, 7101, 7001].includes(t.type) ? str(t.correlationId) : null,
               gross: net != null && t.destinationTax ? Math.round(net / (1 - t.destinationTax / 10000) * 100) / 100 : net, net, status: t.status ?? null,
-              created_at_fansly: tsMs(t.createdAt), category: t.type === 15001 ? 'subscription' : t.type === 6101 ? 'refund' : null, source: 'ledger', updated_at: new Date().toISOString(), raw: t });
+              created_at_fansly: tsMs(t.createdAt), category: t.type === 15001 ? 'subscription' : t.type === 6101 ? 'refund' : [2110, 2116, 2010, 2016, 7101, 7001].includes(t.type) ? null : 'other',
+              source: 'ledger', updated_at: new Date().toISOString(), raw: t });
           }
           for (const a of d.aggregationData?.accounts || []) putFan(fanRowFromAccount(ctx, a));
           bump('ledger', (d.data || []).length); break;
@@ -328,19 +329,21 @@ async function applyEvents(ctx, events) {
     const ids = [...messages.keys()];
     const existing = new Map();
     for (let i = 0; i < ids.length; i += 500) {
-      const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, attribution, chatter_id, user_id, shift_id, device_id, source, first_seen_at')
+      const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, attribution, chatter_id, user_id, shift_id, device_id, source, first_seen_at, sold_at, sold_net')
         .eq('account_id', ctx.account.id).in('message_id', ids.slice(i, i + 500));
       for (const r of data || []) existing.set(r.message_id, r);
     }
     const rows = [];
     for (const row of messages.values()) {
       const old = existing.get(row.message_id);
+      const sold = old ? { sold_at: old.sold_at, sold_net: old.sold_net } : {};
       if (old && RANK[old.attribution] > RANK[row.attribution]) {
-        rows.push({ ...row, attribution: old.attribution, chatter_id: old.chatter_id, user_id: old.user_id, shift_id: old.shift_id, device_id: old.device_id, source: old.source, first_seen_at: old.first_seen_at });
-      } else rows.push(old ? { ...row, first_seen_at: old.first_seen_at } : row);
+        rows.push({ ...row, ...sold, attribution: old.attribution, chatter_id: old.chatter_id, user_id: old.user_id, shift_id: old.shift_id, device_id: old.device_id, source: old.source, first_seen_at: old.first_seen_at });
+      } else rows.push(old ? { ...row, ...sold, first_seen_at: old.first_seen_at } : row);
     }
     await upsert('fansly_messages', rows, 'account_id,message_id');
     counts.messages_written = rows.length;
+    for (const r of rows) if (!r.from_fan) touched.push(r.sent_at);
     counts.unattributed = rows.filter(r => r.attribution === 'unattributed').length;
   }
   if (items.size) { await upsert('fansly_items', [...items.values()], 'account_id,item_id'); counts.items_written = items.size; }
@@ -360,39 +363,28 @@ async function applyEvents(ctx, events) {
   }
   if (transactions.size) {
     const rows = [...transactions.values()];
-    await creditTransactions(ctx, rows);
+    const ids = rows.map(r => r.transaction_id);
+    const known = new Map();
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data } = await supabaseAdmin.from('fansly_transactions').select('transaction_id, category, credited_chatter_id, credited_message_id, credited_rule, message_id')
+        .eq('account_id', ctx.account.id).in('transaction_id', ids.slice(i, i + 500));
+      for (const r of data || []) known.set(r.transaction_id, r);
+    }
+    for (const r of rows) {
+      const k = known.get(r.transaction_id);
+      if (k && (k.credited_message_id || (k.category && !r.category))) Object.assign(r, { category: k.category, credited_chatter_id: k.credited_chatter_id, credited_message_id: k.credited_message_id, credited_rule: k.credited_rule, message_id: k.message_id });
+    }
     await upsert('fansly_transactions', rows, 'account_id,transaction_id');
     counts.transactions_written = rows.length;
+    // a purchase seen live first, then in the ledger: the ledger row is the one that counts
+    const ledger = rows.filter(r => r.source === 'ledger' && r.item_id && r.fan_account_id);
+    for (const r of ledger) await supabaseAdmin.from('fansly_transactions').delete().eq('account_id', ctx.account.id).eq('source', 'live').eq('item_id', r.item_id).eq('fan_account_id', r.fan_account_id);
+    for (const r of rows) touched.push(r.created_at_fansly);
   }
   const patch = Object.fromEntries(Object.entries(accountPatch).filter(([, v]) => v !== undefined));
   await supabaseAdmin.from('fansly_accounts').update({ ...patch, last_seen_at: now }).eq('id', ctx.account.id);
   if (Object.keys(patch).length) forgetAccount(ctx.user.organisationId, ctx.creatorId);
-  return { counts, errors };
-}
-
-/**
- * Whose salary a sale counts for: a media/bundle sale whose item was attached to a
- * message sent to that fan is a chat PPV, credited to that message's chatter.
- * Everything else is wall / subscription / other and credited to nobody.
- */
-async function creditTransactions(ctx, rows) {
-  const itemIds = [...new Set(rows.map(r => r.item_id).filter(Boolean))];
-  if (!itemIds.length) { for (const r of rows) if (!r.category) r.category = r.type === 7101 || r.type === 7001 ? 'chat_tip' : 'other'; return; }
-  const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, fan_account_id, chatter_id, attachments, sent_at')
-    .eq('account_id', ctx.account.id).eq('from_fan', false).not('attachments', 'is', null).order('sent_at', { ascending: false }).limit(5000);
-  const byItem = new Map();
-  for (const m of data || []) for (const a of m.attachments || []) {
-    const k = `${a.content_id}:${m.fan_account_id}`;
-    if (!byItem.has(k)) byItem.set(k, m);
-  }
-  for (const r of rows) {
-    if (r.category && r.category !== 'other') continue;
-    const m = r.item_id ? byItem.get(`${r.item_id}:${r.fan_account_id}`) : null;
-    if (m) { r.category = 'chat_ppv'; r.credited_message_id = m.message_id; r.credited_chatter_id = m.chatter_id || null; r.credited_rule = m.chatter_id ? 'sender_of_message' : 'message_without_chatter'; }
-    else if (r.type === 7101 || r.type === 7001) r.category = 'chat_tip';
-    else if (r.item_id) { r.category = 'wall'; r.credited_rule = 'item_not_in_any_chat'; }
-    else r.category = r.category || 'other';
-  }
+  return { counts, errors, touched };
 }
 
 /**

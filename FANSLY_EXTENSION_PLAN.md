@@ -113,3 +113,8 @@ A page like Infloww's message dashboard: every message sent from each page, in o
 
 ## Phase 1 went live on 23 Oct
 Commits 20776a9 … 7f8fbcd. The first real browser recorded 538 messages, 60 priced PPVs and 43 fans of @corarossi in ten minutes; sends were credited to the signed-in owner with the right shift.
+
+## Phase 2 status (23 Oct, evening)
+Built: sale matching (fanslyStats.matchSales: a ledger sale ↔ the PPV message carrying that item to that fan, re-run after every batch so late-arriving chats still match; tips to the last writer in that chat within 12 h), the sold mark on PPV messages, the daily summary table fansly_daily (per account, Amsterdam day, chatter: sent, mass, fans, PPVs sent/sold, PPV net, tips, refunds, unattributed, median reply time), recount after each batch and every 6 hours on the live server, the Fansly payroll line (credited sender first, else whoever was on the Fansly roster), and a 14-day table on the dashboard.
+
+Not built: the extension fetching older history and the ledger on its own. It would have to reproduce Fansly's request signature, and the safety check stopped that step. History and sales therefore arrive the passive way: every chat a chatter opens (and scrolls) is recorded in full, and the sales ledger is recorded when someone opens Fansly's Earnings page and scrolls its list. The popup and the dashboard remind when the ledger has not been read for a day. Sales that can't be tied to a recorded chat show as "wall" until their chat is opened.

@@ -334,12 +334,55 @@ async function fanvueLines(orgId, period, paidByChatter) {
 }
 
 /**
+ * Each person's Fansly line: hours from the Fansly roster (minus time paid on
+ * OnlyFans), chat PPVs and tips from the earnings ledger, credited to the chatter
+ * whose browser sent the PPV (fansly_transactions.credited_chatter_id); a sale
+ * with no known sender goes to whoever was on that page's shift when it was sent.
+ * Wall and subscription income never reaches a line.
+ */
+async function fanslyLines(orgId, period, paidByChatter) {
+  const out = {}, warnings = [];
+  const pages = await R.loadPages(orgId, 'fansly');
+  if (!pages.length) return { byChatter: out, warnings };
+  const pageIds = new Set(pages.map(p => p.id));
+  const roster = await R.loadRoster(orgId, R.addDays(period.start, -1), period.end, 'fansly', { removed: true });
+  if (!roster.ready) {
+    warnings.push('Fansly has no shift times yet, so nobody\'s Fansly hours could be counted. Open Shifts with Fansly picked once, then recalculate.');
+  }
+  const { data: accounts, error } = await supabaseAdmin.from('fansly_accounts').select('id, creator_id').eq('organisation_id', orgId);
+  if (error) return { byChatter: out, warnings };                    // before database change 051
+  const accPage = Object.fromEntries((accounts || []).filter(a => pageIds.has(a.creator_id)).map(a => [a.id, a.creator_id]));
+  const accIds = Object.keys(accPage);
+  let earned = []; const sentAt = {};
+  if (accIds.length) {
+    const from = Date.parse(`${period.start}T00:00:00Z`), to = Date.parse(`${R.addDays(period.end, 1)}T00:00:00Z`);
+    const tx = await all(() => supabaseAdmin.from('fansly_transactions').select('account_id, transaction_id, category, created_at_fansly, gross, net, credited_message_id, credited_chatter_id')
+      .in('account_id', accIds).in('category', ['chat_ppv', 'chat_tip', 'refund']).gte('created_at_fansly', new Date(from - 3 * H).toISOString()).lt('created_at_fansly', new Date(to + 3 * H).toISOString())
+      .order('created_at_fansly').order('transaction_id'));
+    earned = tx.filter(x => { const t = amsClock(x.created_at_fansly); return t >= from && t < to; }).map(x => ({
+      account_id: x.account_id, transaction_order_id: x.transaction_id, paid_at: x.created_at_fansly,
+      source: x.category === 'chat_ppv' ? 'message' : x.category === 'chat_tip' ? 'tip' : 'refund',
+      gross_cents: Math.round(Number(x.gross || x.net || 0) * 100), net_cents: Math.round(Number(x.net || 0) * 100),
+      message_uuid: x.credited_message_id || null, seller_id: x.credited_chatter_id || null,
+    }));
+    const ids = [...new Set(earned.filter(x => x.message_uuid).map(x => x.message_uuid))];
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await supabaseAdmin.from('fansly_messages').select('message_id, sent_at').in('account_id', accIds).in('message_id', ids.slice(i, i + 200));
+      for (const m of data || []) if (m.sent_at && !sentAt[m.message_id]) sentAt[m.message_id] = m.sent_at;
+    }
+  }
+  if (!roster.ready) { roster.slots = []; roster.assignments = []; roster.changes = []; }
+  const core = fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChatter, today: todayAms(), label: 'Fansly' });
+  return { byChatter: core.byChatter, warnings: [...warnings, ...core.warnings] };
+}
+
+/**
  * The counting behind fanvueLines, without the database (so it can be tested):
  * the roster (slots, assignments, changes) for the period and the day before, the
  * Fanvue pages, which account is which page, the period's earnings, when each PPV
  * was sent, and what each person was paid for on OnlyFans.
  */
-function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChatter, today }) {
+function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChatter, today, label = 'Fanvue' }) {
   const out = {}, warnings = [];
   const pageIds = new Set(pages.map(p => p.id));
   const pageName = Object.fromEntries(pages.map(p => [p.id, p.name]));
@@ -387,7 +430,8 @@ function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChat
     // the PPV's send time, if the roster covers it; else when it was bought
     const sent = x.message_uuid && sentAt[x.message_uuid] ? amsClock(sentAt[x.message_uuid]) : null;
     const when = sent != null && sent >= covered[0] && sent < covered[1] ? sent : amsClock(x.paid_at);
-    const who = [...new Set(entries.filter(e => e.pages.includes(page) && when >= e.start && when < e.end).map(e => e.chatter_id))];
+    // Fansly knows who sent the PPV (the browser that sent it); otherwise whoever was on the page's shift then
+    const who = x.seller_id ? [x.seller_id] : [...new Set(entries.filter(e => e.pages.includes(page) && when >= e.start && when < e.end).map(e => e.chatter_id))];
     const gross = Math.abs(Number(x.gross_cents) || 0) / 100, net = Math.abs(Number(x.net_cents) || 0) / 100;
     if (!who.length) { if (sale) nobody += gross; continue; }
     for (const cid of who) {
@@ -397,7 +441,7 @@ function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChat
       l.pages[pageName[page]] = (l.pages[pageName[page]] || 0) + gross * share;
     }
   }
-  if (nobody >= 1) warnings.push(`Fanvue: ${money(nobody)} in sales came in while nobody was on the Fanvue roster for that page, so it's on no report. The roster counts from the day someone is put on it: for days before that, add one-day changes (Shifts, with Fanvue picked), then recalculate.`);
+  if (nobody >= 1) warnings.push(`${label}: ${money(nobody)} in sales came in while nobody was on the ${label} roster for that page, so it's on no report. The roster counts from the day someone is put on it: for days before that, add one-day changes (Shifts, with ${label} picked), then recalculate.`);
   return { byChatter: out, warnings };
 }
 
@@ -432,6 +476,10 @@ async function buildPeriod(orgId, start, userId = null) {
   const paid = Object.fromEntries(Object.entries(hours).map(([cid, h]) => [cid, paidIntervals(h.shifts)]));
   const fv = await fanvueLines(orgId, period, paid);
   const fvRates = fv.byChatter && Object.keys(fv.byChatter).length ? await platformRates(orgId, 'fanvue') : null;
+  // Fansly: hours from its roster, sales from its ledger credited to the sender
+  const fs = await fanslyLines(orgId, period, paid).catch(e => { console.error('[payroll] Fansly:', e.message); return { byChatter: {}, warnings: [`Couldn't count Fansly (${e.message}).`] }; });
+  const fsRates = fs.byChatter && Object.keys(fs.byChatter).length ? await platformRates(orgId, 'fansly') : null;
+  warnings.push(...(fs.warnings || []));
 
   let sales, source = 'infloww';
   if (infloww.configured()) {
@@ -483,15 +531,16 @@ async function buildPeriod(orgId, start, userId = null) {
     if ((h.hours || h.overtime) && !accounts[cid]) flags.push('no_infloww_account');
     // other platforms' lines; hours the manager typed in stay
     const lines = {};
-    const f = fv.byChatter[cid], was = prev[cid]?.lines?.fanvue;
-    if (f || (was && (was.hours != null || was.overtime_hours != null))) {
+    for (const [platform, found, pRates] of [['fanvue', fv, fvRates], ['fansly', fs, fsRates]]) {
+      const f = found.byChatter[cid], was = prev[cid]?.lines?.[platform];
+      if (!f && !(was && (was.hours != null || was.overtime_hours != null))) continue;
       const x = f || { hours: 0, overtime: 0, shifts: [], gross: 0, net: 0, refunded: 0, pages: {} };
-      const rates = fvRates ? ratesFor(fvRates.own[cid], fvRates.team) : ratesFor(null, await teamRates(orgId, 'fanvue'));
-      lines.fanvue = {
+      const rates = pRates ? ratesFor(pRates.own[cid], pRates.team) : ratesFor(null, await teamRates(orgId, platform));
+      lines[platform] = {
         hours_auto: x.hours, overtime_hours_auto: x.overtime, hours: was?.hours ?? null, overtime_hours: was?.overtime_hours ?? null,
         ...rates, sales_gross: r2(x.gross), sales_net: r2(x.net), refunded: r2(x.refunded),
         pages: Object.entries(x.pages).map(([name, amount]) => ({ name, amount: r2(amount) })).filter(p => p.amount).sort((a, b) => b.amount - a.amount),
-        shifts: x.shifts, basis: 'roster',
+        shifts: x.shifts, basis: platform === 'fansly' ? 'sender' : 'roster',
       };
     }
     // worth a look against Infloww: full shifts with little chatting, and shifts cut short

@@ -16,6 +16,8 @@ const since = (iso) => {
   return min < 1 ? 'just now' : min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
 };
 const money = (n) => (n == null ? '·' : `$${Number(n).toFixed(2)}`);
+const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '·');
+const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
 
 /**
  * The dashboard when Fansly is picked in the menu: every Fansly account the
@@ -25,6 +27,7 @@ const money = (n) => (n == null ? '·' : `$${Number(n).toFixed(2)}`);
 export default function FanslyDashboard() {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
+  const [recounting, setRecounting] = useState(false);
   const load = () => api.get('/api/fansly').then(r => setInfo(r.data)).catch(e => setInfo({ error: e?.response?.data?.error || 'Could not load the Fansly pages.' }));
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
 
@@ -45,6 +48,7 @@ export default function FanslyDashboard() {
   }
 
   const pause = (a) => api.post(`/api/fansly/accounts/${a.id}`, { status: a.status === 'paused' ? 'active' : 'paused' }).then(load);
+  const recount = () => { setRecounting(true); api.post('/api/fansly/recount').then(load).finally(() => setRecounting(false)); };
 
   return (
     <div className='grid gap-6'>
@@ -54,7 +58,7 @@ export default function FanslyDashboard() {
             <div>
               <h2 className='text-base font-semibold'>{a.page || a.username || 'Fansly page'} <span className='ml-1 text-sm font-normal text-muted-foreground'>{a.username ? `@${a.username}` : ''}</span></h2>
               <p className='text-xs text-muted-foreground'>
-                {num(a.totals.fans)} fans · {num(a.totals.messages)} messages recorded · last seen {fmt(a.last_seen_at)}
+                {num(a.totals.fans)} fans · {num(a.totals.messages)} messages recorded · last seen {fmt(a.last_seen_at)} · sales ledger read {fmt(a.ledger_read_at)}
                 {a.followers_count != null && ` · ${num(a.followers_count)} followers`}{a.subscribers_count != null && ` · ${num(a.subscribers_count)} subscribers`}
               </p>
             </div>
@@ -90,6 +94,33 @@ export default function FanslyDashboard() {
             </div>
           </div>
 
+          {a.ledger_stale ? (
+            <p className='mx-4 mb-3 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> Sales come from Fansly&apos;s Earnings page: someone with the extension should open it once a day and scroll its list.</p>
+          ) : null}
+
+          {a.last14?.length > 0 && (
+            <div className='border-t'>
+              <p className='px-4 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground'>Last 14 days</p>
+              <Table>
+                <TableHeader><TableRow>
+                  <TableHead>Chatter</TableHead><TableHead className='text-right'>Days</TableHead><TableHead className='text-right'>Sent</TableHead><TableHead className='text-right'>Mass</TableHead>
+                  <TableHead className='text-right'>PPVs sent</TableHead><TableHead className='text-right'>Sold</TableHead><TableHead className='text-right'>Sell rate</TableHead>
+                  <TableHead className='text-right'>PPV net</TableHead><TableHead className='text-right'>Tips net</TableHead><TableHead className='text-right'>Reply time</TableHead>
+                </TableRow></TableHeader>
+                <TableBody>
+                  {a.last14.map(c => (
+                    <TableRow key={c.name}>
+                      <TableCell>{c.name}{c.unattributed > 0 && <span className='ml-1 text-xs text-amber-600'>({c.unattributed} not attributed)</span>}</TableCell>
+                      <TableCell className='text-right'>{num(c.days)}</TableCell><TableCell className='text-right'>{num(c.sent)}</TableCell><TableCell className='text-right'>{num(c.mass_sent)}</TableCell>
+                      <TableCell className='text-right'>{num(c.ppv_sent)}</TableCell><TableCell className='text-right'>{num(c.ppv_sold)}</TableCell><TableCell className='text-right'>{pct(c.ppv_sold, c.ppv_sent)}</TableCell>
+                      <TableCell className='text-right'>{money(c.ppv_net)}</TableCell><TableCell className='text-right'>{money(c.tips_net)}</TableCell><TableCell className='text-right'>{secs(c.median_reply_s)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
           {a.today.by_chatter.length > 0 && (
             <Table>
               <TableHeader><TableRow><TableHead>Chatter</TableHead><TableHead className='text-right'>Sent</TableHead><TableHead className='text-right'>PPVs</TableHead><TableHead className='text-right'>Fans</TableHead></TableRow></TableHeader>
@@ -102,6 +133,10 @@ export default function FanslyDashboard() {
           )}
         </section>
       ))}
+
+      <div className='flex justify-end'>
+        <Button size='sm' variant='outline' disabled={recounting} onClick={recount}>{recounting ? 'Recounting…' : 'Match sales and recount 14 days'}</Button>
+      </div>
 
       {info.recent?.length > 0 && (
         <section className='rounded-lg border bg-card px-4 py-3'>

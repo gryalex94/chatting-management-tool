@@ -4,6 +4,7 @@ const { supabaseAdmin } = require('../utils/supabase');
 const { authMiddleware, requireMinRole, profileMissing } = require('../middleware/auth');
 const { demoMask } = require('../utils/privacy');
 const F = require('../utils/fanslyIngest');
+const Stats = require('../utils/fanslyStats');
 
 /**
  * Fansly (phase 1): the browser extension's door into the tool, and the Fansly
@@ -94,7 +95,8 @@ router.post('/ingest', async (req, res) => {
     const chatterId = await F.chatterFor(req.user);
     const shifts = await F.shiftsFor(req.user.organisationId);
     const ctx = { account, creatorId: account.fansly_account_id, user: req.user, chatterId, deviceId, shifts };
-    const { counts, errors } = await F.applyEvents(ctx, events);
+    const { counts, errors, touched } = await F.applyEvents(ctx, events);
+    Stats.schedule(account.id, touched);                     // match sales and recount the days touched, shortly after
     F.heartbeat({ user: req.user, chatterId, deviceId, account, extensionVersion: req.body?.extensionVersion }).catch(() => {});
     supabaseAdmin.from('fansly_ingest_log').insert({ organisation_id: req.user.organisationId, account_id: account.id, user_id: req.user.id, device_id: deviceId,
       events: events.length, counts, errors: errors.length ? errors.join(' | ').slice(0, 2000) : null }).then(() => {});
@@ -166,11 +168,29 @@ router.get('/', async (req, res) => {
       const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('category, net').eq('account_id', a.id).gte('created_at_fansly', since).limit(2000);
       const net = {}; for (const t of tx || []) net[t.category || 'other'] = Math.round(((net[t.category || 'other'] || 0) + Number(t.net || 0)) * 100) / 100;
       const { count: fansTotal } = await supabaseAdmin.from('fansly_fans').select('*', { count: 'exact', head: true }).eq('account_id', a.id);
+      // the last 14 days, one line per chatter, from the daily summary
+      const from14 = Stats.addDays(Stats.amsDay(new Date().toISOString()), -13);
+      const { data: daily } = await supabaseAdmin.from('fansly_daily').select('day, chatter_key, sent, mass_sent, fans, ppv_sent, ppv_sold, ppv_net, tips_net, refunds_net, unattributed, median_reply_s, chatters(name)')
+        .eq('account_id', a.id).gte('day', from14).limit(5000);
+      const per = new Map();
+      for (const d of daily || []) {
+        const k = d.chatter_key;
+        const p = per.get(k) || { name: d.chatters?.name || 'Not credited', days: new Set(), sent: 0, mass_sent: 0, ppv_sent: 0, ppv_sold: 0, ppv_net: 0, tips_net: 0, refunds_net: 0, unattributed: 0, replies: [] };
+        p.days.add(d.day); p.sent += d.sent; p.mass_sent += d.mass_sent; p.ppv_sent += d.ppv_sent; p.ppv_sold += d.ppv_sold;
+        p.ppv_net += Number(d.ppv_net); p.tips_net += Number(d.tips_net); p.refunds_net += Number(d.refunds_net); p.unattributed += d.unattributed;
+        if (d.median_reply_s != null) p.replies.push(d.median_reply_s);
+        per.set(k, p);
+      }
+      const last14 = [...per.values()].map(p => ({ ...p, days: p.days.size, ppv_net: Math.round(p.ppv_net * 100) / 100, tips_net: Math.round(p.tips_net * 100) / 100, refunds_net: Math.round(p.refunds_net * 100) / 100,
+        median_reply_s: p.replies.length ? p.replies.sort((x, y) => x - y)[p.replies.length >> 1] : null, replies: undefined })).sort((x, y) => (y.ppv_net + y.tips_net) - (x.ppv_net + x.tips_net) || y.sent - x.sent);
+      // when the sales ledger was last read (someone opened Fansly's Earnings page with the extension on)
+      const { data: lastLedger } = await supabaseAdmin.from('fansly_transactions').select('updated_at').eq('account_id', a.id).eq('source', 'ledger').order('updated_at', { ascending: false }).limit(1);
+      const ledger_read_at = lastLedger?.[0]?.updated_at || null;
       const { count: msgTotal } = await supabaseAdmin.from('fansly_messages').select('*', { count: 'exact', head: true }).eq('account_id', a.id);
       out.push({
         id: a.id, fansly_account_id: a.fansly_account_id, username: a.username, display_name: a.display_name, page: a.creators?.name || null, creator_id: a.creator_id,
         followers_count: a.followers_count, subscribers_count: a.subscribers_count, status: a.status, first_seen_at: a.first_seen_at, last_seen_at: a.last_seen_at,
-        online: onlineBy.get(a.id) || [], totals: { fans: fansTotal || 0, messages: msgTotal || 0 },
+        online: onlineBy.get(a.id) || [], totals: { fans: fansTotal || 0, messages: msgTotal || 0 }, ledger_read_at, ledger_stale: !ledger_read_at || Date.now() - Date.parse(ledger_read_at) > 36 * 3600 * 1000, last14,
         today: {
           sent: rows.filter(r => !r.from_fan).length, received: rows.filter(r => r.from_fan).length,
           fans: new Set(rows.map(r => r.fan_account_id).filter(Boolean)).size,
@@ -183,6 +203,12 @@ router.get('/', async (req, res) => {
     const { data: log } = await supabaseAdmin.from('fansly_ingest_log').select('received_at, device_id, events, counts, errors, users(name)').eq('organisation_id', orgId).order('received_at', { ascending: false }).limit(10);
     res.json({ tables_ready: true, accounts: out, recent: (log || []).map(l => ({ ...l, user: l.users?.name || null, users: undefined })), online_window_sec: F.ONLINE_MS / 1000 });
   } catch (e) { fail(res, e, 'load the Fansly pages'); }
+});
+
+// POST /api/fansly/recount — match sales and recount the last 14 days now
+router.post('/recount', async (req, res) => {
+  try { const n = await Stats.refreshAll(req.user.organisationId, 13); res.json({ ok: true, accounts: n }); }
+  catch (e) { fail(res, e, 'recount the Fansly numbers'); }
 });
 
 // POST /api/fansly/accounts/:id { status: 'active' | 'paused' } — stop or resume recording an account
