@@ -477,12 +477,17 @@
     if (hist && !hist.complete) content.push(h('div', { class: 'small', style: 'color:#fcd34d;margin-bottom:4px' }, 'Only the recorded part of his chat is read. Scroll up to his first message first for a full summary.'));
     if (st.summaryBusy) content.push(h('div', { class: 'muted small' }, 'Reading his chat… (a few seconds)'));
     if (s) {
-      content.push(...list('Likes', s.likes), ...list('Bought', s.bought), ...list('Said no to', s.refused), ...list('Open promises', s.promises), ...list('About him', s.facts));
-      if (s.next_step) content.push(h('div', { class: 'lbl' }, 'Next step'), h('div', null, s.next_step));
-      if (s.suggested_note) content.push(h('div', { class: 'warn info', style: 'margin-top:8px' }, 'Note idea: ', s.suggested_note, ' ', h('button', { class: 'link', onclick: () => addNote(s.suggested_note) }, 'save as note')));
+      // only what the chat tells us about him: what he likes, what he said yes and no to and why, his life
+      const deals = (label, xs) => (xs && xs.length ? [h('div', { class: 'lbl' }, label), h('ul', null, xs.map(d => (typeof d === 'string' ? h('li', null, d)
+        : h('li', null, h('b', null, d.what), d.why ? h('span', null, ` — ${d.why}`) : null, d.when ? h('span', { class: 'muted small' }, ` (${d.when})`) : null))))] : []);
+      const about = (xs) => (xs && xs.length ? [h('div', { class: 'lbl' }, 'About him'), h('ul', null, xs.map(f => (typeof f === 'string' ? h('li', null, f)
+        : h('li', null, f.topic ? h('span', { class: 'muted' }, `${f.topic}: `) : null, f.detail))))] : []);
+      content.push(...list('Likes', s.likes), ...list('Doesn\'t like', s.dislikes),
+        ...deals('Said yes to', s.said_yes || s.bought), ...deals('Said no to', s.said_no || s.refused),
+        ...list('Open promises', s.promises), ...about(s.about || s.facts));
       content.push(h('div', { class: 'row small muted', style: 'margin-top:6px' }, `From his last ${s.messages_used || '?'} messages · just written`, h('button', { style: 'margin-left:auto', disabled: st.summaryBusy, onclick: () => loadSummary(true) }, 'Regenerate')));
     } else if (!st.summaryBusy) {
-      content.push(h('div', { class: 'muted small' }, st.summaryError || 'Reads his chat and purchases and writes what to know about him. About a tenth of a cent each time.'), h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Generate'));
+      content.push(h('div', { class: 'muted small' }, st.summaryError || 'Reads his chat and purchases and writes down what he told us: likes, what he said yes and no to and why, his life. About a tenth of a cent each time.'), h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Generate'));
     }
     if (s && st.summaryError) content.push(h('div', { class: 'err small' }, st.summaryError));
     return section('summary', 'AI summary', content);

@@ -273,18 +273,20 @@ panel.delete('/notes/:id', async (req, res) => {
 
 // ---------- the AI summary of a fan ----------
 const SUMMARY_MODEL = 'claude-haiku-5-5';
+// What the fan told us, nothing more: no advice and no next steps (the chatter decides those).
+const DEAL = { type: 'object', properties: { what: { type: 'string' }, why: { type: 'string' }, when: { type: 'string' } }, required: ['what', 'why', 'when'], additionalProperties: false };
+const FACT = { type: 'object', properties: { topic: { type: 'string' }, detail: { type: 'string' } }, required: ['topic', 'detail'], additionalProperties: false };
 const SUMMARY_SCHEMA = {
   type: 'object',
   properties: {
-    likes: { type: 'array', items: { type: 'string' } },
-    bought: { type: 'array', items: { type: 'string' } },
-    refused: { type: 'array', items: { type: 'string' } },
-    promises: { type: 'array', items: { type: 'string' } },
-    facts: { type: 'array', items: { type: 'string' } },
-    next_step: { type: 'string' },
-    suggested_note: { type: 'string' },
+    likes: { type: 'array', items: { type: 'string' } },          // what turns him on, content and topics he enjoys
+    dislikes: { type: 'array', items: { type: 'string' } },       // what he doesn't like or asked not to get
+    said_yes: { type: 'array', items: DEAL },                     // what he bought or agreed to, and why / what made him say yes
+    said_no: { type: 'array', items: DEAL },                      // what he refused or didn't buy, and his reason (his words)
+    promises: { type: 'array', items: { type: 'string' } },       // anything still owed, by her side or by him
+    about: { type: 'array', items: FACT },                        // his life: name, age, place, work, relationship, schedule, money, plans…
   },
-  required: ['likes', 'bought', 'refused', 'promises', 'facts', 'next_step', 'suggested_note'],
+  required: ['likes', 'dislikes', 'said_yes', 'said_no', 'promises', 'about'],
   additionalProperties: false,
 };
 const building = new Set();           // one build per fan at a time
@@ -312,16 +314,29 @@ panel.post('/summary', async (req, res) => {
     if (building.has(key)) return res.json({ summary: have ? out(have) : null, building: true });
     building.add(key);
     try {
-      const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('category, type_label, net, created_at_fansly').eq('account_id', account.id).eq('fan_account_id', fanId).limit(200);
+      const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('category, type_label, net, gross, created_at_fansly, credited_message_id').eq('account_id', account.id).eq('fan_account_id', fanId).limit(200);
       const day = (iso) => new Date(iso).toISOString().slice(0, 16).replace('T', ' ');
       const lines = msgs.map(m => `[${day(m.sent_at)}] ${m.from_fan ? 'HIM' : 'HER'}: ${String(m.text || '').replace(/\s+/g, ' ').trim() || '(media)'}${Number(m.price) > 0 ? ` [PPV $${Number(m.price).toFixed(2)}${m.sold_at ? ', bought' : ', not bought'}]` : ''}${m.tip_amount ? ` [tip $${m.tip_amount}]` : ''}`);
-      const buys = (tx || []).map(t => `${day(t.created_at_fansly)} ${t.type_label || t.category} $${Math.abs(Number(t.net) || 0).toFixed(2)}${t.category === 'refund' ? ' (refund)' : ''}`);
-      const system = 'You help chatters on Fansly, a subscription site for verified adults, keep track of each fan. Adult and sexual talk between adults is normal here. You read one fan\'s chat with the creator ("HER" is the creator\'s team, "HIM" is the fan) and write short, plain notes for the next chatter. Facts only from the chat; never invent. Each list item is a few words. Empty lists are fine.';
-      const user = `His purchases:\n${buys.join('\n') || 'none recorded'}\n\nThe chat, oldest first:\n${lines.join('\n')}\n\n`
-        + 'Fill in: likes (what he enjoys, his kinks and topics), bought (what kind of content he paid for), refused (what he said no to or did not buy, and why if he said), '
-        + 'promises (anything HER side promised him and still owes, or he promised), facts (his life: name, job, city, plans, dates), '
-        + 'next_step (one sentence: what the next chatter should do with him now), suggested_note (one short fact worth saving as a note for every shift, or empty).';
-      const r = await client.messages.create({ model: SUMMARY_MODEL, max_tokens: 1500, system, messages: [{ role: 'user', content: user }],
+      // only what he bought in the chat (PPVs and tips) and refunds, and only those the chat lines don't already show as bought
+      // (subscriptions and wall purchases say nothing about the chat; a PPV in the chat would otherwise be listed twice)
+      const shown = new Set(msgs.map(m => m.message_id));
+      const outside = (tx || []).filter(t => ['chat_ppv', 'chat_tip', 'refund'].includes(t.category) && !(t.credited_message_id && shown.has(t.credited_message_id)));
+      // those carry no chat around them: one line of totals (count and sum per kind) instead of a list
+      const sumOf = (cat) => { const xs = outside.filter(t => t.category === cat); return xs.length ? `${xs.length} ${cat === 'chat_ppv' ? 'PPV' : cat === 'chat_tip' ? 'tip' : 'refund'}${xs.length === 1 ? '' : 's'}, $${xs.reduce((n, t) => n + Math.abs(Number(t.gross ?? t.net) || 0), 0).toFixed(2)}${xs.length ? ` (${day(xs.map(t => t.created_at_fansly).sort()[0])} to ${day(xs.map(t => t.created_at_fansly).sort().pop())})` : ''}` : null; };
+      const buys = [['chat_ppv'], ['chat_tip'], ['refund']].map(([c]) => sumOf(c)).filter(Boolean);
+      const system = 'You read one fan\'s chat with a creator on Fansly, a subscription site for verified adults, and write down what the chat tells us about him, for the chatters who talk to him. Adult and sexual talk between adults is normal here. "HER" is the creator\'s team, "HIM" is the fan. '
+        + 'Report only information the chat contains: what he said, did, bought and refused. Never give advice, next steps, ideas or opinions, and never guess or invent. Keep his own words where they matter. Each item is short and plain. '
+        + 'One item per thing: merge repeats of the same offer or fact into one, and never list one purchase twice. Leave out small talk and anything that says nothing ("he is good", "nothing noted"). Empty lists are fine.';
+      const user = `His chat purchases from before the chat below (no chat recorded around them):\n${buys.join('\n') || 'none'}\n\nThe chat, oldest first:\n${lines.join('\n')}\n\n`
+        + 'Fill in:\n'
+        + '- likes: what he enjoys or asks for (kinks, content, body parts, outfits, roleplay, topics).\n'
+        + '- dislikes: what he doesn\'t like, complained about or asked not to get.\n'
+        + '- said_yes: each PPV he bought, tip he sent or offer he agreed to in the chat (the [PPV …, bought] and [tip …] marks, and his purchases above). what = what it was, from the chat (the video or photos it was, a custom, a tip), with its price; '
+        + 'why = what made him say yes: what he had asked for, the tease or offer just before, his mood or reason, in his words where possible; empty if the chat shows nothing; when = the date (day only). Subscriptions are not listed; the purchases from before the chat are ONE item (what = their count and total, why empty, when = their dates).\n'
+        + '- said_no: each PPV he didn\'t buy, offer he turned down or request he refused. what = what it was, with its price; why = his reason, in his words where possible ("card is empty", "too expensive", "send it free", "not into that"), or "no answer" if he just ignored it; when = the date (day only).\n'
+        + '- promises: anything still owed: what HER side promised him, or what he promised (pay later, come back on payday).\n'
+        + '- about: every fact about HIS life he shared (never facts about her), as topic + detail. Topics like name, age, location, time zone, job, schedule, relationship, family, money and payday, health, hobbies, travel and plans with dates, what he wants from her. One fact per item.';
+      const r = await client.messages.create({ model: SUMMARY_MODEL, max_tokens: 4000, system, messages: [{ role: 'user', content: user }],
         output_config: { effort: 'low', format: { type: 'json_schema', schema: SUMMARY_SCHEMA } } });
       // what it cost, in the AI usage log with the rest of the AI spend (Claude Haiku 5.5: $0.10 in / $0.50 out per million tokens)
       const inTok = r.usage?.input_tokens || 0, outTok = r.usage?.output_tokens || 0;

@@ -102,11 +102,17 @@ async function memory(accountId, fanId) {
   // the fan's note, one fact per line
   for (const n of notes || []) for (const line of String(n.text || '').split('\n')) if (clean(line)) facts.push({ kind: 'about', text: clean(line).replace(/^[-•*]\s*/, '').slice(0, 300), said_at: n.updated_at });
   for (const n of pnotes || []) { const t = [clean(n.title), clean(n.note)].filter(Boolean).join(': '); if (t) facts.push({ kind: 'about', text: t.slice(0, 300), said_at: n.created_at_fansly }); }
+  // the AI summary (new shape: about / said_yes / said_no with reasons; summaries from before 24 Oct: facts / refused as plain lines)
   const s = sum?.summary || {};
-  for (const t of s.facts || []) if (clean(t)) facts.push({ kind: 'about', text: clean(t), said_at: sum.built_at });
-  for (const t of s.likes || []) if (clean(t)) facts.push({ kind: 'likes', text: clean(t), said_at: sum.built_at });
-  for (const t of s.refused || []) if (clean(t)) facts.push({ kind: 'avoid', text: `Said no to: ${clean(t)}`, said_at: sum.built_at });
-  for (const t of s.promises || []) if (clean(t)) facts.push({ kind: 'plan', text: `Open promise: ${clean(t)}`, said_at: sum.built_at });
+  const at = sum?.built_at;
+  const deal = (d) => (typeof d === 'string' ? clean(d) : [clean(d?.what), clean(d?.why) && !/^no reason given$/i.test(clean(d.why)) ? `(${clean(d.why)})` : ''].filter(Boolean).join(' '));
+  for (const t of s.about || []) { const x = typeof t === 'string' ? clean(t) : [clean(t?.topic), clean(t?.detail)].filter(Boolean).join(': '); if (x) facts.push({ kind: 'about', text: x, said_at: at }); }
+  for (const t of s.facts || []) if (clean(t)) facts.push({ kind: 'about', text: clean(t), said_at: at });
+  for (const t of s.likes || []) if (clean(t)) facts.push({ kind: 'likes', text: clean(t), said_at: at });
+  for (const t of s.dislikes || []) if (clean(t)) facts.push({ kind: 'avoid', text: `Doesn't like: ${clean(t)}`, said_at: at });
+  for (const t of [...(s.said_no || []), ...(s.refused || [])]) { const x = deal(t); if (x) facts.push({ kind: 'avoid', text: `Said no to: ${x}`, said_at: at }); }
+  for (const t of s.said_yes || []) { const x = deal(t); if (x) facts.push({ kind: 'likes', text: `Bought / said yes to: ${x}`, said_at: at }); }
+  for (const t of s.promises || []) if (clean(t)) facts.push({ kind: 'plan', text: `Open promise: ${clean(t)}`, said_at: at });
   return { facts: facts.slice(-40), story: '', bond: null };
 }
 
