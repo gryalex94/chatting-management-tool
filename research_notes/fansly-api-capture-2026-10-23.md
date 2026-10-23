@@ -122,3 +122,48 @@ Pages that exist: /messages /notifications /earnings /statistics /profilestats /
 5. /scheduled, then send one mass message to a small list and open its stats.
 6. Add a note on one fan.
 7. If possible keep recording while a real fan buys a PPV or tips, so the live purchase event is in the file.
+
+---
+
+# Third capture (23 Oct 2026, 1014 requests): earnings, statistics, notifications, subscribers, lists, management, a note
+
+No mass message and no live purchase/tip in this one (the user chose not to send them).
+
+## Earnings: the sales ledger (the "sold" source)
+GET /api/v1/account/wallets/earnings/transactions?limit=&offset= → `{total: 755, data: [...], aggregationData: {accountMedia, accountMediaBundles, subscriptionHistory, tips, accounts}}`
+Each row:
+```
+transactionId, type, amount, destinationTax (2000 = 20%), destinationAmount, newBalance,
+correlationId        = the thing sold (bundle id / media id / subscription history id / tip id)
+correlationAccountId = the FAN who paid
+createdAt (ms), status (2 = settled, 1 = pending), walletId, receiverId (creator)
+```
+`amount` is already NET to the creator in thousandths of a dollar: 23992 = $23.99 net of a $29.99 sale.
+Transaction `type` (the app's own labels): **2110 Media, 2116 Media Sets (bundles), 7101 Tips, 15001 Subscriptions**; legacy 2010/2016/7001.
+The `aggregationData.accountMedia/.accountMediaBundles` entries carry the item's price and media, `accounts` carries the fans' usernames, and `subscriptionHistory` carries the tier, price and ends-at of a sub sale.
+Per-fan: GET /account/wallets/earnings/transactions/accounts?correlationAccountId=&before=&after=&cursor=&limit= (cursor paged). GET /account/wallets/earnings → {pendingBalance}.
+
+Join to the chat: a sale's correlationId equals the attachment's contentId in the PPV message (contentType 1 ↔ type 2110 media, contentType 2 ↔ type 2116 bundle), and correlationAccountId equals the fan in the group. That is the sold / not-sold mark per PPV.
+
+## Statistics (the /statistics page)
+- GET /account/stats/summary?after=&before= → follower/subscriber counts, profile visits, follows/unfollows, subscriptions new/renewed/expired/cancelled (byTier), **revenue {transactions, grossMills, netMills, refunds, payingFans, newPayingFans, byProductType[]}**, views (source 0..3), each with value / previous / delta.
+- GET /account/stats/fans/top?after=&before=&orderBy=netMills&limit= → top spenders {fanId, transactions, grossMills, netMills, refunds, firstBucket, lastBucket}.
+- GET /account/stats/fans?fanId=&granularity=day → one fan's spend over time, byProductType.
+- GET /account/stats/series?family=views&granularity=hour|day → time series. Also /stats/media/top, /stats/media/benchmarks, /stats/streams/totals.
+
+## Notifications
+GET /api/v1/notifications?before=&after=[&type=] → 50 per page: `{id, type, correlationId, correlationGroupId, acknowledgedAt, createdAt, metadata}` + aggregationData (accountMedia, accountMediaBundles, subscriptions, subscriptionHistory, posts, messages, accounts).
+Seen: 2007 media purchase (metadata {accountMediaPrice}), 2008 bundle purchase (correlationId = bundle, correlationGroupId = buyer), 15016 subscriber (metadata {subscriptionStreak}), 15007 expired sub, 15011 promotion, 2002/1002/5003 likes, 3003 follow, 1004 post reply. Tips (7001) and locked-text (32007) did not occur in the window.
+POST /notifications/ack {beforeAnd: <id>, type} marks them read. Notifications are a convenience; the earnings ledger is the complete record.
+
+## Subscribers, followers, lists, notes
+- GET /subscribers?status=3,4&limit=100&offset= → {stats {totalActive, totalExpired, total}, subscriptions[{subscriberId, tier id/name/color, status, price, renewPrice, autoRenew, billingCycle, createdAt, renewDate, endsAt, promo…}]}. Statuses 3,4 = active ones (labels below if found).
+- GET /account/<id>/followersnew?limit=100&offset= → followers[{id, followerId}] + accounts.
+- GET /lists/account → [{id, type, label, itemCount}] (e.g. "Exclude MM"); GET /lists/itemsnew?listId= for members.
+- POST /notes {contentType: 12000, contentId: <fan account id>, title, note} → stored note with id. (12002 = note on a username, 12000 = note on an account.)
+
+## Management
+GET /management/managers → {accountManagers: [], accounts: []}; GET /management/managementsessions → []. Both empty: the feature exists on this account but nothing is set up. From the app texts: "Create Management Session", the link works once, delete sessions the manager no longer needs, some actions (co-performer consent) are not available inside a management session. Create/update/claim/remove calls exist. Needs a real try to see what a manager can and cannot do in chat.
+
+## Not working / odd
+GET /api/v1/messages?ids= answered 400 "error getting messages" 20 times (the app calling it from the notifications page); ignore.
