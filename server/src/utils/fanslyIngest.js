@@ -395,9 +395,21 @@ async function creditTransactions(ctx, rows) {
   }
 }
 
+/**
+ * Every row of one write must carry the same columns: when they differ, the API
+ * fills the gaps with explicit nulls, which overrides the table's defaults
+ * (first_seen_at became null and the write failed). Missing columns are filled
+ * here on purpose: first_seen_at with now, anything else with null.
+ */
+function uniform(rows) {
+  const keys = new Set(); for (const r of rows) for (const k of Object.keys(r)) keys.add(k);
+  const now = new Date().toISOString();
+  return rows.map(r => { const out = {}; for (const k of keys) out[k] = k in r && r[k] !== undefined ? r[k] : (k === 'first_seen_at' ? now : null); return out; });
+}
 async function upsert(table, rows, onConflict) {
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabaseAdmin.from(table).upsert(rows.slice(i, i + 500), { onConflict });
+  const all = uniform(rows);
+  for (let i = 0; i < all.length; i += 500) {
+    const { error } = await supabaseAdmin.from(table).upsert(all.slice(i, i + 500), { onConflict });
     if (error) throw new Error(`${table}: ${error.message}`);
   }
 }

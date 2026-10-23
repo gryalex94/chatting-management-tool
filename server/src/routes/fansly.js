@@ -12,7 +12,8 @@ const F = require('../utils/fanslyIngest');
  * Managers read the summary (GET /). Nothing here ever talks to Fansly.
  */
 const NOT_READY = 'Run database change 051 (Fansly) in Supabase first';
-const missingTable = (e) => /fansly_(accounts|presence|fans|messages|items|transactions|ingest_log)/.test(String(e?.message || '')) && /relation|schema cache|does not exist/.test(String(e?.message || ''));
+// Only a table that really is not there: "relation … does not exist" / "Could not find the table … in the schema cache".
+const missingTable = (e) => /(relation "(public\.)?fansly_\w+" does not exist|Could not find the table '?(public\.)?fansly_\w+)/.test(String(e?.message || ''));
 const fail = (res, e, what) => {
   console.error(`[fansly] ${what}:`, e.message);
   if (missingTable(e)) return res.status(409).json({ error: NOT_READY });
@@ -98,7 +99,14 @@ router.post('/ingest', async (req, res) => {
     supabaseAdmin.from('fansly_ingest_log').insert({ organisation_id: req.user.organisationId, account_id: account.id, user_id: req.user.id, device_id: deviceId,
       events: events.length, counts, errors: errors.length ? errors.join(' | ').slice(0, 2000) : null }).then(() => {});
     res.json({ ok: true, account: { id: account.id, fanslyId: account.fansly_account_id, username: account.username }, counts, errors, accepted: events.map(e => e.id) });
-  } catch (e) { fail(res, e, 'save what the extension sent'); }
+  } catch (e) {
+    // the failure goes to the log too, so it can be read from the dashboard without the server logs
+    supabaseAdmin.from('fansly_ingest_log').insert({ organisation_id: req.user.organisationId, user_id: req.user.id, device_id: deviceId, events: events.length,
+      counts: { kinds: events.map(ev => ev.kind) }, errors: String(e.message).slice(0, 2000) }).then(() => {});
+    if (missingTable(e)) return res.status(409).json({ error: NOT_READY });
+    console.error('[fansly] ingest:', e.message);
+    res.status(500).json({ error: `Could not save: ${String(e.message).slice(0, 300)}` });
+  }
 });
 
 // POST /api/fansly/presence { deviceId, account: {id, username}, extensionVersion, action: 'heartbeat' | 'logout' }
