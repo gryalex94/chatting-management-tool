@@ -70,10 +70,11 @@ app.use(['/api/daily-check/evaluate', '/api/daily-check/run', '/api/daily-check/
   limiter(15, 150, 'AI requests'));
 // The Fansly extension posts a small batch every few seconds from every chatter's
 // browser, often from one office address: its own roomy limit, outside the general one.
-app.use(['/api/fansly/ingest', '/api/fansly/presence'], limiter(15, 20000, 'extension requests'));
+app.use(['/api/fansly/ingest', '/api/fansly/presence', '/api/fansly/panel'], limiter(15, 20000, 'extension requests'));
+app.use('/api/fansly/panel/summary', limiter(15, 300, 'AI summaries'));
 app.use('/api/fansly/login', limiter(15, 60, 'sign-in attempts'));
 const generalLimiter = limiter(15, 3000, 'requests');
-app.use('/api', (req, res, next) => (/^\/fansly\/(ingest|presence)/.test(req.path) ? next() : generalLimiter(req, res, next)));
+app.use('/api', (req, res, next) => (/^\/fansly\/(ingest|presence|panel)/.test(req.path) ? next() : generalLimiter(req, res, next)));
 
 // ---------------------
 // AUTH MIDDLEWARE
@@ -151,6 +152,10 @@ app.use('/api/fanvue', staffOnly, fanvueRoutes);
 // Fansly: the browser extension's door (login, ingest, presence) and the dashboard.
 // Login is public; the route checks the session itself for everything else.
 const fanslyRoutes = require('./src/routes/fansly');
+// Phase 3: the extension's side panel (any signed-in account) and the managers' scripts library
+const fanslyPanel = require('./src/routes/fanslyPanel');
+app.use('/api/fansly/panel', fanslyPanel.panel);
+app.use('/api/fansly/scripts', fanslyPanel.scripts);
 app.use('/api/fansly', fanslyRoutes);
 
 // AI chat for the Fanvue AI creator: her profile, fan memory, the practice room

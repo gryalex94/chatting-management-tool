@@ -52,6 +52,21 @@ async function api(path, body) {
   return data;
 }
 
+// ---- the side panel's calls (GET/POST/PATCH/DELETE under /api/fansly/panel) ----
+async function panelApi(method, path, body) {
+  if (!/^\/api\/fansly\/panel\//.test(path)) throw new Error('Not a panel address');
+  const session = await validSession();
+  if (!session) throw Object.assign(new Error('Not signed in'), { noSession: true });
+  const { apiUrl, deviceId } = await settings();
+  const sep = path.includes('?') ? '&' : '?';
+  const url = apiUrl + path + (method === 'GET' ? `${sep}deviceId=${encodeURIComponent(deviceId)}` : '');
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.token }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) { await set({ session: null }); throw Object.assign(new Error('Signed out: please sign in again'), { noSession: true }); }
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
 // ---- learning which Fansly account this browser shows ----
 function noteAccount(kind, data) {
   let id = null, username = null;
@@ -150,6 +165,20 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       try { await api('/api/fansly/presence', { action: 'logout' }); } catch { /* already out */ }
       await set({ session: null }); respond({ ok: true });
     })();
+    return true;
+  }
+  if (msg && msg.type === 'panel-status') {
+    (async () => {
+      await ready;
+      const s = await settings();
+      respond({ signedIn: !!(s.session && s.session.token), user: s.session ? s.session.user : null, accountId: state.accountId, accountUsername: state.accountUsername, version: VERSION });
+    })();
+    return true;
+  }
+  if (msg && msg.type === 'panel-api') {
+    panelApi(String(msg.method || 'GET').toUpperCase(), String(msg.path || ''), msg.body)
+      .then(data => respond({ ok: true, data }))
+      .catch(e => respond({ ok: false, error: e.message, noSession: !!e.noSession }));
     return true;
   }
   if (msg && msg.type === 'popup-flush') { flush().then(() => respond({ ok: true, queue: queue.length })); return true; }

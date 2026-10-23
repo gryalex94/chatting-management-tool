@@ -7,7 +7,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import PlatformNotice from '@/components/shared/PlatformNotice';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { num } from '@/utils/numbers';
+import FanslyMessages from './FanslyMessages';
+import FanslyScripts from './FanslyScripts';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
 const since = (iso) => {
@@ -25,6 +28,23 @@ const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.r
  * per chatter. Phase 1 of FANSLY_EXTENSION_PLAN.md: recording only.
  */
 export default function FanslyDashboard() {
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('fansly-tab') || 'overview'; } catch { return 'overview'; } });
+  const pick = (v) => { setTab(v); try { localStorage.setItem('fansly-tab', v); } catch { /* ignore */ } };
+  return (
+    <Tabs value={tab} onValueChange={pick} className='gap-4'>
+      <TabsList>
+        <TabsTrigger value='overview'>Pages</TabsTrigger>
+        <TabsTrigger value='messages'>Messages</TabsTrigger>
+        <TabsTrigger value='scripts'>Scripts</TabsTrigger>
+      </TabsList>
+      <TabsContent value='overview'><FanslyOverview /></TabsContent>
+      <TabsContent value='messages'><FanslyMessages /></TabsContent>
+      <TabsContent value='scripts'><FanslyScripts /></TabsContent>
+    </Tabs>
+  );
+}
+
+function FanslyOverview() {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
   const [recounting, setRecounting] = useState(false);

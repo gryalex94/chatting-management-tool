@@ -24,6 +24,8 @@ async function render() {
   $('total').textContent = String(s.sentTotal || 0);
   $('ledger').textContent = ago(s.lastLedgerAt);
   $('ledgerHint').hidden = !!(s.lastLedgerAt && Date.now() - s.lastLedgerAt < 24 * 3600 * 1000);
+  const { panelOff } = await chrome.storage.local.get('panelOff');
+  $('panelOn').checked = !panelOff;
   $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '');
 }
 
@@ -38,6 +40,7 @@ $('signin').addEventListener('click', async () => {
 });
 $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('signin').click(); });
 $('signout').addEventListener('click', async () => { await send({ type: 'popup-logout' }); render(); });
+$('panelOn').addEventListener('change', (e) => chrome.storage.local.set({ panelOff: !e.target.checked }));
 $('flush').addEventListener('click', async () => { await send({ type: 'popup-flush' }); render(); });
 
 render();
