@@ -271,7 +271,12 @@ function resumeSession(s) {
       ? { every: s.cadence.every, text: clean(s.cadence.text).slice(0, 60), due: s.cadence.due === true, next_in: Math.max(0, Math.round(Number(s.cadence.next_in) || 0)), why: clean(s.cadence.why).slice(0, 200) } : null,
     pause: s.pause && typeof s.pause === 'object' && clean(s.pause.why) ? { total: Math.round(Number(s.pause.total) || 0), until: clean(s.pause.until).slice(0, 40), why: clean(s.pause.why).slice(0, 300) } : null,
     pause_lifted: s.pause_lifted === true,
-    first_sale: { asked: s.first_sale?.asked === true, held: Math.max(0, Math.round(Number(s.first_sale?.held) || 0)) },
+    first_sale: {
+      asked: s.first_sale?.asked === true, held: Math.max(0, Math.round(Number(s.first_sale?.held) || 0)),
+      // round 4 (F1, F2): his no, his unclear answers, whether he flirted back, how long the ask waited, the ask dropped
+      declined: s.first_sale?.declined === true, unclear: Math.max(0, Math.round(Number(s.first_sale?.unclear) || 0)), warm: s.first_sale?.warm === true,
+      waited: Math.max(0, Math.round(Number(s.first_sale?.waited) || 0)), no_ask: s.first_sale?.no_ask === true,
+    },
     asked_ready: s.asked_ready === true, why_asked: s.why_asked === true, reminded: s.reminded === true, cheaper_done: s.cheaper_done === true,
     dry_asked: s.dry_asked === true, dry_bye: s.dry_bye === true, pointed: s.pointed === true, hot: s.hot === true,
     asked_about: (Array.isArray(s.asked_about) ? s.asked_about : []).map(t => clean(t).slice(0, 160)).filter(Boolean).slice(-10),

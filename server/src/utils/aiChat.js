@@ -1099,13 +1099,14 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
     if (askAnswer === 'decline') fsNow.declined = true;
     if (askAnswer === 'unclear') { fsNow.unclear = (fsNow.unclear || 0) + 1; if (fsNow.unclear >= 2) fsNow.declined = true; }
     // F2: he went along with the flirting at least once (flirty or more, or the reader saw him flirting)
-    if (level.his >= 1 || ['flirting', 'sexting'].includes(reading?.doing)) fsNow.warm = true;
+    if (level.his >= 1 || ['flirting', 'sexting'].includes(reading?.doing) || replyLevel(hisHere) >= 1) fsNow.warm = true;
     session = { ...session, first_sale: fsNow };
   }
   // F2: the direct ask waits for a moment that fits: not while he cools, not right after he asked her something, not in a repair
   const cooling = !!level.pulled_back || ['annoyed', 'sad'].includes(level.mood) || (session.gauges?.mood ?? 60) < 45 || (session.gauges?.doubt ?? 0) >= 50
     || (reading?.readings || []).some(r => r.sure >= 0.5 && COOLING_READ.test(r.what || '')) || reading?.wishes?.buy === '-' || reading?.wishes?.talk === '-';
-  const unfit = cooling ? 'he is cooling off right now' : (reading?.asked?.length || Plan.DIRECT_Q.test(saidNow)) ? 'he just asked you something: answer him first'
+  // (a question of his in a sexual moment, "what would you do?", is an invitation the ask answers, not a reason to wait)
+  const unfit = cooling ? 'he is cooling off right now' : level.his < 2 && !invited && (reading?.asked?.length || Plan.DIRECT_Q.test(saidNow)) ? 'he just asked you something: answer him first'
     : (Plan.CONFUSED.test(saidNow.trim()) || Plan.PUSHBACK.test(saidNow.trim())) ? 'he is unsure what you meant: clear that up first' : '';
   const fsCur = session.first_sale || {};
   let stage = session.aim === 'first_sale' ? Sl.firstSaleStage({
@@ -1339,7 +1340,7 @@ async function reply(orgId, creatorId, { fanUuid = null, madeUp = null, test = [
       saveCheck(c, r.replies.map(x => x.creator_message));
       // Claude's fix (C3): a weak reply gets Claude's notes (what's wrong, what to do instead, never the words) and Mistral writes it
       // once more; not in selling moments (fix 9): Claude's taste disagrees with the proven answers there
-      if ((c.overall === 'weak' || (replyPlan.answer_first && c.points?.answers_him?.verdict === 'weak') || (replyPlan.hard && c.points?.understood?.verdict === 'weak')) && !c.declined && !SELL_GOALS.has(replyPlan.goal)) {
+      if ((c.overall === 'weak' || (replyPlan.answer_first && c.points?.answers_him?.verdict === 'weak') || (replyPlan.hard && c.points?.understood?.verdict === 'weak') || (c.points?.clear?.verdict === 'weak' && TALK_GOALS.has(replyPlan.goal))) && !c.declined && !SELL_GOALS.has(replyPlan.goal)) {
         const notes = Object.entries(c.points || {}).filter(([k, v]) => v?.verdict === 'weak' && CHECK_POINTS[k]).map(([k, v]) => `${CHECK_POINTS[k]}: ${clean(v.note)}`);
         const instruction = `Your coach found this reply weak${c.summary ? ` (${clean(c.summary)})` : ''}. ${notes.join(' ')} Write it again, fixing exactly that and keeping what was right: the same moment, the same length.`;
         const fixed = await writeOne({ orgId, creatorId, fanUuid, model: r.model, base, latest, recentHer, voice, speed, emojis, sell: sellFor, fixWith: instruction });
@@ -1800,6 +1801,7 @@ const withoutEchoes = (list, his = '') => list.flatMap(m => sentences(String(m))
 // A door: something he can pick up (a question, a word to him, a guess about him, an invitation).
 // round 4, F4: a door is something he can pick up (a question, a guess about him, a dare, an invitation); a bare "you" isn't
 const DOOR = /\?|\b(?:tell me|go on|convince me|prove it|try me|bet you|i bet|let me guess|you seem|you sound|you must|you look like|you strike me|don'?t you|aren'?t you|your turn|i wanna know|i want to know|dare you|admit it)\b/i;
+const KNOWS_HIM = /\b(?:i\s+know\s+(?:you|what\s+you)\s+(?:like|love|want|need)|since\s+you\s+(?:always|usually|keep)|you\s+always\s+(?:go\s+for|like|want)|guys\s+like\s+you|your\s+type\s+(?:always|loves?))\b/i;
 const NAME_GIVEN = /\b(?:[Mm]y\s+name(?:'?s|\s+is)|[Nn]ame'?s|[Cc]all\s+me)\s+([A-Za-z]{2,15})\b|\bI'?m\s+([A-Z][a-z]{1,14})\b/;
 const LATE_NAME = /\b(?:love|like|cute|nice|great|lovely|cool|sexy)\s+(?:that\s+|the\s+|your\s+)?name\b|\bname\s+suits\s+you\b/i;
 const NICE_TO_MEET = /\b(?:nice|pleasure|lovely|good|great)\s+to\s+meet\b|\bpleasure'?s\s+(?:all\s+)?mine\b/i;
@@ -1940,7 +1942,7 @@ async function setDiaryFact(orgId, creatorId, text, off) {
 // Claude's watch-only checks of Practice replies (ai_checks), added up: a score per
 // day (good = 1, okay = ½, weak = 0; declined ones don't count) and the most common
 // weak points, each with a few examples. Nothing is sent anywhere.
-const CHECK_POINTS = { answers_him: 'Answering him', understood: 'Understanding him', fits_moment: 'Fitting the moment', notes_facts: 'His notes and her facts', selling: 'Selling', lessons: 'Repeating a marked mistake' };
+const CHECK_POINTS = { answers_him: 'Answering him', understood: 'Understanding him', fits_moment: 'Fitting the moment', clear: 'Being clear', notes_facts: 'His notes and her facts', selling: 'Selling', lessons: 'Repeating a marked mistake' };
 const scoreOf = (c) => {
   const n = c.good + c.okay + c.weak;
   return n ? Math.round((100 * (c.good + c.okay / 2)) / n) : null;
@@ -2160,11 +2162,23 @@ function noQuestionWhy({ recent = [], recent10 = null, latest = [], hard = false
   if (WANTS.test(said)) return 'he told you what he wants: say yes, react or lead.';
   const run = (k) => recent.slice(-k).length === k && recent.slice(-k).every(r => r.includes('?'));
   if (run(3)) return 'you asked him something in your last three replies; this time react, tease or tell him something instead.';
-  if (run(2) && !shortAnswer) return 'you asked him something in your last two replies; this time react, tease or tell him something instead.';
-  const ten = (recent10 || recent).slice(-10);
-  if (ten.length >= 6 && ten.filter(r => r.includes('?')).length / ten.length > 0.5) return 'you have asked in more than half of your last replies; this time react, tease or tell him something instead.';
   return '';
 }
+/**
+ * Round 4, G2: two questions in a row, or more than half of her last ten, no longer block a question; the next one must
+ * follow up something he just said (in his words), never open a new topic. Three in a row still blocks (noQuestionWhy).
+ */
+function followOnlyWhy({ recent = [], recent10 = null, shortAnswer = false }) {
+  const two = recent.slice(-2).length === 2 && recent.slice(-2).every(r => r.includes('?'));
+  if (two && !shortAnswer) return 'you asked in your last two replies: a question now only if it follows up something he just said, in his words; never a new topic.';
+  const ten = (recent10 || recent).slice(-10);
+  if (ten.length >= 6 && ten.filter(r => r.includes('?')).length / ten.length > 0.5) return 'you have asked in more than half of your last replies: a question now only if it follows up something he just said, in his words; never a new topic.';
+  return '';
+}
+// a question that follows him: a short reaction question, or one that shares a topic word with what he just said
+const SHORT_FOLLOW = /^\W*(?:really|how come|why|what happened|and then|how so|wait,? what|seriously|for real|which one|how long|since when)\b/i;
+const followsHim = (q, his) => SHORT_FOLLOW.test(String(q).trim()) || Plan.topicWords(q).some(w => Plan.topicWords(his).includes(w));
+const questionSentences = (list) => list.flatMap(m => sentences(String(m))).filter(x => /\?/.test(x));
 
 /**
  * What her reply's voice is checked against (safety.voiceProblems) and told
@@ -2179,6 +2193,7 @@ function voiceFor({ chat, fan = {}, latest = [], followUp = false, from = 0, har
     recent, names: hisNames(chat, fan),
     his: chat.filter(m => m.from_fan).slice(-6).map(m => clean(m.text)).join('\n'),
     noQuestion: followUp ? '' : noQuestionWhy({ recent: herReplies(chat.slice(from)).slice(-6), recent10: herReplies(chat).slice(-10), latest, hard, shortAnswer }),
+    followOnly: followUp || hard ? '' : followOnlyWhy({ recent: herReplies(chat.slice(from)).slice(-6), recent10: herReplies(chat).slice(-10), shortAnswer }),
     openers: recent.slice(-4).map(r => r.split(/\s+/).slice(0, 2).join(' ').replace(/[,.!?…]+$/, '')).filter(Boolean),
   };
 }
@@ -2665,6 +2680,13 @@ async function writeOne({ orgId, creatorId, fanUuid, model, base, latest, recent
         // a reply all about her ("I love how names travel makes me want to try some rooibos tea again"): no door for him
         now.style.push('It gives him nothing to answer: it is all about you. Say something to him he can pick up (a guess about him, "bet you…", "you seem…", or tell him something and hand it back).');
       }
+      // round 4, G2: after two questions in a row a question has to follow him
+      const qNow = questionSentences(draft.messages);
+      if (base.plan?.ask?.follow_only && qNow.length && !qNow.some(q => followsHim(q, latestText))) now.style.push('Your question changes the subject after two questions in a row: ask about what he just said, or no question.');
+      // round 4, G1: an offer that acts like she knows him; asking his name without giving hers
+      if (draft.offer && KNOWS_HIM.test(draft.messages.join(' '))) now.style.push('It acts like you know him ("I know you like…"): say why it fits in his own words, or not at all.');
+      const herName = clean(base.profile?.name || '').split(/\s+/)[0];
+      if (herName && /\bwhat'?s\s+your\s+name\b/i.test(draft.messages.join(' ')) && !new RegExp(`\\b${herName}\\b`, 'i').test([...recentHer, ...draft.messages].join(' '))) now.style.push(`When you ask his name, give yours too ("I'm ${herName}").`);
       // round 4, F5: repairing a line that claimed too much: the claim is not said again
       if (base.plan?.clarify_kind === 'overclaim' && (Sf.FELT_FROM_HIM.test(draft.messages.join(' ')) || Sf.DECLARED.test(draft.messages.join(' ')))) now.style.push('It says the claim again: take it down a notch instead, in plain words (what you really meant).');
       // round 4, F4: he just gave his name: she says it back; a comment on his name when he gave it earlier comes too late
@@ -2780,6 +2802,9 @@ function pickCandidate(list, { plan = null, voice = null, closeness = 'new', que
     if (d.messages.length > 3) { score -= 20; why.push('too many messages'); }
     if (d.messages.some(m => words(m) > 15)) { score -= 10; why.push('a long message'); }
     if (DECLARED_RE.test(text) && ['new', 'friendly'].includes(closeness)) { score -= 20; why.push('declares feelings early'); }
+    const qs = questionSentences(d.messages);
+    if (qs.length && plan?.ask?.follow_only && !qs.some(q => followsHim(q, hisLine))) { score -= 20; why.push('changes the subject after two questions'); }
+    else if (qs.length && ['sharing', 'venting'].includes(plan?.reading?.doing)) { if (qs.some(q => followsHim(q, hisLine))) { score += 10; why.push('follows up on what he shared'); } else { score -= 10; why.push('changes the subject'); } }
     if (!plan?.name_given && LATE_NAME.test(text)) { score -= 15; why.push('comments on his name late'); }
     if (Sf.FELT_FROM_HIM.test(text) && ['new', 'friendly'].includes(closeness) && !voice?.earned) { score -= 20; why.push('claims a feeling he didn\'t cause'); }
     const beats = (plan?.beats || []).join(' ');

@@ -28,6 +28,9 @@ const wilson = (k, n) => {
   const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), h = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n);
   return `${Math.round(100 * (c - h) / d)}–${Math.round(100 * (c + h) / d)}%`;
 };
+const PlanM = require('../src/ai/chat/plan');
+const { sentences } = require('../src/ai/chat/safety');
+const SHORT_FOLLOW = /^\W*(?:really|how come|why|what happened|and then|how so|wait,? what|seriously|for real|which one|how long|since when)\b/i;
 const pct = (k, n) => (n ? `${(100 * k / n).toFixed(1)}%` : '—');
 const inBand = (v, [lo, hi]) => (v == null ? '' : v < lo ? ' ▼ low' : v > hi ? ' ▲ high' : ' ✓');
 
@@ -89,6 +92,10 @@ const inBand = (v, [lo, hi]) => (v == null ? '' : v < lo ? ' ▼ low' : v > hi ?
   console.log(`Small-talk scorecard: ${n} talk replies in the last ${DAYS} days (${replies.filter(r => r.from === 'checks').length} from the checks log, ${replies.filter(r => r.from === 'practice').length} more from saved practice chats)${n < 300 ? `; under 300, so each share is only within about ±${Math.round(100 * 1.96 * Math.sqrt(0.25 / n))} points` : ''}\n`);
   console.log(`${'measure'.padEnd(34)} ${'Yuna'.padStart(6)}  (95% range)  vs the human chatters`);
   row('Replies with a question', asks, 'question', '   humans 43–47%');
+  // round 4, G2: of her replies with a question, how many follow up something he just said (a word of his, or "really? how come?")
+  const asking = replies.filter(r => /\?/.test(r.bubbles.join(' ')));
+  const followUps = asking.filter(r => r.bubbles.flatMap(b => sentences(b)).filter(x => /\?/.test(x)).some(q => SHORT_FOLLOW.test(q.trim()) || PlanM.topicWords(q).some(w => PlanM.topicWords(r.his).includes(w)))).length;
+  console.log(`${'Her questions that follow him'.padEnd(34)} ${pct(followUps, asking.length).padStart(6)}  (${wilson(followUps, asking.length)}, of ${asking.length} replies with a question)   no human band yet; the higher the better`);
   console.log(`${'Words per reply (median, mid half)'.padEnd(34)} ${String(q(0.5)).padStart(6)}  (${q(0.25)}–${q(0.75)}, 9 in 10 under ${q(0.9)})${inBand(q(0.5), BANDS.median_words)}   humans 7 (4–11, 9 in 10 under 16)`);
   row('Replies of 3 words or fewer', count(r => words(r.bubbles.join(' ')) <= 3), 'declared', '   humans about 20%');
   row('A message over 15 words', long, 'declared', '   humans: rare');

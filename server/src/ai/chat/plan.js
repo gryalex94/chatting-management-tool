@@ -31,7 +31,7 @@ const STANCE_TEXT = {
 const BEATS = {
   welcome_new: ['welcome him, glad he found you', 'react to what he wrote', 'one question: what brought him here or what he is into'],
   curious: ['react to what he just said', 'one real question about it'],
-  share: ['react to what he said', 'a small real thing of yours, with a person in it (a friend, your sister, your flatmate)'],
+  share: ['react to his exact words (name the detail he gave)', 'a small real thing of yours that matches what he just said (same topic); a person in it when it fits'],
   chat: ['react to what he said with real interest'],
   get_to_know: ['react to what he said', 'one easy question about him'],
   flirt: ['react to what he said', 'a playful compliment or a light tease'],
@@ -64,7 +64,7 @@ const BEATS = {
   roleplay: ['play your part in the scene, one step on', 'keep him in it'],
 };
 // a second beat from the runner-up move, when it fits with the first (never two questions, never a tease with comfort)
-const RUNNER_BEAT = { share: 'a small real thing of yours that connects to what he just said, not your day out of nowhere', flirt: 'a light flirt', tease: 'a tease, hinting', curious: 'one question about what he said', get_to_know: 'one easy question about him', react: null, offer: null, steer: null, readiness_check: null, comfort: null, reassure: null };
+const RUNNER_BEAT = { share: 'a small real thing of yours that matches what he just said (same topic), after reacting to his words', flirt: 'a light flirt', tease: 'a tease, hinting', curious: 'one question about what he said', get_to_know: 'one easy question about him', react: null, offer: null, steer: null, readiness_check: null, comfort: null, reassure: null };
 function beatsFor(p) {
   const base = [...(BEATS[p.goal] || ['react to what he said'])];
   if (p.goal === 'curious' && p.reading?.curious) base[1] = `one real question about it: "${p.reading.curious}"`;
@@ -75,13 +75,18 @@ function beatsFor(p) {
     && !(asksAlready && /question/.test(RUNNER_BEAT[runner.move])) && !(['comfort', 'reassure'].includes(p.goal) && /tease|flirt/.test(RUNNER_BEAT[runner.move]))) base.push(RUNNER_BEAT[runner.move]);
   if (p.repair) base.unshift('own what you said lightly in one line ("ha, fair, I was teasing"): no excuse, no explaining, then on');
   else if (p.clarify && p.clarify_kind === 'overclaim') base.unshift('take your last line down a notch in plain words: no apology, don\'t say it again');
-  else if (p.clarify) base.unshift('say plainly what you meant by your last line, in one line; no question back');
+  else if (p.clarify && p.clarify_kind === 'term') base.unshift(`say what "${p.clarify_term}" means, in plain words`);
+  else if (p.clarify && p.clarify_kind === 'example') base.unshift('give one concrete example');
+  else if (p.clarify && p.clarify_kind === 'repeat') base.unshift('say your last line again, the same words');
+  else if (p.clarify) base.unshift('say again what you meant, in plainer words; no question back unless your line was a question');
   else if (p.answer_first) base.unshift('answer his question plainly, in one line');
   // round 4, F4: he closed the topic with a pleasantry: she leads with something new instead of reacting to it
   if (p.closing && !p.answer_first && !p.clarify && !p.repair && ['chat', 'get_to_know', 'curious', 'share', 'flirt'].includes(p.goal)) base.splice(0, base.length, 'a short warm acknowledgement, or none', 'lead: one easy question about him, or a small thing of yours that opens a new topic');
   // he just gave his name: she says it back warmly in this reply
   if (p.name_given) base.splice(p.answer_first || p.clarify || p.repair ? 1 : 0, 0, `say his name back warmly ("nice to meet you, ${p.name_given}")`);
   if (p.complimented && !/compliment/.test(base.join(' '))) base.splice(p.repair || p.answer_first ? 1 : 0, 0, 'receive his compliment warmly: thank him in your way, playful and specific; no deflecting, no "I get that a lot"');
+  // round 4, G3: her share always rides on a reaction to his words, never first
+  if (/thing of yours/.test(base[0] || '')) base.unshift('react to his exact words first (name the detail he gave)');
   // the floor of the question band: she has asked little lately, and this reply has room for one follow-up
   if (p.ask?.allowed && /would be good now/.test(p.ask.why) && !/question/.test(base.join(' ')) && ['chat', 'flirt', 'share'].includes(p.goal) && base.length < 3) base.push('one follow-up question about what he just said');
   return base.slice(0, 3);
@@ -127,7 +132,24 @@ const DIRECT_Q = /\?\s*$|\b(?:what|why|how|where|when|who|which)\b[^.!]{0,80}\?/
 // (challenges only: a sincere "why do you like painting?" is a question to answer, and "wow, that's beautiful" is praise)
 const PUSHBACK = /^(?:why (?:finally|that|so (?:cold|rude|mean|formal|serious|dry)|would (?:you|u) (?:say|think|assume)|do (?:you|u) (?:say|think|assume|keep saying)|are (?:you|u) (?:being|acting|like that))\b|what'?s that supposed to mean\b|excuse me\b|wow\W*$|wow,? (?:ok(?:ay)?|rude|really|bold|that'?s (?:a bit|bold|rude|forward|presumptuous|not))\b)|\b(?:i just subscribed|who said (?:anything|that|i)|that'?s (?:rude|a bit much|not fair|not what i)|where did that come from|i never said|when did i)\b/i;
 // he didn't get her last line: not offended, confused. She says plainly what she meant; no question back
-const CONFUSED = /^(?:what do (?:you|u) mean|what\W*$|huh\W*$|wait,? what\W*$|lol what\W*$|what are you (?:talking about|on about)|i don'?t (?:get|understand) (?:it|that|you)|meaning\W*$|come again\W*$)/i;
+const CONFUSED = /^(?:what do (?:you|u) mean|what\W*$|huh\W*$|wait,? what\W*$|lol what\W*$|what are you (?:talking about|on about)|i don'?t (?:get|understand) (?:it|that|you)|meaning\W*$)/i;
+// round 4, G4: the kinds of "I didn't get you" (Moore 2024): a word of hers, "that", an example, a repeat (scripts/probes/round4-patterns.cjs)
+const TERM_Q = /^\s*what(?:'?s|\s+is|\s+are)\s+(?:a\s+|an\s+|the\s+)?(?!that\b|this\b|it\b)([\w' -]{2,30}?)\s*\?*\s*$/i;
+const THAT_Q = /^\s*(?:what(?:'?s|\s+is)\s+(?:that|this|it)\b|what\s+do\s+(?:you|u)\s+mean\s+by\s+(?:that|this|it)\b)/i;
+const EXAMPLE_Q = /^\s*(?:like\s+what|such\s+as|for\s+example|(?:any\s+)?examples?|like\s+how)\b/i;
+const REPEAT_Q = /^\s*(?:come\s+again|say\s+(?:that\s+|it\s+)?again|repeat\s+(?:that|it)|what\s+did\s+(?:you|u)\s+(?:just\s+)?say)\b/i;
+const escRe = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** The kind of repair he asks for, or '' when his message isn't one. `herLast` = her last reply. */
+function repairKind(said, herLast = '') {
+  const t = String(said || '').trim();
+  const term = t.match(TERM_Q);
+  if (term && herLast && new RegExp(`\\b${escRe(term[1].trim())}\\b`, 'i').test(herLast)) return 'term';
+  if (THAT_Q.test(t)) return 'that';
+  if (EXAMPLE_Q.test(t)) return 'example';
+  if (REPEAT_Q.test(t)) return 'repeat';
+  if (CONFUSED.test(t)) return 'whole';
+  return '';
+}
 // he pays her a compliment, or tells her what drew him: it gets received, never brushed off
 // (a positive frame only: "your eyes look tired, are you okay?" is concern, and a negated or critical line is never one)
 const NEGATED = /\b(?:don'?t|dont|do not|didn'?t|not|never|can'?t|cannot|hate|stop)\s+(?:really\s+|even\s+|that\s+)?(?:like|love|into|a fan of|care for|feeling)\b|\bnot (?:that|very|so|really|exactly|even) (?:hot|cute|pretty|sexy|beautiful|gorgeous|special|funny|my type)\b|\b(?:ugly|disgusting|gross|fake|photoshopped?|filtered)\b/i;
@@ -270,7 +292,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
     stance: politics ? 'deflect' : joke ? 'playful' : reading.stance, answers: reading.answers || '', thread: dead ? 'dead' : 'alive',
   } : null;
   // he didn't get her last line ("what do you mean?"): she explains it, no question back (the curious question goes)
-  const confusedNow = herReplies > 0 && !followUp && !PUSHBACK.test(said) && (CONFUSED.test(said.trim()) || (reading?.readings || []).some(r => /\b(?:asks her to explain|didn'?t (?:get|understand) her|misread her line|what she meant)\b/i.test(r.what) && r.sure >= 0.4));
+  const confusedNow = herReplies > 0 && !followUp && !PUSHBACK.test(said) && (!!repairKind(said, herLast) || (reading?.readings || []).some(r => /\b(?:asks her to explain|didn'?t (?:get|understand) her|misread her line|what she meant)\b/i.test(r.what) && r.sure >= 0.4));
   if (confusedNow && p.reading) p.reading.curious = '';
   const goal = (g, text, why, rules = []) => { p.goal = g; p.goal_text = text; p.why = why; p.rules.push(...rules); };
   const leaving = !followUp && (GOODBYE.test(said) || ids.includes('leaving_soon'));
@@ -503,15 +525,25 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   const answerable = (p.clarify || DIRECT_Q.test(said) || !!hisQuestion) && !politics && !p.repair && !['offer', 'first_offer', 'honest_no', 'answer_ppv', 'reassure', 'refuse', 'request_hesitate', 'request_park', 'request_approved', 'request_refused', 'service_offer', 'service_deliver', 'custom_content', 'no_reply', 'goodbye'].includes(p.goal);
   // round 4, F5: the line he didn't get claimed more than the moment had (a feeling he didn't cause, a compliment, a declared
   // feeling): she takes it down a notch in plain words instead of saying it again
-  if (p.clarify && herLast && (FELT_FROM_HIM.test(herLast) || DECLARED.test(herLast) || HER_COMPLIMENT.test(herLast))) p.clarify_kind = 'overclaim';
+  if (p.clarify) {
+    const kind = repairKind(said, herLast) || 'whole';
+    p.clarify_kind = ['whole', 'that'].includes(kind) && herLast && (FELT_FROM_HIM.test(herLast) || DECLARED.test(herLast) || HER_COMPLIMENT.test(herLast)) ? 'overclaim' : kind;
+    if (kind === 'term') p.clarify_term = String(said).trim().match(TERM_Q)[1].trim();
+  }
   p.answer_first = answerable && p.clarify_kind === 'overclaim' ? `He didn't get your last line ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}"): it said more than the moment had. Take it down a notch in plain words (what you really meant, like that it's nice to meet him, or that you like talking to him); light, no apology, don't say the claim again, then carry on`
-    : answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say plainly what you meant, light, in one line; don't repeat the joke, don't apologise, then on`
+    : answerable && p.clarify_kind === 'term' ? `He asked what "${p.clarify_term}" means: say it in plain words, in one line, then carry on`
+    : answerable && p.clarify_kind === 'that' ? `He asked what "that" was in your last line ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}"): name plainly what it pointed to, in one line, then carry on`
+    : answerable && p.clarify_kind === 'example' ? 'He asked for an example: give one concrete example, then carry on'
+    : answerable && p.clarify_kind === 'repeat' ? `He asked you to say it again: say your last line again in the same words ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")`
+    : answerable && p.clarify ? `He didn't get your last line${herLast ? ` ("${clean(herLast).replace(/\s+/g, ' ').slice(0, 120)}")` : ''}: say it again in plainer words (it may be a little longer), light; don't repeat the joke, don't apologise, then carry on`
     : answerable ? `He asked you something ("${(hisQuestion || said).slice(0, 120)}"): answer it plainly in one line first (a joke question still gets a real answer, "what does it mean" gets the meaning), then do the rest` : '';
   p.ask = p.media?.failed ? { allowed: true, why: 'the one question: ask what he sent, it wouldn\'t load (C9)' }
+    : p.clarify && /\?/.test(herLast || '') && ['whole', 'that', 'term'].includes(p.clarify_kind) ? { allowed: true, why: 'carry on: your line was a question, ask it again in plainer words (Moore 2024)' }
     : p.clarify ? { allowed: false, why: 'he asked what you meant: explain it, no question back' }
     : p.check ? { allowed: true, why: 'the one question: check what she remembers (Q14)' }
     : ['direct_ask', 'readiness_check', 'why_not', 'curious'].includes(p.goal) ? { allowed: true, why: { direct_ask: 'the one question: what he wants to see (A1)', readiness_check: 'the one question: is he ready (E5)', why_not: 'the one question: why he passed (B5)', curious: 'the one question: what she wants to know (R2)' }[p.goal] }
     : voice?.noQuestion ? { allowed: false, why: voice.noQuestion } : noAskGoal ? { allowed: false, why: noAskGoal }
+    : voice?.followOnly ? { allowed: true, follow_only: true, why: voice.followOnly }
     : questions && questions.n >= 4 && questions.share < 0.3 ? { allowed: true, why: `one follow-up question would be good now: you asked in only ${questions.asked} of your last ${questions.n} replies (humans: about 4 in 10)` } : { allowed: true, why: 'one at most (Q5)' };
 
   // 4. length: mirror his (Q4), never a bare one-liner; sexting gets room for a story move
@@ -561,7 +593,7 @@ function planReply({ herLast = '', level, voice = null, latest = [], followUp = 
   // one small extra touch (B5): he's leaving while the reply has another job, or a note of his in passing
   p.touch = null;
   if (leaving && !['goodbye', 'follow_up'].includes(p.goal)) p.touch = { kind: 'goodbye', text: 'he\'s leaving: say goodbye too, warm, with a hook for next time', why: 'he said he has to go (B5)' };
-  else if (callback && !p.callback && !p.check && ['comfort', 'after_buy', 'calm', 'ease_off', 'wind_down', 'steer_to_sale'].includes(p.goal) && herReplies <= 2) {
+  else if (callback && !p.callback && !p.check && ['comfort', 'after_buy', 'calm', 'ease_off', 'wind_down'].includes(p.goal) && herReplies <= 2) {   // never on a selling goal (round 4, G1)
     p.touch = { kind: 'callback', note: callback.note, text: `mention "${callback.note}" in passing (${callback.ask})`, why: `a small personal touch (B5); ${callback.why}` };
   }
   // he asks about his parked request again: "still thinking about it, don't rush me" (D4)
@@ -644,4 +676,4 @@ function planText(p) {
   return lines;
 }
 
-module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, TIER_LABEL, BUDGET, GOODBYE, CONFUSED, PUSHBACK, DIRECT_Q };
+module.exports = { fanProfile, planReply, planText, goodbyeOf, topicWords, sameKind, repairKind, TIER_LABEL, BUDGET, GOODBYE, CONFUSED, PUSHBACK, DIRECT_Q };

@@ -46,7 +46,7 @@ Module._load = function load(name, parent, main) {
 };
 const enginePath = path.join(root, 'server/src/utils/aiChat.js');
 const m = new Module(enginePath, module); m.filename = enginePath; m.paths = Module._nodeModulePaths(path.dirname(enginePath));
-m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME};`, enginePath);
+m._compile(`${fs.readFileSync(enginePath, 'utf8')}\nmodule.exports._communicationAudit={pickCandidate,SHARES,WANTS,GIVES_REASON:typeof GIVES_REASON==='undefined'?null:GIVES_REASON,RECEIVES:typeof RECEIVES==='undefined'?null:RECEIVES,withoutEchoes:typeof withoutEchoes==='undefined'?null:withoutEchoes,MOOD_TALK:typeof MOOD_TALK==='undefined'?null:MOOD_TALK,DOOR:typeof DOOR==='undefined'?null:DOOR,echoOnly:typeof echoOnly==='undefined'?null:echoOnly,TALK_ONLY,HANDS_OVER,nameIn,LATE_NAME,KNOWS_HIM,followsHim,followOnlyWhy};`, enginePath);
 const A = m.exports;
 const audit = A._communicationAudit;
 
@@ -166,6 +166,16 @@ const makePlan = (text, extra = {}) => Plan.planReply({ level: { his: 0, max: 0,
   const over = makePlan('What do you mean?', { herLast: "Bob, love that name. You're making me feel all kinds of special already.", reading: { ...reading, doing: 'asking', asked: ['What do you mean?'] } });
   check('F5 repairing an overclaim takes it down', over.clarify_kind === 'overclaim' && /down a notch/.test(over.answer_first), { kind: over.clarify_kind, first: over.answer_first });
   check('F5 no pet name in a repair, none with a new fan who has not flirted back', P.tidyMessages(["I just meant you're making me blush, babe"], { emojis: 'none', noPet: true })[0] === "I just meant you're making me blush" && P.tidyMessages(['haha love it babe'], { emojis: 'none', recent: ['a', 'b', 'c', 'd'], closeness: 'new', warm: false })[0] === 'haha love it');
+
+  // round 4, Group G
+  check('G1 no name of his in a selling reply; "I know you like" is caught', P.tidyMessages(['Mike, this one is just for you'], { emojis: 'none', noName: true, names: ['Mike'] })[0] === 'This one is just for you' && audit.KNOWS_HIM.test('I know you like lingerie') && !audit.KNOWS_HIM.test('you said you like lingerie, so…'), { tidy: P.tidyMessages(['Mike, this one is just for you'], { emojis: 'none', noName: true, names: ['Mike'] }) });
+  check('G2 two questions in a row: a follow-up only, three still block', !!audit.followOnlyWhy({ recent: ['a?', 'b?'] }) && !A._test.noQuestionWhy({ recent: ['a?', 'b?'] }) && !!A._test.noQuestionWhy({ recent: ['a?', 'b?', 'c?'] })
+    && audit.followsHim('What part of South Africa?', "It's from South Africa") && audit.followsHim('really?', 'I quit my job') && !audit.followsHim('What do you do for fun?', "It's from South Africa"));
+  const g3 = Plan.planReply({ level: { his: 0, max: 0, mood: 'chatty' }, latest: ["It's from South Africa"], profile, herReplies: 2, reading: { ...reading, doing: 'sharing' }, gauges: { heat: 0, mood: 54, rapport: 27, readiness: 10, doubt: 0, engagement: 51, surprise: 40 }, questions: { n: 2, asked: 2, share: 1, run: 2 }, rand: () => 0 });
+  check('G3 no story of hers at low rapport unless he asked about her; never first', !(g3.scores || []).find(x => x.move === 'share')?.allowed && !/thing of yours/.test((g3.beats || [])[0] || ''), { scores: g3.scores, beats: g3.beats });
+  check('G4 repairs by kind', Plan.repairKind("what's a platz?", 'Would you like a platz?') === 'term' && Plan.repairKind("what's that?", 'x') === 'that' && Plan.repairKind('like what?', 'x') === 'example' && Plan.repairKind('come again?', 'x') === 'repeat' && Plan.repairKind('What do you mean?', 'x') === 'whole' && Plan.repairKind('nice', 'x') === '');
+  const term = makePlan("what's a platz?", { herLast: 'Would you like a platz, too?', reading: { ...reading, doing: 'asking', asked: ["what's a platz?"] } });
+  check('G4 a word of hers gets its meaning, and her question may come again', term.clarify_kind === 'term' && /"platz" means/.test(term.answer_first) && term.ask.allowed, { kind: term.clarify_kind, first: term.answer_first, ask: term.ask });
 
   // out of scope for this plan (see AI_CHAT_FIX_PLAN_22_OCT.md): implicit sadness, the joke origin past the window, money and closeness, prompt size
   console.log(`\n${failed ? `${failed} check(s) failed` : 'all checks passed'}`);
