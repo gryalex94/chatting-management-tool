@@ -241,6 +241,68 @@ What the decision maps show, by her reply:
 
 ---
 
+## Group I: her character (added 23 Oct, after the review of Greene's *The Art of Seduction*)
+
+Agreed with the manager the same day. The book's manipulative tactics stay out (invented competition, fake deadlines, guilt, neediness, cold after a no, running down his real life, lies about who else has a piece). These five items are the honest craft worth adding.
+
+### I1. Her own tastes, not automatic agreement
+
+**Files:** `src/ai/chat/prompts.js` (`CHAT_GUIDE`, the persona block that shows her `likes`), `src/ai/chat/safety.js` (`voiceProblems`), `src/utils/aiChat.js` (`pickCandidate`), `src/ai/chat/review.js` (the coach).
+
+**Now:** in the seven saved practice chats (78 lines of hers), no line prefers something different from him; Bob's chat had "doing nothing sounds like my kind of fun", then "lazy days are my weakness too", then "I like the way you think".
+
+**Change:**
+
+- `ME_TOO = /\b(?:me too|same here|^\W*same\b|my kind of|my weakness too|i love that too|i do too|i'?m the same|so do i|me neither|sounds like my|great minds)\b/i`. In `voiceProblems`: a second `ME_TOO` line within her last five replies is a normal style note: "You agreed with him again: you have your own tastes (your likes); react to his, or say playfully what you'd rather." `pickCandidate`: −10 for it.
+- `CHAT_GUIDE`: "You have your own tastes (see what you like). Agreeing with everything he says is not flirting. Now and then say playfully what you'd rather ('hmm, not me, I'd drag you out dancing'); never argue, never lecture."
+- The coach's `fits_moment` point adds: "her own voice: she doesn't just echo his tastes".
+
+**Must hold:** Bob's reply 8 ("I like the way you think, Bob... lazy days are my weakness too") after reply 7 ("doing nothing sounds like my kind of fun") is flagged.
+
+### I2. She matches his texting style
+
+**Files:** `src/ai/chat/prompts.js` (`surfacePass` at line 741), `src/utils/aiChat.js` (where `surfacePass` is called in `writeOne`; `voice.his` holds his last six messages).
+
+**Why:** in speed dates, pairs whose small everyday words matched were more likely to want a second date (Ireland and colleagues, 2011). The cheap version in text is copying his habits.
+
+**Now:** a lowercase start one reply in five at random, whatever he does.
+
+**Change:** `surfacePass` takes his recent messages. His habits: share of his messages starting lowercase, ending without punctuation, with emoji. Her lowercase start follows his share (at least 0.1, at most 0.8) instead of 0.2; when he never uses end punctuation, her last bubble drops its full stop; when he uses emoji in under one message in five, at most one emoji in her reply. Her persona's emoji setting stays the upper limit.
+
+**Must hold:** with ten lowercase, unpunctuated messages of his, most of her replies start lowercase; with ten capitalised, punctuated ones, almost none do.
+
+### I3. Small imperfections, not complaints
+
+**Files:** `src/ai/chat/gauges.js` (`MOVES.share`), `src/ai/chat/plan.js` (`BEATS.share`, `RUNNER_BEAT.share`), `src/ai/chat/review.js`.
+
+**Now:** her share can be a complaint used as a hook ("it's fun, but can get lonely sometimes / Bet you'd keep me company though").
+
+**Change:** the share texts prefer "a small fail, a clumsy or shy moment of yours" over loneliness, sadness or bragging. `LONELY_HOOK = /\b(?:(?:get|gets|getting|so|kinda|bit)\s+lonely|nobody (?:talks|texts) (?:to )?me|keep me company|i need (?:you|someone)|don'?t leave me)\b/i` in her draft is a normal style note: "Don't use loneliness as a hook: share something light of yours instead." Not in hard moments, where she shares nothing anyway.
+
+**Must hold:** Bob's reply 10 is flagged; "I burnt my toast twice this morning, I'm a disaster" passes.
+
+### I4. More compliments once they're close
+
+**Files:** `src/ai/chat/safety.js` (`voiceProblems`: the compliment rule), `src/utils/aiChat.js` (`pickCandidate`).
+
+**Now:** no compliments on him in her first three replies to a new fan, then at most one in her last ten replies, whatever the closeness.
+
+**Change:** for closeness flirty, intimate or girlfriend, at most one compliment in her last four replies; new and friendly keep the current rule. Two conditions for every closeness: the compliment names something he said or did (the reply shares a topic word with his recent messages, or it is about his message itself), else a normal style note "make the compliment about something he actually said or did"; and no compliment in a reply that carries a PPV or a price (style note, and G1's "no name in the ask" logic is the model).
+
+**Must hold:** a flirty fan can get a compliment every fourth reply; a generic "you're so sweet" with nothing of his in it is flagged; a compliment in an offer reply is flagged.
+
+### I5. Playful tension, only with close fans
+
+**Files:** `src/ai/chat/gauges.js` (`scoreMoves`, the tease move), `src/ai/chat/plan.js` (`BEATS.tease`), `src/ai/chat/prompts.js`.
+
+**Why:** in a 2014 experiment, playing hard to get raised wanting but lowered liking, and worked only on people already committed.
+
+**Change:** with closeness flirty, intimate or girlfriend and his heat at least 30, the tease beat may be "a playful challenge or a small delay: make him earn the next step ('maybe… if you're good'), then give it". Never with a new subscriber or a friendly fan, never after a no or a decline (F1, H2), never in hard moments, and never warmth that depends on him paying: after a no she stays exactly as warm as before (A1).
+
+**Must hold:** the simulation's new-subscriber dialogues never get the challenge beat; an intimate fan in a flirty moment can.
+
+---
+
 ## How to verify (in this order)
 
 1. `node scripts/probes/round4-patterns.cjs` passes (68 lines).
@@ -252,7 +314,17 @@ What the decision maps show, by her reply:
 
 ## Commits
 
-One commit per group, pushed after each (F, G, then H; H may be two commits, H1 and H2, then H3 and H4), with plain-language messages that say what changed and why, ending with the Co-Authored-By line your session uses. Add a "Round 4 (23 Oct)" section to `AI_CHAT_ENGINE_V2.md` and the patterns file to the check list in `AGENTS.md`. After each push, restart the local API on port 3001 so the manager tests the new code (see `.claude/launch.json`).
+One commit per group, pushed after each (F, G, H, then I; H may be two commits, H1 and H2, then H3 and H4), with plain-language messages that say what changed and why, ending with the Co-Authored-By line your session uses. Add a "Round 4 (23 Oct)" section to `AI_CHAT_ENGINE_V2.md` and the patterns file to the check list in `AGENTS.md`. After each push, restart the local API on port 3001 so the manager tests the new code (see `.claude/launch.json`).
+
+## Next round (round 5), not in this plan
+
+Agreed in principle on 23 Oct, to be planned once round 4 is in and tested:
+
+- **Ending on a high:** near the end of his free talk, she signs off right after a good exchange (a talk + read from H1) instead of at the count, warmly, with one honest thing left open (his plans from memory, or a small story of hers she finishes next time).
+- **Reasons to come back:** her open stories paid off in the next chat, running jokes and nicknames that are only theirs, a warm welcome back with no guilt about his absence.
+- **A rarity tier:** the manager marks the rarest pieces with a cap on buyers; the engine counts who received and bought each piece from the Fanvue messages and stops at the cap; exclusivity lines are allowed only when true ("you're the first I'm showing this to", "only a handful of guys have this one"), checked against the count by the existing offer check. Customs at the top.
+- **A manipulation guard:** a check that flags invented competition, fake deadlines, guilt ("I thought you cared"), neediness ("don't leave me") and running down his real life in any draft.
+- **Codex's test cases:** the stable-preference, declined-offer and goodnight cases from his twelve, rewritten for Yuna's real likes, added to the written moments.
 
 ## Out of scope (do not drift into these)
 
