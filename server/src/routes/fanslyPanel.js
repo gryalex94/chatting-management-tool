@@ -56,7 +56,7 @@ async function workable(req, res, fanslyAccountId) {
 
 /** The fan in this chat: by his account id, else by the chat (group) id. */
 async function fanOf(account, { fan, group }) {
-  const cols = 'fansly_account_id, group_id, username, display_name, nickname, joined_fansly_at, last_seen_at, follows_you, subscription_tier_id, subscription_tier_name, subscription_status, subscribed_until, last_message_at';
+  const cols = 'fansly_account_id, group_id, username, display_name, nickname, joined_fansly_at, last_seen_at, follows_you, history_complete, subscription_tier_id, subscription_tier_name, subscription_status, subscribed_until, last_message_at';
   if (fan && /^\d{5,25}$/.test(String(fan))) {
     const { data } = await supabaseAdmin.from('fansly_fans').select(cols).eq('account_id', account.id).eq('fansly_account_id', String(fan)).maybeSingle();
     if (data) return data;
@@ -187,6 +187,8 @@ panel.get('/fan', async (req, res) => {
       fansly_notes: (fanslyNotes || []).filter(n => n.note || n.title).map(n => ({ id: n.note_id, title: n.title, note: n.note, at: n.created_at_fansly })),
       metrics: metricsOf(msgs, tx || []),
       warnings: warningsOf(msgs, fan),
+      // is his whole chat recorded? Until the chatter scrolls to its first message, numbers and the AI see only part of it
+      history: { complete: !!fan.history_complete, recorded: msgs.filter(m => m.type !== 2).length, oldest_at: msgs[0]?.sent_at || null },
       note: { text: note?.text || '', updated_at: note?.updated_at || null, by: note?.users?.name || null },
       summary: summary ? { ...summary.summary, built_at: summary.built_at, stale: summary.last_message_id !== lastId, messages_used: summary.messages_used } : null,
       owned_item_ids: owned,

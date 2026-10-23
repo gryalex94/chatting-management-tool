@@ -244,7 +244,7 @@ async function applyEvents(ctx, events) {
       orders.set(`${fan}:${item}`, { fan, item, at: ts(o.createdAt), id: str(o.id) });
     }
   };
-  const unsent = new Set(), broadcasts = new Map();
+  const unsent = new Set(), broadcasts = new Map(), historyDone = new Set();
   const tiers = {};                    // tier id → { name, color, price }: the chip colours in Fansly's chat list
   const takeTier = (id, name, color, price) => { if (!id) return; const k = str(id); tiers[k] = { ...(tiers[k] || {}), ...(name ? { name } : {}), ...(color ? { color } : {}), ...(price != null ? { price: dollars(price) } : {}) }; };
 
@@ -319,6 +319,12 @@ async function applyEvents(ctx, events) {
         case 'messages': {                                 // a chat page (25 messages) the chatter opened or scrolled
           for (const m of d.messages || []) putMessage(messageRow(ctx, m, { source: d.before ? 'history' : 'page', attribution: 'history', prices }));
           takeOrders(d.accountMediaOrders);
+          // fewer than the page asked for: this is the chat's first page, its whole history is now recorded
+          if (d.groupId && Number(d.limit) > 0 && (d.messages || []).length < Number(d.limit)) {
+            historyDone.add(str(d.groupId));
+            const fanId = (d.messages || []).map(m => messageRow(ctx, m, { source: 'page', attribution: 'history', prices }).fan_account_id).find(Boolean);
+            if (fanId) putFan({ account_id: ctx.account.id, fansly_account_id: fanId, group_id: str(d.groupId), history_complete: true, history_complete_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+          }
           for (const t of d.tips || []) bump('tips_seen');
           bump('messages', (d.messages || []).length); break;
         }
@@ -508,6 +514,16 @@ async function applyEvents(ctx, events) {
   // purchases the chat shows: mark the PPV message sold, and keep a sale when Fansly says when (the ledger replaces it later)
   if (orders.size) counts.orders_marked = await applyOrders(ctx, [...orders.values()], touched);
   if (broadcasts.size) await upsert('fansly_broadcasts', [...broadcasts.values()], 'account_id,broadcast_id');
+  // (a chat whose first page came back empty has no fan in it: marked by its chat id)
+  if (historyDone.size) {
+    const at = new Date().toISOString();
+    const { data: hit } = await supabaseAdmin.from('fansly_fans').update({ history_complete: true, history_complete_at: at }).eq('account_id', ctx.account.id).in('group_id', [...historyDone]).select('group_id');
+    // no fan row for that chat yet: find him from the chat's recorded messages
+    for (const g of [...historyDone].filter(x => !(hit || []).some(r => r.group_id === x))) {
+      const { data: m } = await supabaseAdmin.from('fansly_messages').select('fan_account_id').eq('account_id', ctx.account.id).eq('group_id', g).not('fan_account_id', 'is', null).limit(1);
+      if (m?.[0]) await supabaseAdmin.from('fansly_fans').upsert({ account_id: ctx.account.id, fansly_account_id: m[0].fan_account_id, group_id: g, history_complete: true, history_complete_at: at, updated_at: at }, { onConflict: 'account_id,fansly_account_id' });
+    }
+  }
   if (unsent.size) {
     const ids = [...unsent], at = new Date().toISOString();
     await supabaseAdmin.from('fansly_messages').update({ deleted_at: at }).eq('account_id', ctx.account.id).in('message_id', ids).is('deleted_at', null);

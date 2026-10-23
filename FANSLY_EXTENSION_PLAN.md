@@ -166,3 +166,4 @@ The panel only reads from our server and writes our notes; it never sends anythi
 - **Writes at** is in the chatter's own computer time, with the zone shown (the server sends UTC hours).
 - **Across the agency** lists Fansly pages only, without platform labels; other platforms wait until fans can be matched surely.
 - **AI summary** is empty until Generate is pressed; Generate / Regenerate always writes a new one.
+- **Incomplete chat warning** (060, extension 0.6.1): a chat is marked complete once Fansly returns a page shorter than it asked for (its first message is reached, also an empty page after exactly full ones). Until then the panel warns "Chat not fully recorded: N messages, back to <date>; scroll up to his first message once", and the AI summary says it reads only the recorded part. Chats recorded before 0.6.1 show the warning until scrolled once more.

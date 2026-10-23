@@ -378,7 +378,11 @@
     return h('div', { class: 'shift' },
       h('div', { class: 'row' }, h('span', null, 'Signed in: ', h('b', null, who)), h('span', { class: 'muted', style: 'margin-left:auto' }, sh.since ? `on ${sinceLabel(sh.since)}` : '')),
       sh.shift ? h('div', { class: 'muted small' }, `Shift ${String(sh.shift.start).slice(0, 5)}–${String(sh.shift.end).slice(0, 5)}`) : null,
-      ...((d.warnings || []).map(w => h('div', { class: `warn ${w.level}` }, w.text))));
+      ...((d.warnings || []).map(w => h('div', { class: `warn ${w.level}` }, w.text))),
+      // his chat isn't fully recorded yet: the chatter scrolls up to its first message once
+      d.found && d.history && !d.history.complete ? h('div', { class: 'warn mid' },
+        h('b', null, 'Chat not fully recorded. '),
+        `${d.history.recorded} message${d.history.recorded === 1 ? '' : 's'} so far${d.history.oldest_at ? `, back to ${date(d.history.oldest_at)}` : ''}. Scroll up in the chat to his very first message once; until then his numbers and the AI see only this part.`) : null);
   }
 
   function suggestion(d) {
@@ -468,6 +472,8 @@
     const s = st.summary;
     const list = (label, xs) => (xs && xs.length ? [h('div', { class: 'lbl' }, label), h('ul', null, xs.map(x => h('li', null, x)))] : []);
     const content = [];
+    const hist = st.data && st.data.history;
+    if (hist && !hist.complete) content.push(h('div', { class: 'small', style: 'color:#fcd34d;margin-bottom:4px' }, 'Only the recorded part of his chat is read. Scroll up to his first message first for a full summary.'));
     if (st.summaryBusy) content.push(h('div', { class: 'muted small' }, 'Reading his chat… (a few seconds)'));
     if (s) {
       content.push(...list('Likes', s.likes), ...list('Bought', s.bought), ...list('Said no to', s.refused), ...list('Open promises', s.promises), ...list('About him', s.facts));

@@ -54,7 +54,7 @@
       if (p === '/messaging/groups' && r) return { kind: 'groups', data: { data: r.data, aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), groups: (r.aggregationData && r.aggregationData.groups || []).map(slimGroup) } } };
       if (/^\/group\/\d+\/?$/.test(p) && r) return { kind: 'group', data: slimGroup(r) };
       // accountMediaOrders: what the fan in this chat bought (Fansly's "This user has purchased this media")
-      if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [], accountMediaOrders: r.accountMediaOrders || [] } };
+      if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, limit: q.limit || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [], accountMediaOrders: r.accountMediaOrders || [] } };
       if (/^\/message\/broadcast\/stats(\/deleted)?$/.test(p) && r) return { kind: 'broadcasts', data: { deleted: /deleted$/.test(p), items: firstList(r) } };
       if (p === '/message/unread' && r) return { kind: 'unread', data: { messageInteractions: r.messageInteractions || [] } };
       if (p === '/subscribers' && r) return { kind: 'subscribers', data: { stats: r.stats, subscriptions: r.subscriptions || [] } };
