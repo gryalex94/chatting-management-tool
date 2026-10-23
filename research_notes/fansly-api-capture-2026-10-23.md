@@ -46,3 +46,40 @@ Chatter attribution comes from the extension itself (each chatter runs one brows
 
 ## Still needed from a second capture
 Start recording BEFORE opening fansly.com/messages, then: the thread list loads, open 3 chats, send one PPV, open Earnings/Statistics, open Notifications. Export with the same "Export HAR" button.
+
+---
+
+# Second capture (same day, recording started before /messages loaded; 466 requests, 36 socket frames)
+
+## New calls
+
+| Call | What it returns |
+|---|---|
+| GET /api/v1/messaging/groups?sortOrder=1&flags=0&limit=20&offset=0 | the thread list, 20 per page: data[{groupId, partnerAccountId, partnerUsername, flags, unreadCount, subscriptionTierId, lastMessageId, lastUnreadMessageId}] + aggregationData.accounts[] (fan profiles) + aggregationData.groups[] (each with lastMessage) |
+| GET /api/v1/message/unread?limit=100&offset=0&before=0 | our sent messages the fan has not read yet (messageInteractions[] with deliveredAt/readAt) |
+| GET /api/v1/account/me | the creator account incl. mainWallet / earningsWallet / totalSpent30 / subscriptionTiers |
+| GET /api/v1/account/<id>/wallets | wallet balances (thousandths of a dollar) |
+| GET /api/v1/subscriptions/tiers | the subscription tiers (the coloured chips in the chat-list filter are tiers: "Same as on OnlyFans" $5 etc.) |
+| GET /api/v1/vault/albumsnew, GET /api/v1/media/vaultnew?albumId= | the Media Vault albums and their media (the "From Vault" picker) |
+| GET /api/v1/notifications/unack | unread counts by notification type (1002, 2002, 5003, 15007 seen; meaning unknown) |
+| POST /api/v1/message/typing {groupId} | typing indicator |
+| wss://wsv3.fansly.com/?v=3 | live feed, see below |
+
+Fan profile fields in aggregationData.accounts: id, username, displayName, createdAt, followCount, subscriberCount, followsYou, lastSeenAt, statusId, accountMediaLikes, postLikes, timelineStats. The nickname a chatter gives a fan is group.users[].userSettings.customName.
+
+## How a PPV is sent (two calls, confirmed by sending a $10 photo)
+1. POST /api/v1/account/media with a body like
+   `[{mediaId, previewId, permissionFlags: 8, price: 0, whitelist: [{accountId: creator}, {accountId: fan}], permissions: {permissionFlags: [{type: 0, flags: 1, price: 10000, metadata: "{\"1\":\"{\\\"price\\\":10000}\"}"}]}, tags: []}]`
+   -> returns the new accountMedia record (its `id` is what the message attaches). Price 10000 = $10.00. The fan's id in `whitelist` ties this PPV to one fan.
+2. POST /api/v1/message with
+   `{type: 1, groupId, content, attachments: [{contentType: 1, contentId: <accountMedia id>, pos: 0, messageId: null}], likes: [], scheduledFor: 0, inReplyTo: null, createdAt}`
+   -> returns the stored message (id, createdAt, interactions[]).
+So a chat PPV is an ORDINARY type 1 message with an attachment; type 2 is therefore the mass message ("You up for some spice" went to the whole list as type 2).
+
+## The live feed (websocket)
+- Client sends `{"t":1,"d":"{\"token\":\"…\",\"v\":3}"}` once, then the text `p` every ~24 s; server answers `{"t":2,…lastPing}`.
+- Events arrive as `{"t":10000,"d":"{\"serviceId\":5,\"event\":\"<json string>\"}"}`. Event types seen: 1 = a new message (full message object, same shape as the REST one, for sent and received), 22 = typing announce {accountId, groupId}.
+- Purchase / tip / read events were not triggered during the capture; their event types are still unknown.
+
+## Still unknown
+- The per-fan purchase signal. Nothing in the capture says "this fan unlocked this PPV". Candidates: a websocket event when the fan buys, the Earnings/Statistics page's calls, or a notifications list call. The Earnings page and the Notifications page were not opened in this capture.
