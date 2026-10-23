@@ -83,3 +83,42 @@ So a chat PPV is an ORDINARY type 1 message with an attachment; type 2 is theref
 
 ## Still unknown
 - The per-fan purchase signal. Nothing in the capture says "this fan unlocked this PPV". Candidates: a websocket event when the fan buys, the Earnings/Statistics page's calls, or a notifications list call. The Earnings page and the Notifications page were not opened in this capture.
+
+---
+
+# What the app code says exists (read from main.js in the second capture, 23 Oct 2026)
+
+The app builds every URL as apiBaseUri + path, apiBaseUri = https://apiv3.fansly.com/api/v1. Calls that matter to us and were NOT yet seen live:
+
+| Call | Why we want it |
+|---|---|
+| GET /account/wallets/earnings/transactions?before&after&limit&offset | every earning (PPV unlock, tip, sub) with time: the "sold" signal, page by page |
+| GET /account/wallets/earnings/stats, /monthlystats, and the same with /accounts?correlationAccountId= | totals, and per-fan totals |
+| GET /account/media/orders/?limit&offset | who bought which media/bundle |
+| GET /message/broadcast/stats?before&limit ; POST /message/broadcast | mass messages and how each performed |
+| GET /notifications?before&after&type | the Notifications page, by type |
+| GET /subscribers?before&after&status&limit&offset&search&subscriptionTierId | subscriber list |
+| GET /tips?ids= / ?targetIds= | tips by message id |
+| /notes, /notes/edit, /notes/delete | notes chatters keep on a fan (contentType 12002 = note on a username) |
+| /lists, /lists/itemsnew?listId= | the fan lists (the chips in the chat filter) |
+| POST /message/ack {messageIds, type}; POST /groups/users/readreceipts | read marks |
+| /management/managers, /management/managementsessions, /managementsession/claim/:token | Fansly's own "management" feature: managers log in through a claimable session link; worth checking as the way chatters sign in |
+| /scheduled, /message/broadcast/scheduled | scheduled sends |
+
+Notification types (from the Notifications page code): 2007/2008 = Media Purchases, 32007 = Locked Text Purchases, 7001 = Tips, 15006/15016 = new Subscribers, 15007 = Expired Subscriptions, 15011 = Promotions, 3002/3003 = Followers, 1002/2002/5003 = Likes, 1004/1005 = post replies/quotes, 24001/24002 = Fansly Alerts, 45012 = stream tickets.
+
+Live feed services (serviceId in each socket event): 2 Media, 4 Group, 5 Message, 6 Wallet, 7 Tipping, 9 Notification, 14 Order, 15 Subscription, 34 Notes, 40 EarningsStats, 39 Management. Handlers found in the code:
+- serviceId 5 (Message): type 1 new message, 3/4 like added/removed, 22 typing.
+- serviceId 2 (Media): **type 7 = accountMediaOrderCreate, with the order** → a fan unlocking a PPV arrives live. 999 = cache clear.
+Other services' event shapes are not in the chat page code; a capture while a purchase or tip happens would show them.
+
+Pages that exist: /messages /notifications /earnings /statistics /profilestats /subscribers /followers /lists /vault /scheduled /management /sessions /wallet /payments /trackinglinks /topsupporters /streaming.
+
+## Capture checklist for the third HAR (start recording BEFORE each page loads, "All" filter, "Keep log" on)
+1. /earnings and /statistics — scroll the transaction list a bit.
+2. /notifications — click the Media Purchases, Tips and Subscribers tabs.
+3. /subscribers and /lists.
+4. /management — screenshots too; this decides how chatters could log in.
+5. /scheduled, then send one mass message to a small list and open its stats.
+6. Add a note on one fan.
+7. If possible keep recording while a real fan buys a PPV or tips, so the live purchase event is in the file.
