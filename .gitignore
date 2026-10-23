@@ -39,3 +39,6 @@ pc-guard/guard.log
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Fansly traffic captures (HAR files hold the live session token). Local only.
+fansly-capture/
