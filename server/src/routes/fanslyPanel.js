@@ -30,7 +30,7 @@ const fail = (res, e, what) => {
   if (missingTable(e)) return res.status(409).json({ error: 'Run database changes 054 and 055 (Fansly panel) in Supabase first' });
   return res.status(500).json({ error: `Could not ${what}` });
 };
-const amsHour = (iso) => Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Amsterdam', hour: '2-digit', hour12: false }).format(new Date(iso))) % 24;
+// the hours he writes, in UTC: the panel shows them in the chatter's own time
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); return s[s.length >> 1]; };
 
 /**
@@ -40,7 +40,7 @@ const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a,
 async function accountOf(req, fanslyAccountId) {
   const id = String(fanslyAccountId || '');
   if (!/^\d{5,25}$/.test(id)) return null;
-  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, ai_creator_id, creators(name)')
+  const { data } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, creator_id, status, ai_creator_id, tiers, creators(name)')
     .eq('organisation_id', req.user.organisationId).eq('fansly_account_id', id).maybeSingle();
   if (!data) return null;
   return { ...data, assigned: await F.mayWork(req.user, data) };
@@ -56,7 +56,7 @@ async function workable(req, res, fanslyAccountId) {
 
 /** The fan in this chat: by his account id, else by the chat (group) id. */
 async function fanOf(account, { fan, group }) {
-  const cols = 'fansly_account_id, group_id, username, display_name, nickname, joined_fansly_at, last_seen_at, follows_you, subscription_tier_name, subscription_status, subscribed_until, last_message_at';
+  const cols = 'fansly_account_id, group_id, username, display_name, nickname, joined_fansly_at, last_seen_at, follows_you, subscription_tier_id, subscription_tier_name, subscription_status, subscribed_until, last_message_at';
   if (fan && /^\d{5,25}$/.test(String(fan))) {
     const { data } = await supabaseAdmin.from('fansly_fans').select(cols).eq('account_id', account.id).eq('fansly_account_id', String(fan)).maybeSingle();
     if (data) return data;
@@ -91,7 +91,7 @@ function metricsOf(msgs, tx) {
     if (s >= 0 && s < 86400) gaps.push(Math.round(s));
   }
   const hours = new Array(24).fill(0);
-  for (const m of msgs) if (m.from_fan && m.sent_at) hours[amsHour(m.sent_at)] += 1;
+  for (const m of msgs) if (m.from_fan && m.sent_at) hours[new Date(m.sent_at).getUTCHours()] += 1;
   const topHours = hours.map((n, h) => ({ h, n })).filter(x => x.n > 0).sort((a, b) => b.n - a.n).slice(0, 3).map(x => x.h).sort((a, b) => a - b);
   return {
     spent_net: round2(spent),
@@ -102,7 +102,7 @@ function metricsOf(msgs, tx) {
     last_purchase: last ? { what: last.type_label || last.category, net: round2(Math.abs(Number(last.net) || 0)), at: last.created_at_fansly, category: last.category } : null,
     days_since_purchase: last?.created_at_fansly ? Math.floor((Date.now() - Date.parse(last.created_at_fansly)) / 86400000) : null,
     reply_s: median(gaps),
-    online_hours: topHours,                                       // Amsterdam hours he writes most
+    online_hours_utc: topHours,                                   // the UTC hours he writes most
     messages_recorded: msgs.length, team_messages: team.length,
   };
 }
@@ -165,8 +165,7 @@ panel.get('/fan', async (req, res) => {
     const msgs = (recent || []).filter(m => m.sent_at).reverse();
     const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('category, type_label, item_id, gross, net, created_at_fansly')
       .eq('account_id', account.id).eq('fan_account_id', fanId).limit(2000);
-    const { data: notes } = await supabaseAdmin.from('fansly_notes').select('id, text, pinned, created_at, updated_at, user_id, users(name)')
-      .eq('account_id', account.id).eq('fan_account_id', fanId).order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(100);
+    const { data: note } = await supabaseAdmin.from('fansly_fan_notes').select('text, updated_at, users(name)').eq('account_id', account.id).eq('fan_account_id', fanId).maybeSingle();
     const { data: summary } = await supabaseAdmin.from('fansly_fan_summaries').select('summary, last_message_id, built_at, messages_used')
       .eq('account_id', account.id).eq('fan_account_id', fanId).maybeSingle();
     const { data: fanslyNotes } = await supabaseAdmin.from('fansly_platform_notes').select('note_id, title, note, created_at_fansly').eq('account_id', account.id).eq('fan_account_id', fanId)
@@ -182,15 +181,17 @@ panel.get('/fan', async (req, res) => {
     const owned = [...new Set((tx || []).filter(t => t.item_id && t.category !== 'refund').map(t => String(t.item_id)))];
     res.json({
       found: true, page, shift,
-      fan: { ...fan, name: fan.nickname || fan.display_name || fan.username || null, lists: listNames },
+      fan: { ...fan, name: fan.nickname || fan.display_name || fan.username || null, lists: listNames,
+        // his tier with Fansly's own chip colour (when the extension has seen it)
+        tier: fan.subscription_tier_id || fan.subscription_tier_name ? { name: account.tiers?.[fan.subscription_tier_id]?.name || fan.subscription_tier_name || 'Subscribed', color: account.tiers?.[fan.subscription_tier_id]?.color || null } : null },
       fansly_notes: (fanslyNotes || []).filter(n => n.note || n.title).map(n => ({ id: n.note_id, title: n.title, note: n.note, at: n.created_at_fansly })),
       metrics: metricsOf(msgs, tx || []),
       warnings: warningsOf(msgs, fan),
-      notes: (notes || []).map(n => ({ id: n.id, text: n.text, pinned: n.pinned, created_at: n.created_at, updated_at: n.updated_at, author: n.users?.name || 'Someone', mine: n.user_id === req.user.id, can_edit: n.user_id === req.user.id || isManager(req.user) })),
+      note: { text: note?.text || '', updated_at: note?.updated_at || null, by: note?.users?.name || null },
       summary: summary ? { ...summary.summary, built_at: summary.built_at, stale: summary.last_message_id !== lastId, messages_used: summary.messages_used } : null,
       owned_item_ids: owned,
       // where else he sits in the agency and what he spent there (utils/fanAgency.js)
-      agency: await Agency.agencySpend(req.user.organisationId, fanId, { username: fan.username, thisAccountId: account.id }).catch(e => { console.error('[fansly-panel] agency:', e.message); return null; }),
+      agency: await Agency.agencySpend(req.user.organisationId, fanId, { thisAccountId: account.id, fanslyOnly: true }).catch(e => { console.error('[fansly-panel] agency:', e.message); return null; }),
     });
   } catch (e) { fail(res, e, 'load the fan'); }
 });
@@ -217,6 +218,21 @@ async function editableNote(req) {
   if (n.user_id !== req.user.id && !isManager(req.user)) return null;
   return n;
 }
+
+// PUT /api/fansly/panel/note { account, fan, text } — the fan's one note, saved as the chatter types
+panel.put('/note', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fan = String(req.body?.fan || '');
+    if (!/^\d{5,25}$/.test(fan)) return res.status(404).json({ error: 'No such fan on this page' });
+    const text = String(req.body?.text ?? '').slice(0, 5000);
+    const row = { account_id: account.id, fan_account_id: fan, text, updated_by: req.user.id, updated_at: new Date().toISOString() };
+    const { error } = await supabaseAdmin.from('fansly_fan_notes').upsert(row, { onConflict: 'account_id,fan_account_id' });
+    if (error) throw error;
+    res.json({ ok: true, updated_at: row.updated_at });
+  } catch (e) { fail(res, e, 'save the note'); }
+});
 
 // PATCH /api/fansly/panel/notes/:id { text?, pinned? }
 panel.patch('/notes/:id', async (req, res) => {
@@ -277,7 +293,8 @@ panel.post('/summary', async (req, res) => {
     if (msgs.length < 4) return res.json({ summary: null, reason: 'Too few messages with him yet' });
     // keep the old one when nothing moved, or when it is fresh and only a few messages came since
     const newSince = have ? msgs.length - 1 - msgs.findIndex(m => m.message_id === have.last_message_id) : Infinity;
-    const fresh = have && (have.last_message_id === lastId || (!req.body?.force && Date.now() - Date.parse(have.built_at) < 15 * 60_000 && newSince < 10));
+    // pressing the button (force) always writes a new one; without it, the saved one is reused while it still fits
+    const fresh = have && !req.body?.force && (have.last_message_id === lastId || (Date.now() - Date.parse(have.built_at) < 15 * 60_000 && newSince < 10));
     if (fresh) return res.json({ summary: out(have) });
     const key = `${account.id}:${fanId}`;
     if (building.has(key)) return res.json({ summary: have ? out(have) : null, building: true });

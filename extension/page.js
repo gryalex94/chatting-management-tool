@@ -36,6 +36,7 @@
     correlationId: m.correlationId, deletedAt: m.deletedAt,     // the mass message it belongs to · when it was unsent
     attachments: m.attachments, interactions: m.interactions, totalTipAmount: m.totalTipAmount, likes: m.likes && m.likes.length,
   });
+  const slimTier = (t) => t && ({ id: t.id, name: t.name, color: t.color, price: t.price });
   const slimGroup = (g) => g && ({ id: g.id, type: g.type, createdBy: g.createdBy, users: g.users, userSettings: g.userSettings, lastMessage: slimMessage(g.lastMessage) });
 
   const listOf = (r, ...keys) => { if (Array.isArray(r)) return r; for (const k of keys) if (r && Array.isArray(r[k])) return r[k]; return []; };
@@ -48,7 +49,8 @@
     if (!API.test(url) || !body || body.success === false) return null;
     const p = path(url), r = body.response, q = query(url);
     if (method === 'GET') {
-      if (p === '/account/me' && r && r.account) return { kind: 'me', data: slimAccount(r.account) };
+      if (p === '/account/me' && r && r.account) return { kind: 'me', data: { ...slimAccount(r.account), subscriptionTiers: (r.account.subscriptionTiers || []).map(slimTier) } };
+      if (p === '/subscriptions/tiers' && r) return { kind: 'tiers', data: { tiers: firstList(r).map(slimTier) } };
       if (p === '/messaging/groups' && r) return { kind: 'groups', data: { data: r.data, aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), groups: (r.aggregationData && r.aggregationData.groups || []).map(slimGroup) } } };
       if (/^\/group\/\d+\/?$/.test(p) && r) return { kind: 'group', data: slimGroup(r) };
       // accountMediaOrders: what the fan in this chat bought (Fansly's "This user has purchased this media")

@@ -159,3 +159,10 @@ The panel only reads from our server and writes our notes; it never sends anythi
 ## 24 Oct, evening: the panel next to the page (extension 0.5.0)
 - The panel now opens in Chrome's own side panel (popup: "Open the panel next to the page"), so Chrome narrows the Fansly page instead of the panel covering it. It follows the active Fansly tab's chat; a clicked script or suggestion is typed into that tab's message box by bridge.js. Needs Chrome 116+; older browsers fall back to the panel inside the page (popup: "Where the panel shows").
 - The search for linking a fan to his OnlyFans / Fanvue account by hand is gone from the panel; a same-username match is still offered.
+
+## 24 Oct, night: panel clean-up (059, applied in Supabase; extension 0.6.0)
+- **Tier chip in Fansly's colour.** The fan card shows his tier as a chip in the tier's own colour (fansly_accounts.tiers, read from the account, the tier list and the subscriber list; corarossi's "Same as on OnlyFans" pink #FF1493 seeded from the 23 Oct capture). "last online" only when Fansly says it.
+- **Notes like Infloww.** One free-text note per fan (fansly_fan_notes), empty by default, saved 0.8 s after typing stops, shared by every shift; older notes were moved into it one per line. The AI reads it one fact per line.
+- **Writes at** is in the chatter's own computer time, with the zone shown (the server sends UTC hours).
+- **Across the agency** lists Fansly pages only, without platform labels; other platforms wait until fans can be matched surely.
+- **AI summary** is empty until Generate is pressed; Generate / Regenerate always writes a new one.

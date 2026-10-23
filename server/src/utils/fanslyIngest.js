@@ -245,6 +245,8 @@ async function applyEvents(ctx, events) {
     }
   };
   const unsent = new Set(), broadcasts = new Map();
+  const tiers = {};                    // tier id → { name, color, price }: the chip colours in Fansly's chat list
+  const takeTier = (id, name, color, price) => { if (!id) return; const k = str(id); tiers[k] = { ...(tiers[k] || {}), ...(name ? { name } : {}), ...(color ? { color } : {}), ...(price != null ? { price: dollars(price) } : {}) }; };
 
   const putMessage = (row) => {
     const prev = messages.get(row.message_id);
@@ -286,6 +288,7 @@ async function applyEvents(ctx, events) {
     try {
       switch (e.kind) {
         case 'me': {
+          for (const t of d.subscriptionTiers || []) takeTier(t.id, t.name, t.color, t.price);
           Object.assign(accountPatch, { username: d.username || undefined, display_name: d.displayName || undefined, followers_count: d.followCount ?? undefined, subscribers_count: d.subscriberCount ?? undefined });
           bump('me'); break;
         }
@@ -337,6 +340,7 @@ async function applyEvents(ctx, events) {
         }
         case 'subscribers': {
           for (const s of d.subscriptions || []) {
+            takeTier(s.subscriptionTierId, s.subscriptionTierName, s.subscriptionTierColor);
             putFan({ account_id: ctx.account.id, fansly_account_id: str(s.subscriberId),
               subscription_tier_id: str(s.subscriptionTierId), subscription_tier_name: s.subscriptionTierName || null, subscription_status: s.status ?? null,
               subscribed_until: s.endsAt ? tsMs(s.endsAt) : null, updated_at: new Date().toISOString() });
@@ -393,6 +397,7 @@ async function applyEvents(ctx, events) {
           for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
           bump('notifications', (d.notifications || []).length); break;
         }
+        case 'tiers': { for (const t of d.tiers || []) takeTier(t.id, t.name, t.color, t.price); bump('tiers', (d.tiers || []).length); break; }
         case 'orders': { takeOrders(d.accountMediaOrders); bump('orders_seen', (d.accountMediaOrders || []).length); break; }
         case 'msg_deleted': { if (d.messageId) unsent.add(str(d.messageId)); bump('unsent'); break; }
         case 'broadcasts': {                               // the mass message history (and its "deleted" tab)
@@ -522,6 +527,12 @@ async function applyEvents(ctx, events) {
   if (notifs.size) await upsert('fansly_notifications', [...notifs.values()], 'account_id,notification_id');
   if (snapshots.length) { const { error } = await supabaseAdmin.from('fansly_stats_snapshots').insert(snapshots); if (error) errors.push(`stats: ${error.message}`); }
 
+  if (Object.keys(tiers).length) {
+    const { data: cur } = await supabaseAdmin.from('fansly_accounts').select('tiers').eq('id', ctx.account.id).maybeSingle();
+    const merged = { ...(cur?.tiers || {}) };
+    for (const [k, v] of Object.entries(tiers)) merged[k] = { ...(merged[k] || {}), ...v };
+    accountPatch.tiers = merged;
+  }
   const patch = Object.fromEntries(Object.entries(accountPatch).filter(([, v]) => v !== undefined));
   await supabaseAdmin.from('fansly_accounts').update({ ...patch, last_seen_at: now }).eq('id', ctx.account.id);
   if (Object.keys(patch).length) forgetAccount(ctx.user.organisationId, ctx.creatorId);

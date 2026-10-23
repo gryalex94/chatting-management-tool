@@ -90,8 +90,10 @@ async function fanvuePages(orgId, fanUuid) {
  * the OnlyFans and Fanvue accounts linked to him (by hand or by the same username),
  * and the total.
  */
-async function agencySpend(orgId, fanId, { username = null, thisAccountId = null } = {}) {
+// `fanslyOnly`: his Fansly pages only (what the panel shows for now: other platforms can't be matched surely yet)
+async function agencySpend(orgId, fanId, { username = null, thisAccountId = null, fanslyOnly = false } = {}) {
   const fansly = await fanslyPages(orgId, fanId, thisAccountId);
+  if (fanslyOnly) return { pages: fansly, total_net: r2(fansly.reduce((n, p) => n + (p.spent_net || 0), 0)), fansly_pages: fansly.length };
   const { data: links } = await supabaseAdmin.from('fan_links').select('id, platform, ref_id, ref_name').eq('organisation_id', orgId).eq('fansly_fan_id', fanId);
   const linked = (links || []).map(l => ({ ...l, match: 'linked' }));
   // the same username elsewhere: a suggestion, unless already linked

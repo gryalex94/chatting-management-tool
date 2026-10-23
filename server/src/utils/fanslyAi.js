@@ -94,12 +94,13 @@ async function fanRow(accountId, fanId) {
  */
 async function memory(accountId, fanId) {
   const [{ data: notes }, { data: pnotes }, { data: sum }] = await Promise.all([
-    supabaseAdmin.from('fansly_notes').select('text, created_at').eq('account_id', accountId).eq('fan_account_id', fanId).order('created_at').limit(60),
+    supabaseAdmin.from('fansly_fan_notes').select('text, updated_at').eq('account_id', accountId).eq('fan_account_id', fanId).limit(1),
     supabaseAdmin.from('fansly_platform_notes').select('title, note, created_at_fansly').eq('account_id', accountId).eq('fan_account_id', fanId).limit(10),
     supabaseAdmin.from('fansly_fan_summaries').select('summary, built_at').eq('account_id', accountId).eq('fan_account_id', fanId).maybeSingle(),
   ]);
   const facts = [];
-  for (const n of notes || []) if (clean(n.text)) facts.push({ kind: 'about', text: clean(n.text).slice(0, 300), said_at: n.created_at });
+  // the fan's note, one fact per line
+  for (const n of notes || []) for (const line of String(n.text || '').split('\n')) if (clean(line)) facts.push({ kind: 'about', text: clean(line).replace(/^[-•*]\s*/, '').slice(0, 300), said_at: n.updated_at });
   for (const n of pnotes || []) { const t = [clean(n.title), clean(n.note)].filter(Boolean).join(': '); if (t) facts.push({ kind: 'about', text: t.slice(0, 300), said_at: n.created_at_fansly }); }
   const s = sum?.summary || {};
   for (const t of s.facts || []) if (clean(t)) facts.push({ kind: 'about', text: clean(t), said_at: sum.built_at });

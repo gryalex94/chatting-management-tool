@@ -34,6 +34,7 @@
     summary: null, summaryBusy: false, summaryError: '', summaryAskedAt: 0,
     scripts: null, scriptsFor: null, openStages: new Set(['opener', 'ppv_pitch']), scriptFilter: '',
     noteDraft: '', editing: null, editDraft: '', toast: '',
+    note: { fan: null, text: '', dirty: false, saving: false, savedAt: null, by: null, error: '' },   // the fan's one note, saved as you type
     suggest: null, suggestBusy: false, suggestError: '',
     linkQ: '', linkResults: null, linkBusy: false,   // { draft_id, messages, goal, why, inserted, group }
     width: 420, collapsed: false, push: true, open: { suggest: true, card: true, agency: true, metrics: true, notes: true, summary: true, scripts: true },
@@ -124,7 +125,10 @@
   const date = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short', year: '2-digit' }) : '·');
   const when = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
   const ago = (iso) => { if (!iso) return '·'; const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} d ago`; };
-  const hours = (hs) => (hs && hs.length ? hs.map(x => `${String(x).padStart(2, '0')}:00`).join(', ') : '·');
+  // the hours he writes most, turned from UTC into the chatter's own computer time
+  // (today's date, so summer or winter time is right)
+  const localHours = (hs) => (hs && hs.length ? [...new Set(hs.map(x => { const d = new Date(); d.setUTCHours(x, 0, 0, 0); return d.getHours(); }))].sort((a, b) => a - b).map(x => `${String(x).padStart(2, '0')}:00`).join(', ') : '·');
+  const myZone = () => { try { return new Date().toLocaleTimeString('en-GB', { timeZoneName: 'short' }).split(' ').pop(); } catch { return 'your time'; } };
   const sinceLabel = (iso) => { if (!iso) return ''; const m = Math.floor((Date.now() - Date.parse(iso)) / 60000); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
 
   function flash(text) { st.toast = text; render(); setTimeout(() => { if (st.toast === text) { st.toast = ''; render(); } }, 3500); }
@@ -194,8 +198,15 @@
       st.data = data; st.error = '';
       st.fanId = data.found ? data.fan.fansly_account_id : null;
       // the AI summary is built only when the chatter presses the button (it costs money); the saved one is shown as it is
-      if (data.found && !st.summaryBusy) st.summary = data.summary;
+      // the AI summary stays empty until the chatter presses Generate (each press writes a new one), so data.summary isn't shown
       void fanChanged;
+      if (data.found) {
+        // his note: a new fan loads it; the same fan picks up another shift's edits only while nobody is typing here
+        const fid = data.fan.fansly_account_id, saved = data.note || {};
+        const typing = root.activeElement && root.activeElement.classList && root.activeElement.classList.contains('fan-note');
+        if (st.note.fan !== fid) st.note = { fan: fid, text: saved.text || '', dirty: false, saving: false, savedAt: saved.updated_at || null, by: saved.by || null, error: '' };
+        else if (!st.note.dirty && !st.note.saving && !typing) st.note = { ...st.note, text: saved.text || '', savedAt: saved.updated_at || null, by: saved.by || null };
+      }
     } catch (e) { if (seq === loadSeq) st.error = e.message; }
     finally { if (seq === loadSeq) { st.loading = false; render(); } }
   }
@@ -225,6 +236,8 @@
   function groupFromUrl() { const m = currentPath().match(/^\/messages\/(\d{5,25})/); return m ? m[1] : null; }
   function setGroup(g) {
     if (g === st.groupId) return;
+    flushNote();
+    st.note = { fan: null, text: '', dirty: false, saving: false, savedAt: null, by: null, error: '' };
     dropSuggestion();
     st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null; st.linkQ = ''; st.linkResults = null;
     loadFan(false);
@@ -289,35 +302,36 @@
   }
 
   // ---------- actions ----------
-  async function addNote(text) {
+  // ---------- the fan's note: one free-text field, saved a moment after the chatter stops typing ----------
+  let noteTimer = null;
+  function typeNote(text) {
+    st.note = { ...st.note, text, dirty: true, error: '' };
+    clearTimeout(noteTimer);
+    const fan = st.note.fan;
+    noteTimer = setTimeout(() => saveNote(fan), 800);
+  }
+  async function saveNote(fan) {
+    if (!fan || fan !== st.note.fan || !st.note.dirty) return;
+    const text = st.note.text;
+    st.note = { ...st.note, saving: true }; renderSoon();
+    try {
+      const r = await call('PUT', '/api/fansly/panel/note', { account: st.accountId, fan, text });
+      if (st.note.fan === fan) st.note = { ...st.note, saving: false, dirty: st.note.text !== text, savedAt: r.updated_at, by: (st.user && (st.user.name || st.user.email)) || 'you' };
+    } catch (e) { if (st.note.fan === fan) st.note = { ...st.note, saving: false, error: e.message }; }
+    renderSoon();
+  }
+  function flushNote() { if (st.note.dirty) { clearTimeout(noteTimer); saveNote(st.note.fan); } }
+  // the AI's note idea goes in as a new line of his note
+  function addNote(text) {
     const t = String(text || '').trim();
-    if (!t || !st.fanId) return;
-    try { await call('POST', '/api/fansly/panel/notes', { account: st.accountId, fan: st.fanId, text: t }); st.noteDraft = ''; flash('Note saved'); await loadFan(true); }
-    catch (e) { flash(e.message); }
-  }
-  async function saveEdit(id) {
-    try { await call('PATCH', `/api/fansly/panel/notes/${id}`, { text: st.editDraft }); st.editing = null; await loadFan(true); }
-    catch (e) { flash(e.message); }
-  }
-  async function pinNote(n) { try { await call('PATCH', `/api/fansly/panel/notes/${n.id}`, { pinned: !n.pinned }); await loadFan(true); } catch (e) { flash(e.message); } }
-  async function deleteNote(n) {
-    if (!confirm('Delete this note?')) return;
-    try { await call('DELETE', `/api/fansly/panel/notes/${n.id}`); await loadFan(true); } catch (e) { flash(e.message); }
+    if (!t || !st.note.fan) return;
+    typeNote(st.note.text ? `${st.note.text.replace(/\s+$/, '')}\n${t}` : t);
+    flushNote(); flash('Added to his note'); render();
   }
   async function useScript(s) {
     const where = await insertText(fillPlaceholders(s.text));
     flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box');
     if (where) call('POST', `/api/fansly/panel/scripts/${s.id}/use`, { account: st.accountId, fan: st.fanId }).catch(() => {});
-  }
-
-  // ---------- one fan across the agency: link him to his OnlyFans / Fanvue account ----------
-  async function linkFan(x) {
-    try { await call('POST', '/api/fansly/panel/links', { account: st.accountId, fan: st.fanId, platform: x.platform, ref_id: x.ref_id, ref_name: x.name || x.ref_name }); st.linkQ = ''; st.linkResults = null; flash('Linked: his spending there now counts here'); await loadFan(true); }
-    catch (e) { flash(e.message); }
-  }
-  async function unlinkFan(id) {
-    if (!confirm('Not the same person? Remove the link.')) return;
-    try { await call('DELETE', `/api/fansly/panel/links/${id}`); await loadFan(true); } catch (e) { flash(e.message); }
   }
 
   // ---------- suggested replies (phase 4) ----------
@@ -388,42 +402,37 @@
 
   function fanCard(d) {
     const f = d.fan;
-    const sub = f.subscription_tier_name ? `${f.subscription_tier_name}${f.subscribed_until ? ` until ${date(f.subscribed_until)}` : ''}` : (f.subscribed_until ? `subscribed until ${date(f.subscribed_until)}` : 'not subscribed');
+    // his subscription tier as Fansly's own coloured chip, and until when
+    const t = f.tier;
+    const chip = t ? h('span', { class: 'pill', style: `margin:0 6px 0 0;${t.color ? `color:${t.color};border-color:${t.color};background:${t.color}22` : ''}` }, t.name) : null;
+    const ended = f.subscribed_until && Date.parse(f.subscribed_until) < Date.now();
+    const sub = t ? h('span', null, chip, f.subscribed_until ? `${ended ? 'ended' : 'until'} ${date(f.subscribed_until)}` : '') : (f.subscribed_until ? `Subscription ${ended ? 'ended' : 'until'} ${date(f.subscribed_until)}` : 'Not subscribed');
     return section('card', 'Fan', [
       h('div', { class: 'name' }, f.nickname || f.display_name || f.username || `#${String(f.fansly_account_id).slice(-6)}`),
       h('div', { class: 'muted' }, [f.username && `@${f.username}`, f.nickname && f.display_name && f.display_name !== f.nickname ? f.display_name : null].filter(Boolean).join(' · ')),
       h('div', { class: 'small', style: 'margin-top:4px' }, sub),
-      h('div', { class: 'small muted' }, `Joined Fansly ${date(f.joined_fansly_at)} · last seen ${ago(f.last_seen_at)}${f.follows_you ? ' · follows you' : ''}`),
+      h('div', { class: 'small muted' }, [`Fansly account since ${date(f.joined_fansly_at)}`, f.last_seen_at ? `last online ${ago(f.last_seen_at)}` : null, f.follows_you ? 'follows you' : null].filter(Boolean).join(' · ')),
       f.lists && f.lists.length ? h('div', { style: 'margin-top:4px' }, f.lists.map(l => h('span', { class: 'pill', style: 'margin:0 4px 0 0' }, l))) : null,
     ]);
   }
 
-  const PLATFORM = { fansly: 'Fansly', onlyfans: 'OnlyFans', fanvue: 'Fanvue' };
+  // his spending on every Fansly page of the agency (other platforms can't be matched surely yet)
   function agency(d) {
     const a = d.agency;
     if (!a) return null;
-    const groups = a.platforms_detail || [];
-    const pageCount = groups.reduce((n, g) => n + g.pages.length, 0);
-    const pageLine = (p) => h('div', { style: 'padding:3px 0 3px 10px;border-left:2px solid #2c2c33;margin:3px 0' },
-      h('div', { class: 'row' }, h('span', null, p.page), p.this_page ? h('span', { class: 'small muted' }, 'this chat') : null, h('span', { style: 'margin-left:auto' }, money(p.spent_net))),
+    const pages = (a.pages || []).filter(p => p.page);
+    const line = (p) => h('div', { class: 'note' },
+      h('div', { class: 'row' }, h('b', null, p.page), p.this_page ? h('span', { class: 'small muted' }, 'this chat') : null, h('span', { style: 'margin-left:auto;font-weight:600' }, money(p.spent_net))),
       h('div', { class: 'small muted' }, [
         `${p.purchases} purchase${p.purchases === 1 ? '' : 's'}`,
         p.last_purchase_at ? `last ${date(p.last_purchase_at)}` : null,
-        p.platform === 'fansly' ? (p.tier ? `${p.tier}${p.subscribed_until ? ` until ${date(p.subscribed_until)}` : ''}` : (p.subscribed_until ? `subscribed until ${date(p.subscribed_until)}` : null)) : null,
-        p.platform === 'fansly' && p.last_message_at && !p.this_page ? `chatted ${ago(p.last_message_at)}` : null,
+        p.tier ? `${p.tier}${p.subscribed_until ? ` until ${date(p.subscribed_until)}` : ''}` : (p.subscribed_until ? `subscribed until ${date(p.subscribed_until)}` : null),
+        p.last_message_at && !p.this_page ? `chatted ${ago(p.last_message_at)}` : null,
       ].filter(Boolean).join(' · ')));
-    const content = [
-      h('div', { class: 'row' }, h('span', { class: 'name', style: 'font-size:14px' }, money(a.total_net)), h('span', { class: 'muted small' }, `with the agency, ${pageCount} page${pageCount === 1 ? '' : 's'}`)),
-      ...groups.map(g => h('div', { class: 'note' },
-        h('div', { class: 'row' },
-          h('span', { class: 'pill', style: 'margin:0' }, PLATFORM[g.platform] || g.platform),
-          g.account ? h('span', { class: 'small' }, `@${g.account.name || g.account.ref_id}`) : null,
-          h('b', { style: 'margin-left:auto' }, money(g.spent_net))),
-        g.account && g.account.match === 'username' ? h('div', { class: 'small', style: 'color:#fcd34d' }, 'Same username: probably him. ', h('button', { class: 'link', onclick: () => linkFan({ platform: g.platform, ref_id: g.account.ref_id, name: g.account.name }) }, 'yes, link')) : null,
-        g.account && g.account.match === 'linked' && g.account.link_id ? h('div', { class: 'small muted' }, 'Linked by hand. ', h('button', { class: 'link', onclick: () => unlinkFan(g.account.link_id) }, 'not him')) : null,
-        g.pages.length ? g.pages.map(pageLine) : h('div', { class: 'small muted' }, 'No purchases there yet.'))),
-    ];
-    return section('agency', 'Across the agency', content, groups.length > 1 ? h('span', { class: 'pill' }, `${groups.length} platforms`) : null);
+    return section('agency', 'Across the agency', [
+      h('div', { class: 'row' }, h('span', { class: 'name', style: 'font-size:14px' }, money(a.total_net)), h('span', { class: 'muted small' }, pages.length > 1 ? `on ${pages.length} of our pages` : 'only on this page so far')),
+      ...pages.map(line),
+    ], pages.length > 1 ? h('span', { class: 'pill' }, String(pages.length)) : null);
   }
 
   function metrics(d) {
@@ -438,48 +447,35 @@
         stat('Avg price', money(m.avg_price)),
         stat('Since last buy', m.days_since_purchase == null ? '·' : `${m.days_since_purchase} d`),
         stat('Replies in', dur(m.reply_s)),
-        stat('Writes at', hours(m.online_hours)),
+        stat(`Writes at (${myZone()})`, localHours(m.online_hours_utc)),
         stat('Messages', String(m.messages_recorded))),
       m.last_purchase ? h('div', { class: 'small muted', style: 'margin-top:6px' }, `Last purchase: ${m.last_purchase.what} ${money(m.last_purchase.net)} on ${date(m.last_purchase.at)}`) : h('div', { class: 'small muted', style: 'margin-top:6px' }, 'No purchase recorded yet (open Earnings to read the ledger).'),
     ]);
   }
 
   function notes(d) {
-    const list = d.notes || [];
-    const add = h('textarea', { placeholder: 'Add a note for every shift (stays in our tool, never on Fansly)', value: st.noteDraft, oninput: (e) => { st.noteDraft = e.target.value; } });
+    const n = st.note;
+    const status = n.error ? h('span', { class: 'err' }, `Not saved: ${n.error}`) : n.saving ? 'Saving…' : n.dirty ? 'Typing…' : n.savedAt ? `Saved${n.by ? ` by ${n.by}` : ''} · ${when(n.savedAt)}` : 'Every shift sees this. It stays in our tool, never on Fansly.';
     const theirs = (d.fansly_notes || []).map(n => h('div', { class: 'note' }, h('div', { class: 'txt' }, [n.title, n.note].filter(Boolean).join(': ')), h('div', { class: 'small muted' }, `Fansly's own note · ${date(n.at)}`)));
     return section('notes', 'Notes', [
       theirs.length ? h('div', { style: 'margin-bottom:6px' }, theirs) : null,
-      h('div', null, list.length ? list.map(n => st.editing === n.id
-        ? h('div', { class: 'note' },
-          h('textarea', { placeholder: 'Edit the note', value: st.editDraft, oninput: (e) => { st.editDraft = e.target.value; } }),
-          h('div', { class: 'row', style: 'margin-top:4px' }, h('button', { class: 'primary', onclick: () => saveEdit(n.id) }, 'Save'), h('button', { onclick: () => { st.editing = null; render(); } }, 'Cancel')))
-        : h('div', { class: 'note' },
-          h('div', { class: 'txt' }, n.pinned ? h('span', { class: 'pin' }, '★ ') : null, n.text),
-          h('div', { class: 'row small muted' }, `${n.author} · ${when(n.created_at)}`,
-            n.can_edit ? h('span', { style: 'margin-left:auto' },
-              h('button', { class: 'link', onclick: () => pinNote(n) }, n.pinned ? 'unpin' : 'pin'),
-              h('button', { class: 'link', onclick: () => { st.editing = n.id; st.editDraft = n.text; render(); } }, 'edit'),
-              h('button', { class: 'link', onclick: () => deleteNote(n) }, 'delete')) : null)))
-        : h('div', { class: 'muted small' }, 'No notes on him yet.')),
-      add,
-      h('div', { class: 'row', style: 'margin-top:4px' }, h('button', { class: 'primary', onclick: () => addNote(st.noteDraft) }, 'Add note')),
-    ], list.length ? h('span', { class: 'pill' }, String(list.length)) : null);
+      h('textarea', { class: 'fan-note', placeholder: 'Write anything about him…', value: n.text, style: 'min-height:140px', oninput: (e) => typeNote(e.target.value), onblur: flushNote }),
+      h('div', { class: 'small muted', style: 'margin-top:3px' }, status),
+    ]);
   }
 
   function summary() {
     const s = st.summary;
     const list = (label, xs) => (xs && xs.length ? [h('div', { class: 'lbl' }, label), h('ul', null, xs.map(x => h('li', null, x)))] : []);
     const content = [];
-    if (st.summaryBusy) content.push(h('div', { class: 'muted small' }, s ? 'Updating…' : 'Reading his chat…'));
+    if (st.summaryBusy) content.push(h('div', { class: 'muted small' }, 'Reading his chat… (a few seconds)'));
     if (s) {
       content.push(...list('Likes', s.likes), ...list('Bought', s.bought), ...list('Said no to', s.refused), ...list('Open promises', s.promises), ...list('About him', s.facts));
       if (s.next_step) content.push(h('div', { class: 'lbl' }, 'Next step'), h('div', null, s.next_step));
       if (s.suggested_note) content.push(h('div', { class: 'warn info', style: 'margin-top:8px' }, 'Note idea: ', s.suggested_note, ' ', h('button', { class: 'link', onclick: () => addNote(s.suggested_note) }, 'save as note')));
-      if (s.stale && !st.summaryBusy) content.push(h('div', { class: 'warn info', style: 'margin-top:8px' }, 'His chat has moved on since this summary. ', h('button', { class: 'link', onclick: () => loadSummary(true) }, 'update it')));
-      content.push(h('div', { class: 'row small muted', style: 'margin-top:6px' }, `From ${s.messages_used || '?'} messages · ${ago(s.built_at)}`, h('button', { class: 'link', style: 'margin-left:auto', disabled: st.summaryBusy, onclick: () => loadSummary(true) }, 'update')));
+      content.push(h('div', { class: 'row small muted', style: 'margin-top:6px' }, `From his last ${s.messages_used || '?'} messages · just written`, h('button', { style: 'margin-left:auto', disabled: st.summaryBusy, onclick: () => loadSummary(true) }, 'Regenerate')));
     } else if (!st.summaryBusy) {
-      content.push(h('div', { class: 'muted small' }, st.summaryError || 'No summary yet. It reads his whole chat and costs about a tenth of a cent.'), h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Summarise him'));
+      content.push(h('div', { class: 'muted small' }, st.summaryError || 'Reads his chat and purchases and writes what to know about him. About a tenth of a cent each time.'), h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => loadSummary(true) }, 'Generate'));
     }
     if (s && st.summaryError) content.push(h('div', { class: 'err small' }, st.summaryError));
     return section('summary', 'AI summary', content);
