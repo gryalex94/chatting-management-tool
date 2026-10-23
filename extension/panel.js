@@ -287,9 +287,10 @@
       call('POST', `/api/fansly/panel/drafts/${sug.draft_id}/sent`, { text: (data && data.content) || '' }).catch(() => {});
       render();
     }
-    if ((kind === 'ws_message' || kind === 'sent') && g && String(g) === st.groupId) {
+    // a new message, or older ones loading as the chatter scrolls up: reload the panel once they're saved
+    if ((kind === 'ws_message' || kind === 'sent' || kind === 'messages') && g && String(g) === st.groupId) {
       // our server has it a few seconds later (the worker batches every 4 s)
-      clearTimeout(bumpTimer); bumpTimer = setTimeout(() => loadFan(true), 7000);
+      clearTimeout(bumpTimer); bumpTimer = setTimeout(() => loadFan(true), kind === 'messages' ? 6000 : 7000);
     }
   }
 
