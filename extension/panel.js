@@ -228,7 +228,19 @@
     } catch (e) { if (seq === loadSeq) st.error = e.message; }
     finally { if (seq === loadSeq) { st.loading = false; render(); } }
     if (st.data && st.data.found) loadTranslations();
+    if (!st.myShift || st.myShift.account !== st.accountId) loadMyShift();
   }
+  // ---------- this shift so far (the chatter's own numbers; a manager: the page's) ----------
+  let shiftBusy = false;
+  async function loadMyShift() {
+    if (!st.signedIn || !st.accountId || shiftBusy) return;
+    shiftBusy = true;
+    const account = st.accountId;
+    try { st.myShift = { ...(await call('GET', `/api/fansly/panel/my-shift?${new URLSearchParams({ account })}`)), account }; }
+    catch { /* the strip just keeps the last numbers */ }
+    finally { shiftBusy = false; render(); }
+  }
+  setInterval(() => { if (document.visibilityState !== 'hidden') loadMyShift(); }, 60_000);
   // ---------- the translator: his messages in English, a reply in his language ----------
   async function loadTranslations() {
     const fan = st.fanId;
@@ -484,11 +496,29 @@
     return h('div', { class: 'shift' },
       h('div', { class: 'row' }, h('span', null, 'Signed in: ', h('b', null, who)), h('span', { class: 'muted', style: 'margin-left:auto' }, sh.since ? `on ${sinceLabel(sh.since)}` : '')),
       sh.shift ? h('div', { class: 'muted small' }, `Shift ${String(sh.shift.start).slice(0, 5)}–${String(sh.shift.end).slice(0, 5)}`) : null,
+      myShiftLine(),
       ...((d.warnings || []).map(w => h('div', { class: `warn ${w.level}` }, w.text))),
       // his chat isn't fully recorded yet: the chatter scrolls up to its first message once
       d.found && d.history && !d.history.complete ? h('div', { class: 'warn mid' },
         h('b', null, 'Chat not fully recorded. '),
         `${d.history.recorded} message${d.history.recorded === 1 ? '' : 's'} so far${d.history.oldest_at ? `, back to ${date(d.history.oldest_at)}` : ''}. Scroll up in the chat to his very first message once; until then his numbers and the AI see only this part.`) : null);
+  }
+
+  // "This shift: $184 · 9 PPVs sent, 4 bought · reply 2 min"; opened: by type and who bought
+  function myShiftLine() {
+    const m = st.myShift;
+    if (!m || !m.found) return null;
+    const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
+    const wait = (x) => (x == null ? '·' : x < 60 ? `${Math.round(x)} s` : `${Math.round(x / 60)} min`);
+    const open = !!st.open.myshift;
+    const line = h('div', { class: 'row small', style: 'cursor:pointer;gap:6px', title: 'This shift so far. Click for more.', onclick: () => { st.open.myshift = !open; save(); render(); } },
+      h('b', null, m.team ? 'Page this shift:' : 'My shift:'), h('b', null, usd(m.sales)),
+      h('span', { class: 'muted' }, `· ${m.ppv_sent} PPV${m.ppv_sent === 1 ? '' : 's'} sent, ${m.ppv_bought} bought · reply ${wait(m.reply_s)}`),
+      h('span', { class: 'muted', style: 'margin-left:auto' }, open ? '–' : '+'));
+    if (!open) return line;
+    return h('div', null, line,
+      h('div', { class: 'muted small' }, `Since ${new Date(m.since).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}${m.shift ? ` (shift ${m.shift})` : ''} · PPVs ${usd(m.ppv)} · tips ${usd(m.tips)} · ${m.messages} messages to ${m.fans} fan${m.fans === 1 ? '' : 's'}`),
+      m.buyers && m.buyers.length ? h('div', { class: 'small' }, 'Bought this shift: ', m.buyers.map(b => `${b.name || b.fan} ${usd(b.amount)}`).join(' · ')) : h('div', { class: 'muted small' }, 'No sales yet this shift.'));
   }
 
   function suggestion(d) {

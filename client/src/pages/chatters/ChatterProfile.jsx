@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BarChart3, Bookmark, BookmarkCheck,
-  Brain, Calendar, Check, ChevronDown, ChevronRight, Clock, Flag, Plus, RotateCcw, Star,
+  Brain, Calendar, Check, ChevronDown, ChevronRight, Clock, Eye, Flag, Plus, RotateCcw, Star,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -1072,6 +1072,9 @@ export default function ChatterProfile() {
                   ))}
                 </DropdownMenuContent>
               </DropdownMenu>
+              <Button variant='outline' size='sm' className='h-7 gap-1.5 text-xs' onClick={() => navigate(`/me?chatter=${id}`)} title='The My stats page as this chatter sees it'>
+                <Eye className='size-3.5' />See it as {chatter.name.split(' ')[0]} does
+              </Button>
             </div>
             <div className='mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground'>
               {creatorNames.map(n => <Badge key={n} variant='secondary' className='font-normal'>{n}</Badge>)}

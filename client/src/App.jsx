@@ -20,6 +20,7 @@ import PlaybookPage from './pages/playbook/PlaybookPage';
 import SettingsPage from './pages/settings/SettingsPage';
 import FanvueCallback from './pages/fanvue/FanvueCallback';
 import ChatterProfile from './pages/chatters/ChatterProfile';
+import MyStatsPage from './pages/me/MyStatsPage';
 
 function ProtectedRoute({ children }) {
   const { user, loading, unreachable, retryProfile } = useAuth();
@@ -40,8 +41,8 @@ function ProtectedRoute({ children }) {
     </div>
   );
   if (!user) return <Navigate to="/login" replace />;
-  // Chatters work from the Playbook; the management pages aren't for them
-  if (user.role === 'chatter' && !pathname.startsWith('/playbook')) return <Navigate to="/playbook" replace />;
+  // Chatters work from their own numbers (My stats) and the Playbook; the management pages aren't for them
+  if (user.role === 'chatter' && !pathname.startsWith('/playbook') && !pathname.startsWith('/me')) return <Navigate to="/me" replace />;
   return children;
 }
 
@@ -69,6 +70,7 @@ function AppRoutes() {
         <Route path="payroll" element={<PayrollPage />} />
         <Route path="ai-chat" element={<AiChatPage />} />
         <Route path="playbook" element={<PlaybookPage />} />
+        <Route path="me" element={<MyStatsPage />} />
         <Route path="creators" element={<CreatorsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />

@@ -380,6 +380,74 @@ panel.get('/translate', async (req, res) => {
   } catch (e) { fail(res, e, 'translate his messages'); }
 });
 
+// GET /api/fansly/panel/my-shift?account= → this shift so far on this page: the chatter's own numbers
+// (a manager: everyone's on the page). The shift: the one on now (its start), else since this sign-in.
+const STAFF = new Set(['va', 'manager', 'head_manager', 'admin', 'owner']);
+panel.get('/my-shift', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.query.account);
+    if (!account) return;
+    const staff = STAFF.has(req.user.role);
+    const chatterId = staff ? null : await F.chatterFor(req.user).catch(() => null);
+    if (!staff && !chatterId) return res.json({ found: false });
+    // when this shift began
+    const now = new Date();
+    const shifts = await F.shiftsFor(req.user.organisationId).catch(() => []);
+    const sh = F.shiftAt(shifts, account.creator_id, now.toISOString());
+    let start = null, label = null;
+    if (sh) {
+      const mins = (iso, tz) => { const p = new Intl.DateTimeFormat('en-GB', { timeZone: tz || 'Europe/Amsterdam', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(iso)); return Number(p.find(x => x.type === 'hour').value) * 60 + Number(p.find(x => x.type === 'minute').value); };
+      const a = String(sh.start_time).split(':').map(Number);
+      const elapsed = (mins(now.toISOString(), sh.timezone) - (a[0] * 60 + a[1]) + 1440) % 1440;
+      start = new Date(Math.floor(now.getTime() / 60000) * 60000 - elapsed * 60000);
+      label = `${String(sh.start_time).slice(0, 5)}–${String(sh.end_time).slice(0, 5)}`;
+    } else {
+      const { data: pres } = await supabaseAdmin.from('fansly_presence').select('started_at').eq('user_id', req.user.id).is('ended_at', null).order('started_at', { ascending: false }).limit(1);
+      start = pres?.[0]?.started_at ? new Date(pres[0].started_at) : new Date(now.getTime() - 8 * 3600_000);
+    }
+    const since = start.toISOString();
+    const mq = supabaseAdmin.from('fansly_messages').select('fan_account_id, group_id, from_fan, type, price, sold_at, sold_net, sent_at, chatter_id')
+      .eq('account_id', account.id).gte('sent_at', new Date(start.getTime() - 3 * 3600_000).toISOString()).order('sent_at').limit(5000);
+    const { data: msgs, error } = await mq;
+    if (error) throw error;
+    const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('category, net, gross, fan_account_id, credited_chatter_id, credited_chatter_ids, created_at_fansly')
+      .eq('account_id', account.id).gte('created_at_fansly', since).limit(2000);
+    const mine = (id) => (staff ? true : id === chatterId);
+    const out = { messages: 0, fans: new Set(), ppv_sent: 0, ppv_bought: 0, sales: 0, ppv: 0, tips: 0, buyers: new Map(), replies: [] };
+    const waiting = new Map();
+    for (const m of msgs || []) {
+      const g = m.group_id || m.fan_account_id;
+      if (m.from_fan) { if (!waiting.has(g)) waiting.set(g, m.sent_at); continue; }
+      const w = m.type === 2 ? null : waiting.get(g);
+      if (m.type !== 2) waiting.delete(g);
+      if (m.sent_at < since || m.type === 2 || !mine(m.chatter_id)) continue;
+      out.messages += 1;
+      if (m.fan_account_id) out.fans.add(m.fan_account_id);
+      if (Number(m.price) > 0) { out.ppv_sent += 1; if (m.sold_at) out.ppv_bought += 1; }
+      if (w) { const sec = (Date.parse(m.sent_at) - Date.parse(w)) / 1000; if (sec >= 0 && sec <= 86400) out.replies.push(sec); }
+    }
+    for (const t of tx || []) {
+      if (!['chat_ppv', 'chat_tip', 'refund'].includes(t.category)) continue;
+      const ids = Array.isArray(t.credited_chatter_ids) && t.credited_chatter_ids.length ? t.credited_chatter_ids : t.credited_chatter_id ? [t.credited_chatter_id] : [];
+      if (!ids.length || (!staff && !ids.includes(chatterId))) continue;
+      const share = (Math.abs(Number(t.net) || 0) * (t.category === 'refund' ? -1 : 1)) / (staff ? 1 : ids.length);
+      out.sales += share;
+      if (t.category === 'chat_tip') out.tips += share; else if (t.category === 'chat_ppv') out.ppv += share;
+      if (t.fan_account_id && t.category !== 'refund') out.buyers.set(t.fan_account_id, (out.buyers.get(t.fan_account_id) || 0) + share);
+    }
+    const ids = [...out.buyers.keys()];
+    const { data: fans } = ids.length ? await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, nickname, display_name').eq('account_id', account.id).in('fansly_account_id', ids) : { data: [] };
+    const nameOf = new Map((fans || []).map(f => [f.fansly_account_id, f.nickname || f.display_name || f.username]));
+    const r2 = (n) => Math.round(n * 100) / 100;
+    res.json({
+      found: true, team: staff, since, shift: label,
+      messages: out.messages, fans: out.fans.size, ppv_sent: out.ppv_sent, ppv_bought: out.ppv_bought,
+      sales: r2(out.sales), ppv: r2(out.ppv), tips: r2(out.tips), reply_s: median(out.replies),
+      buyers: ids.map(id => ({ fan: id, name: nameOf.get(id) || null, amount: r2(out.buyers.get(id)) })).sort((a, b) => b.amount - a.amount).slice(0, 10),
+    });
+  } catch (e) { fail(res, e, 'read this shift'); }
+});
+
 // GET /api/fansly/panel/vault-marks?account=&group= → the vault items this fan was sent in his chat:
 // bought (green in Fansly's vault), sent as a PPV and not bought (red), or sent free; with the price
 panel.get('/vault-marks', async (req, res) => {

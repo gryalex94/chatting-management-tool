@@ -111,6 +111,9 @@ app.use('/api/creators', protect, creatorRoutes);
 const chatterRoutes = require('./src/routes/chatters');
 app.use('/api/chatters', staffOnly, chatterRoutes);
 
+// A chatter's own numbers (My stats): every signed-in role; a chatter sees only themself
+app.use('/api/me', protect, require('./src/routes/me'));
+
 const shiftRoutes = require('./src/routes/shifts');
 app.use('/api/shifts', protect, shiftRoutes);
 

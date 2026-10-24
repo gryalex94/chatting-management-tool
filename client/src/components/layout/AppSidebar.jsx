@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet, BookOpen,
+  LayoutDashboard, ShieldCheck, ListChecks, BookCheck, CalendarClock, FileUp, Settings, Wallet, BookOpen, UserRound,
   ChevronsUpDown, LogOut, Sun, Moon, Check, Bot,
 } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -37,6 +37,7 @@ export const NAV_GROUPS = [
     items: [
       { url: '/shifts', title: 'Shifts', icon: CalendarClock },
       { url: '/payroll', title: 'Payroll', icon: Wallet, managerOnly: true },
+      { url: '/me', title: 'My stats', icon: UserRound, chattersOnly: true },
       { url: '/playbook', title: 'Playbook', icon: BookOpen, forChatters: true },
       { url: '/reports', title: 'Reports', icon: FileUp },
     ],
@@ -59,7 +60,7 @@ export function AppSidebar() {
   const isChatter = user?.role === 'chatter'
   const { platform } = usePlatform()
   // a screen made for one platform shows only while that platform is picked
-  const visible = (item) => (isChatter ? item.forChatters : (!item.managerOnly || isManager) && (!item.platform || item.platform === platform))
+  const visible = (item) => (isChatter ? item.forChatters || item.chattersOnly : !item.chattersOnly && (!item.managerOnly || isManager) && (!item.platform || item.platform === platform))
   const { pathname } = useLocation()
   const { setOpenMobile } = useSidebar()
   const orgName = user?.organisation?.name || 'Organisation'
