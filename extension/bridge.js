@@ -363,6 +363,8 @@
   }
   const picOf = (el) => {
     if (el.tagName === 'IMG') return el.currentSrc || el.src || '';
+    if (el.tagName === 'VIDEO') return el.poster || el.currentSrc || el.src || (el.querySelector('source') || {}).src || '';
+    if (el.tagName === 'CANVAS') return '';
     const m = /url\(["']?([^"')]+)/.exec(el.style.backgroundImage || ''); return m ? m[1] : '';
   };
   function mediaOfPic(src) {
@@ -398,7 +400,8 @@
     if (!root) return;
     if (!vaultStyle.isConnected) (document.head || document.documentElement).append(vaultStyle);
     loadMarks();
-    const pics = [...root.querySelectorAll('img'), ...root.querySelectorAll('[style*="background-image"]')].filter(p => p.getBoundingClientRect().width > 60);
+    // photos are pictures; a video tile plays a short preview instead (a video element, sometimes a canvas)
+    const pics = [...root.querySelectorAll('img, video, canvas'), ...root.querySelectorAll('[style*="background-image"]')].filter(p => p.getBoundingClientRect().width > 60);
     // a line in the window: what is known about him, and how many of those pictures are on screen
     let note = root.querySelector(':scope > .cmt-vm-note');
     if (!note) { note = document.createElement('div'); note.className = 'cmt-vm-note'; note.style.cssText = 'font:12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#9ca3af;padding:4px 12px'; root.prepend(note); }
@@ -410,9 +413,11 @@
       : !nb.length ? 'Chatting Manager: nothing from the vault was sent to him yet.'
         : `Chatting Manager: sent to him ${shown} · bought ${nb.filter(m => m.status === 'bought').length} · not bought ${nb.filter(m => m.status === 'not_bought').length}${pics.length ? ` · ${known} of ${pics.length} pictures here recognised` : ''}`;
     if (note.textContent !== text) note.textContent = text;
+    const done = new Set();
     for (const pic of pics) {
-      const tile = tileOf(pic, root); if (!tile) continue;
+      const tile = tileOf(pic, root); if (!tile || done.has(tile)) continue;
       const mid = mediaOfTile(tile, pic);
+      if (mid) done.add(tile);
       const m = mid && marksFor === groupNow() ? marks.get(mid) : null;
       const want = m ? m.status : '';
       if ((tile.dataset.cmtVm || '') === want + (m ? m.price : '')) continue;
