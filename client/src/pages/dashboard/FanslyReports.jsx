@@ -15,9 +15,11 @@ import { num } from '@/utils/numbers';
 
 const money = (n) => (n == null ? '·' : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const short = (n) => (Math.abs(n) >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${Math.round(n)}`);
-const when = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : '');
 const dayLabel = (d) => new Date(`${d}T12:00:00Z`).toLocaleDateString([], { day: 'numeric', month: 'short', timeZone: 'UTC' });
 const amsToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
+const pct = (n) => (n == null ? '·' : `${Number(n).toFixed(n % 1 ? 1 : 0)}%`);
+const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min ${s % 60 ? `${s % 60} s` : ''}`.trim() : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
+const ratioColor = (r) => (r == null ? 'text-muted-foreground' : r >= 5 ? 'text-emerald-600' : r >= 3 ? 'text-amber-600' : 'text-red-500');
 const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 // one colour per kind of earning, the same everywhere on the page
@@ -47,10 +49,10 @@ function rangeDays(v, custom) {
 /** The change against the days just before, as a percentage (null when there was nothing before). */
 const change = (now, before) => (before ? ((now - before) / Math.abs(before)) * 100 : null);
 
-function Delta({ now, before, className }) {
+function Delta({ now, before, className, lowerBetter }) {
   const c = change(now, before);
   if (c == null) return <span className={cn('text-xs text-muted-foreground', className)}>{now ? 'new' : '·'}</span>;
-  return <span className={cn('text-xs tabular-nums', c >= 0 ? 'text-emerald-600' : 'text-red-500', className)}>{c >= 0 ? '↑' : '↓'} {Math.abs(c).toFixed(2)}%</span>;
+  return <span className={cn('text-xs tabular-nums', (c >= 0) !== !!lowerBetter ? 'text-emerald-600' : 'text-red-500', className)}>{c >= 0 ? '↑' : '↓'} {Math.abs(c).toFixed(2)}%</span>;
 }
 
 /**
@@ -92,7 +94,7 @@ export default function FanslyReports() {
   const reset = () => { setRange('7'); setCustom({ from: '', to: '' }); setPicked([]); setGross(false); };
 
   return (
-    <div className='grid gap-4'>
+    <div className='grid grid-cols-[minmax(0,1fr)] gap-4'>
       <div className='flex flex-wrap items-center gap-2'>
         <div className='inline-flex rounded-md border p-0.5'>
           <Button size='sm' variant={view === 'overview' ? 'default' : 'ghost'} onClick={() => setView('overview')}>Overview</Button>
@@ -233,7 +235,7 @@ function Overview({ data, from, to, gross }) {
     </TableHead>
   );
   const exportCsv = () => {
-    const cols = ['page', 'subscriptions', 'tips', 'messages', 'messages_chat', 'messages_mass', 'media', 'other', 'refunds', 'total', 'engagement_ratio', 'share', 'active_subscribers', 'ppv_sent', 'ppv_sold', 'buy_rate'];
+    const cols = ['page', 'subscriptions', 'tips', 'messages', 'messages_chat', 'messages_mass', 'media', 'other', 'refunds', 'total', 'share', 'ratio', 'ltv', 'subscriptions_bought', 'unlock_rate', 'golden_ratio', 'messages_sent', 'ppv_sent', 'ppv_bought', 'reply_s', 'fans_chatted', 'active_subscribers'];
     const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
@@ -243,7 +245,7 @@ function Overview({ data, from, to, gross }) {
   const incomplete = data.ledger.filter(l => l.total && l.read < l.total);
 
   return (
-    <div className={cn('grid gap-4', data.loading && 'opacity-60')}>
+    <div className={cn('grid grid-cols-[minmax(0,1fr)] gap-4', data.loading && 'opacity-60')}>
       <section className='grid gap-2 lg:grid-cols-4'>
         <div className='rounded-lg border bg-card p-4 lg:row-span-2'>
           <p className='text-sm text-muted-foreground'>Total earnings</p>
@@ -266,12 +268,14 @@ function Overview({ data, from, to, gross }) {
         <div className='rounded-lg border bg-card p-3'>
           <p className='text-sm text-muted-foreground'>Paying fans</p>
           <p className='mt-0.5 text-xl font-semibold tabular-nums'>{num(data.paying_fans)}</p>
-          <span className='text-xs text-muted-foreground'>{num(data.new_subscribers.length)} new subscribers</span>
+          <span className='text-xs text-muted-foreground'>{num(data.metrics.subscriptions_bought)} subscriptions bought or renewed</span>
         </div>
       </section>
 
+      <ChattingMetrics data={data} />
+
       <div className='grid gap-4 lg:grid-cols-3'>
-        <div className='lg:col-span-2'><EarningsChart data={data} from={from} to={to} /></div>
+        <div className='min-w-0 lg:col-span-2'><EarningsChart data={data} from={from} to={to} /></div>
         <Breakdown totals={t} />
       </div>
 
@@ -284,8 +288,9 @@ function Overview({ data, from, to, gross }) {
           <TableHeader><TableRow>
             {head('page', 'Creator')}
             {head('subscriptions', 'Subscriptions', 'text-right')}{head('tips', 'Tips', 'text-right')}{head('messages', 'Messages', 'text-right')}
-            {head('media', 'Posts and media', 'text-right')}{head('engagement_ratio', 'Engagement ratio', 'text-right')}{head('total', 'Total earnings', 'text-right')}
-            {head('share', 'Contribution', 'text-right')}{head('active_subscribers', 'Active subscribers', 'text-right')}{head('buy_rate', 'PPV buy rate', 'text-right')}
+            {head('media', 'Posts and media', 'text-right')}{head('total', 'Total earnings', 'text-right')}{head('share', 'Contribution', 'text-right')}
+            {head('ratio', 'Ratio', 'text-right')}{head('ltv', 'LTV', 'text-right')}{head('unlock_rate', 'Unlock', 'text-right')}{head('golden_ratio', 'Golden', 'text-right')}
+            {head('messages_sent', 'Messages sent', 'text-right')}{head('reply_s', 'Reply time', 'text-right')}{head('active_subscribers', 'Active subscribers', 'text-right')}
           </TableRow></TableHeader>
           <TableBody>
             {rows.map(r => (
@@ -294,11 +299,15 @@ function Overview({ data, from, to, gross }) {
                 {['subscriptions', 'tips', 'messages', 'media'].map(k => (
                   <TableCell key={k} className='whitespace-nowrap text-right tabular-nums'>{money(r[k])} <Delta now={r[k]} before={r.prev[k]} className='ml-1' /></TableCell>
                 ))}
-                <TableCell className='whitespace-nowrap text-right tabular-nums'>{r.engagement_ratio == null ? '·' : `${r.engagement_ratio.toFixed(2)}%`}</TableCell>
                 <TableCell className='whitespace-nowrap text-right font-medium tabular-nums'>{money(r.total)} <Delta now={r.total} before={r.prev.total} className='ml-1 font-normal' /></TableCell>
                 <TableCell className='text-right tabular-nums'>{r.share == null ? '·' : `${r.share.toFixed(2)}%`}</TableCell>
+                <TableCell className={cn('text-right font-medium tabular-nums', ratioColor(r.ratio))}>{r.ratio == null ? '·' : r.ratio.toFixed(2)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{money(r.ltv)}</TableCell>
+                <TableCell className='text-right tabular-nums' title={`${r.ppv_bought} of ${r.ppv_sent} chat PPVs bought`}>{pct(r.unlock_rate)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{pct(r.golden_ratio)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{num(r.messages_sent)}</TableCell>
+                <TableCell className='whitespace-nowrap text-right tabular-nums'>{secs(r.reply_s)}</TableCell>
                 <TableCell className='text-right tabular-nums'>{num(r.active_subscribers)}</TableCell>
-                <TableCell className='whitespace-nowrap text-right tabular-nums' title={`${r.ppv_sold} of ${r.ppv_sent} PPVs sent through the extension were bought`}>{r.buy_rate == null ? '·' : `${r.buy_rate}%`}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -306,7 +315,7 @@ function Overview({ data, from, to, gross }) {
       </section>
 
       <div className='grid gap-1 text-xs text-muted-foreground'>
-        <p>Changes compare with the same number of days just before. Engagement ratio: messages and tips for every dollar of subscriptions. Active subscribers: as of the last time the Subscribers list was read. PPV buy rate: only PPVs sent through the extension.</p>
+        <p>Changes compare with the same number of days just before. Ratio: messages and tips for every dollar of subscriptions (target 5). LTV: earnings for every subscription bought or renewed. Unlock: chat PPVs bought out of those sent. Golden: chat PPVs out of all chat messages sent. Reply time: typical wait from a fan&apos;s message to the reply. Chatting numbers count the chats the extension recorded; mass messages are left out. Active subscribers: as of the last time the Subscribers list was read.</p>
         <p>Fansly does not say whether media was bought in a chat or on a post. Messages counts media bought from a chat message the extension has seen; the rest is under Posts and other media, and moves to Messages as more chats are opened with the extension on.</p>
         {incomplete.map(l => <p key={l.account_id} className='text-amber-600'>{l.page}: {num(l.read)} of {num(l.total)} sales read so far. Press Earnings, everything on the Pages tab to read the rest.</p>)}
       </div>
@@ -320,7 +329,7 @@ function Performance({ data, pages, one, setOne, from, to }) {
   const t = data.totals, p = data.prev_totals;
   const list = pages.filter(x => x.page.toLowerCase().includes(q.trim().toLowerCase()));
   return (
-    <div className='grid gap-4 lg:grid-cols-[220px_1fr]'>
+    <div className='grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]'>
       <aside className='grid content-start gap-1'>
         <div className='relative mb-1'>
           <Search className='absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
@@ -354,63 +363,74 @@ function Performance({ data, pages, one, setOne, from, to }) {
           ))}
         </section>
 
-        <Heatmap data={data} from={from} to={to} only={only} />
-
-        <div className='grid gap-4 xl:grid-cols-3'>
-          <FanList title='Top fans' empty='No purchases in these days.' rows={data.top_fans} right={f => <>{money(f.total)} <span className='text-muted-foreground'>· {f.purchases}</span></>} />
-          <FanList title={`New subscribers (${data.new_subscribers.length})`} empty='No new subscribers in these days.' rows={data.new_subscribers} right={f => <span className='text-muted-foreground'>{when(f.at)}</span>} />
-          <FanList title={`Subscriptions ended (${data.ended_subscriptions.length})`} empty='No subscriptions ended in these days.' rows={data.ended_subscriptions} right={f => <span className='text-muted-foreground'>{when(f.at)}</span>} />
-        </div>
+        <ChattingMetrics data={data} />
+        <ChatterTable rows={data.chatters} />
       </div>
     </div>
   );
 }
 
-/** When sales come in: a square per day and hour, darker for more money. */
-function Heatmap({ data, from, to, only }) {
-  const days = [];
-  for (let d = from; d <= to && days.length < 62; d = addDays(d, 1)) days.push(d);
-  const val = new Map();
-  for (const h of data.by_hour) val.set(`${h.day}|${h.hour}`, only ? h[only] || 0 : TYPES.reduce((s, x) => s + (h[x.k] || 0), 0));
-  const max = Math.max(0, ...val.values());
+/** The OnlyFans dashboard's own numbers: ratio, LTV, unlock, golden, reply time, and the chatting behind them. */
+function ChattingMetrics({ data }) {
+  const m = data.metrics, c = data.chatting, pm = m.prev, pc = c.prev;
+  const tiles = [
+    { label: 'Ratio', value: m.ratio == null ? '·' : m.ratio.toFixed(2), now: m.ratio, before: pm.ratio, cls: ratioColor(m.ratio), hint: '(messages + tips) ÷ subscriptions · target 5' },
+    { label: 'LTV', value: money(m.ltv), now: m.ltv, before: pm.ltv, hint: `earnings ÷ ${num(m.subscriptions_bought)} subscriptions bought` },
+    { label: 'Unlock rate', value: pct(c.unlock_rate), now: c.unlock_rate, before: pc.unlock_rate, hint: `${num(c.ppv_bought)} of ${num(c.ppv_sent)} chat PPVs bought` },
+    { label: 'Golden ratio', value: pct(c.golden_ratio), now: c.golden_ratio, before: pc.golden_ratio, hint: 'chat PPVs ÷ chat messages' },
+    { label: 'Messages sent', value: num(c.messages), now: c.messages, before: pc.messages, hint: `${num(c.mass)} mass messages besides` },
+    { label: 'Fans chatted', value: num(c.fans), now: c.fans, before: pc.fans, hint: `${num(c.buyers)} bought a PPV` },
+    { label: 'PPV sales', value: money(c.ppv_sales), now: c.ppv_sales, before: pc.ppv_sales, hint: 'chat PPVs bought' },
+    { label: 'Reply time', value: secs(c.reply_s), now: c.reply_s, before: pc.reply_s, lower: true, hint: `typical, over ${num(c.replies)} replies` },
+    { label: 'Per day', value: money(m.per_day), now: m.per_day, before: pm.per_day, hint: 'average earnings' },
+  ];
   return (
     <section className='rounded-lg border bg-card p-4'>
-      <h3 className='mb-2 text-sm font-medium'>Earnings heatmap</h3>
-      <div className='overflow-x-auto'>
-        <table className='border-separate border-spacing-0.5 text-[10px] text-muted-foreground'>
-          <thead><tr><th />{Array.from({ length: 24 }, (_, h) => <th key={h} className='w-5 font-normal'>{h % 3 === 0 ? h : ''}</th>)}</tr></thead>
-          <tbody>
-            {days.map(d => (
-              <tr key={d}>
-                <td className='whitespace-nowrap pr-2'>{dayLabel(d)}</td>
-                {Array.from({ length: 24 }, (_, h) => {
-                  const v = val.get(`${d}|${h}`) || 0;
-                  return <td key={h} title={v ? `${dayLabel(d)} ${h}:00 · ${money(v)}` : undefined} className='h-4 w-5 rounded-sm'
-                    style={{ background: v && max ? `rgba(127,119,221,${0.2 + 0.8 * (v / max)})` : 'var(--muted)' }} />;
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <h3 className='mb-3 text-sm font-medium'>Chatting metrics</h3>
+      <div className='grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-x-4 gap-y-3'>
+        {tiles.map(t => (
+          <div key={t.label} title={t.hint}>
+            <p className='text-xs text-muted-foreground'>{t.label}</p>
+            <p className={cn('text-lg font-semibold tabular-nums', t.cls)}>{t.value}</p>
+            <Delta now={t.now || 0} before={t.before} lowerBetter={t.lower} />
+            <p className='truncate text-[11px] text-muted-foreground'>{t.hint}</p>
+          </div>
+        ))}
       </div>
-      {days.length >= 62 && <p className='mt-1 text-xs text-muted-foreground'>Showing the first 62 days of the range.</p>}
     </section>
   );
 }
 
-function FanList({ title, rows, right, empty }) {
+/** One row per chatter on this page, like the chatter table on the OnlyFans dashboard. */
+function ChatterTable({ rows }) {
   return (
     <section className='rounded-lg border bg-card'>
-      <h3 className='border-b px-4 py-2 text-sm font-medium'>{title}</h3>
-      {!rows.length ? <p className='px-4 py-6 text-center text-xs text-muted-foreground'>{empty}</p> : (
-        <div className='max-h-80 overflow-y-auto'>
-          {rows.map((f, i) => (
-            <div key={`${f.fan_account_id}:${i}`} className='flex items-center justify-between gap-2 border-b px-4 py-1.5 text-sm last:border-0'>
-              <span className='truncate'>{f.name}</span><span className='whitespace-nowrap text-xs tabular-nums'>{right(f)}</span>
-            </div>
-          ))}
-        </div>
+      <h3 className='border-b px-4 py-2 text-sm font-medium'>By chatter</h3>
+      {!rows.length ? <p className='px-4 py-6 text-center text-xs text-muted-foreground'>No chats recorded in these days.</p> : (
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead>Chatter</TableHead><TableHead className='text-right'>Credited sales</TableHead><TableHead className='text-right'>PPV sales</TableHead>
+            <TableHead className='text-right'>PPVs</TableHead><TableHead className='text-right'>Unlock</TableHead><TableHead className='text-right'>Golden</TableHead>
+            <TableHead className='text-right'>Messages</TableHead><TableHead className='text-right'>Fans</TableHead><TableHead className='text-right'>Reply time</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {rows.map(r => (
+              <TableRow key={r.chatter_id || 'none'}>
+                <TableCell className={cn('whitespace-nowrap', !r.chatter_id && 'text-muted-foreground')}>{r.name}</TableCell>
+                <TableCell className='whitespace-nowrap text-right tabular-nums'>{r.chatter_id ? <>{money(r.sales)} <Delta now={r.sales} before={r.prev?.sales} className='ml-1' /></> : '·'}</TableCell>
+                <TableCell className='text-right tabular-nums'>{money(r.ppv_sales)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{num(r.ppv_bought)} / {num(r.ppv_sent)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{pct(r.unlock_rate)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{pct(r.golden_ratio)}</TableCell>
+                <TableCell className='text-right tabular-nums'>{num(r.messages)}{r.mass ? <span className='text-muted-foreground'> + {num(r.mass)} mass</span> : null}</TableCell>
+                <TableCell className='text-right tabular-nums'>{num(r.fans)}</TableCell>
+                <TableCell className='whitespace-nowrap text-right tabular-nums'>{secs(r.reply_s)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
+      <p className='border-t px-4 py-2 text-xs text-muted-foreground'>Credited sales follow the page&apos;s credit rules (PPVs to whoever sent them through the extension, tips to the last chatter within the hour or the chatters on shift). &quot;No chatter signed in&quot; are messages sent without the extension signed in, so nobody is credited for them.</p>
     </section>
   );
 }
