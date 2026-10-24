@@ -44,6 +44,26 @@
   const firstList = (r) => { if (Array.isArray(r)) return r; for (const v of Object.values(r || {})) if (Array.isArray(v) && v.length && typeof v[0] === 'object') return v; return []; };
   const parseBody = (b) => { try { return typeof b === 'string' ? JSON.parse(b) : null; } catch { return null; } };
 
+  // Which picture in Fansly's vault window is which vault item: every id and picture address inside an
+  // item points to it (kept in this tab only, for the coloured frames bridge.js draws; nothing is sent)
+  function vaultKeys(r) {
+    const keys = [];
+    const walk = (v, mid, depth) => {
+      if (depth > 6 || v == null) return;
+      if (typeof v === 'string') {
+        if (/^https?:\/\//.test(v)) { try { keys.push([new URL(v).pathname, mid]); } catch { /* not an address */ } }
+        else if (/^\d{15,25}$/.test(v)) keys.push([v, mid]);
+        return;
+      }
+      if (Array.isArray(v)) { for (const x of v) walk(x, mid, depth + 1); return; }
+      if (typeof v === 'object') for (const x of Object.values(v)) walk(x, mid, depth + 1);
+    };
+    for (const m of r.media || []) if (m && m.id) walk(m, String(m.id), 0);
+    const names = (r.albumMedia || []).filter(x => x.mediaId && x.customFilename).map(x => [String(x.customFilename), String(x.mediaId)]);
+    for (const m of r.media || []) if (m && m.id && m.filename) names.push([String(m.filename), String(m.id)]);
+    try { window.postMessage({ 'cmt-vault-keys': 1, keys, names }, '*'); } catch { /* ignore */ }
+  }
+
   /** Which answers we keep, and how. Returns null for anything else. `sent` = the request body (POST). */
   function pick(method, url, body, sent) {
     if (!API.test(url) || !body || body.success === false) return null;
@@ -51,6 +71,7 @@
     if (method === 'GET') {
       // the vault, as Fansly's own page loads it (albums; one page of an album's media)
       if (p === '/vault/albumsnew' && r) return { kind: 'vault_albums', data: { albums: (r.albums || []).map(a => ({ id: a.id, type: a.type, title: a.title, itemCount: a.itemCount, pos: a.pos })) } };
+      if (p === '/media/vaultnew' && r) vaultKeys(r);
       if (p === '/media/vaultnew' && r) return { kind: 'vault_media', data: { albumId: q.albumId || null, media: (r.media || []).map(slimMedia), albumMedia: (r.albumMedia || []).map(x => ({ mediaId: x.mediaId, albumId: x.albumId, customFilename: x.customFilename })) } };
       if (p === '/account/me' && r && r.account) return { kind: 'me', data: { ...slimAccount(r.account), subscriptionTiers: (r.account.subscriptionTiers || []).map(slimTier) } };
       if (p === '/subscriptions/tiers' && r) return { kind: 'tiers', data: { tiers: firstList(r).map(slimTier) } };

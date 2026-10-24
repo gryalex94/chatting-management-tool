@@ -310,6 +310,16 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     })();
     return true;
   }
+  // the coloured frames in Fansly's vault window: what the fan in this chat was sent, and whether he bought it
+  if (msg && msg.type === 'cmt-vault-marks' && /^\d{5,25}$/.test(String(msg.group || ''))) {
+    (async () => {
+      await ready;
+      if (!state.accountId) return respond({ ok: false });
+      const data = await panelApi('GET', `/api/fansly/panel/vault-marks?account=${encodeURIComponent(state.accountId)}&group=${encodeURIComponent(msg.group)}`);
+      respond({ ok: true, marks: data.marks || [] });
+    })().catch(() => respond({ ok: false }));
+    return true;
+  }
   if (msg && msg.type === 'panel-api') {
     panelApi(String(msg.method || 'GET').toUpperCase(), String(msg.path || ''), msg.body)
       .then(data => respond({ ok: true, data }))

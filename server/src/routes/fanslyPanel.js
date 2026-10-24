@@ -380,6 +380,48 @@ panel.get('/translate', async (req, res) => {
   } catch (e) { fail(res, e, 'translate his messages'); }
 });
 
+// GET /api/fansly/panel/vault-marks?account=&group= → the vault items this fan was sent in his chat:
+// bought (green in Fansly's vault), sent as a PPV and not bought (red), or sent free; with the price
+panel.get('/vault-marks', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.query.account);
+    if (!account) return;
+    const fan = await fanOf(account, { group: req.query.group, fan: req.query.fan });
+    if (!fan) return res.json({ marks: [] });
+    const { data: msgs, error } = await supabaseAdmin.from('fansly_messages').select('sent_at, sold_at, attachments')
+      .eq('account_id', account.id).eq('fan_account_id', fan.fansly_account_id).eq('from_fan', false).not('attachments', 'is', null)
+      .order('sent_at', { ascending: false }).limit(2000);
+    if (error) throw error;
+    const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('item_id, category')
+      .eq('account_id', account.id).eq('fan_account_id', fan.fansly_account_id).not('item_id', 'is', null).limit(2000);
+    const owned = new Set((tx || []).filter(t => t.category !== 'refund').map(t => String(t.item_id)));
+    const sent = [];
+    for (const m of msgs || []) for (const a of m.attachments || []) {
+      const id = String(a.content_id || a.contentId || '');
+      if (id) sent.push({ item: id, at: m.sent_at, sold: !!m.sold_at || owned.has(id), price: a.price });
+    }
+    const ids = [...new Set(sent.map(x => x.item))];
+    const { data: items } = ids.length ? await supabaseAdmin.from('fansly_items').select('item_id, price, media_id, media_ids').eq('account_id', account.id).in('item_id', ids.slice(0, 1000)) : { data: [] };
+    const itemOf = new Map((items || []).map(i => [i.item_id, i]));
+    const marks = new Map();                                  // vault media id → what happened with it in his chat
+    for (const x of sent) {
+      const it = itemOf.get(x.item); if (!it) continue;
+      const price = Number(x.price ?? it.price) || 0;
+      for (const mid of it.media_id ? [it.media_id] : (it.media_ids || [])) {
+        const status = x.sold ? 'bought' : price > 0 ? 'not_bought' : 'free';
+        const was = marks.get(mid);
+        const rank = { bought: 3, not_bought: 2, free: 1 };
+        if (!was || rank[status] > rank[was.status]) marks.set(mid, { media_id: mid, status, price, at: x.at, times: (was?.times || 0) + 1, bundle: !it.media_id });
+        else was.times += 1;
+      }
+    }
+    const mids = [...marks.keys()];
+    const { data: media } = mids.length ? await supabaseAdmin.from('fansly_vault_media').select('media_id, filename').eq('account_id', account.id).in('media_id', mids) : { data: [] };
+    for (const v of media || []) marks.get(v.media_id).filename = v.filename || null;
+    res.json({ marks: [...marks.values()] });
+  } catch (e) { fail(res, e, 'read what he was sent from the vault'); }
+});
+
 // POST /api/fansly/panel/translate { account, fan, text, lang? } → the text in his language (or lang)
 panel.post('/translate', async (req, res) => {
   try {

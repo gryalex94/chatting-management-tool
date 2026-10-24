@@ -319,6 +319,108 @@
   askSecure(0);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideForChatters, { once: true }); else hideForChatters();
 
+  // ---- Fansly's vault window: a frame on what the fan in this chat was sent from it ----
+  // green: he bought it · red: sent as a PPV, not bought · grey: sent free; with the price it went for.
+  // Which picture is which item comes from Fansly's own vault answer (page.js), else from its name.
+  const vaultKey = new Map(), vaultName = new Map();
+  let marks = new Map(), marksFor = null, marksAt = 0, marksBusy = false;
+  window.addEventListener('message', (ev) => {
+    if (ev.source !== window || !ev.data || ev.data['cmt-vault-keys'] !== 1) return;
+    for (const [k, v] of ev.data.keys || []) vaultKey.set(String(k), String(v));
+    for (const [k, v] of ev.data.names || []) vaultName.set(String(k).trim().toLowerCase(), String(v));
+    markSoon();
+  });
+  const groupNow = () => (location.pathname.match(/^\/messages\/(\d{5,25})/) || [])[1] || null;
+  function loadMarks() {
+    const g = groupNow();
+    if (!g || marksBusy || (g === marksFor && Date.now() - marksAt < 30000)) return;
+    marksBusy = true;
+    try {
+      chrome.runtime.sendMessage({ type: 'cmt-vault-marks', group: g }, (r) => {
+        void chrome.runtime.lastError; marksBusy = false;
+        if (!r || !r.ok) return;
+        marks = new Map(r.marks.map(m => [String(m.media_id), m])); marksFor = g; marksAt = Date.now();
+        for (const m of r.marks) if (m.filename && !vaultName.has(m.filename.trim().toLowerCase())) vaultName.set(m.filename.trim().toLowerCase(), String(m.media_id));
+        markVault();
+      });
+    } catch { marksBusy = false; }
+  }
+  const vaultStyle = document.createElement('style');
+  vaultStyle.textContent = '.cmt-vm-rel{position:relative}.cmt-vm::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:2}'
+    + '.cmt-vm-bought::after{box-shadow:inset 0 0 0 4px #22c55e}.cmt-vm-not_bought::after{box-shadow:inset 0 0 0 4px #ef4444}.cmt-vm-free::after{box-shadow:inset 0 0 0 4px #94a3b8}'
+    + '.cmt-vm-tag{position:absolute;left:6px;bottom:6px;z-index:3;pointer-events:none;padding:2px 7px;border-radius:5px;font:600 12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#fff}'
+    + '.cmt-vm-bought .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}.cmt-vm-free .cmt-vm-tag{background:#475569}';
+  // the vault window: Fansly's picker with its "Upload to Vault" and "Add … Media" buttons
+  function vaultWindow() {
+    for (const b of document.querySelectorAll('button, .btn, div[class*="btn"]')) {
+      const t = String(b.textContent || '').trim();
+      if (!/^add \d+ media$/i.test(t) && !/^upload to vault$/i.test(t)) continue;
+      let el = b;
+      for (let i = 0; i < 12 && el.parentElement; i++) { el = el.parentElement; if (el.querySelectorAll('img').length >= 2 && el.getBoundingClientRect().width > 400) return el; }
+    }
+    return null;
+  }
+  const picOf = (el) => {
+    if (el.tagName === 'IMG') return el.currentSrc || el.src || '';
+    const m = /url\(["']?([^"')]+)/.exec(el.style.backgroundImage || ''); return m ? m[1] : '';
+  };
+  function mediaOfPic(src) {
+    let u; try { u = new URL(src, location.href); } catch { return null; }
+    if (vaultKey.has(u.pathname)) return vaultKey.get(u.pathname);
+    for (const seg of u.pathname.split(/[/._-]/)) if (/^\d{15,25}$/.test(seg) && vaultKey.has(seg)) return vaultKey.get(seg);
+    return null;
+  }
+  function mediaOfTile(tile, pic) {
+    const byPic = mediaOfPic(picOf(pic));
+    if (byPic) return byPic;
+    // its name on the tile ("IMG_6883.jpeg")
+    for (const el of tile.querySelectorAll('span, div')) {
+      if (el.children.length > 1) continue;
+      const t = String(el.textContent || '').trim().toLowerCase();
+      if (t && t.length < 120 && vaultName.has(t)) return vaultName.get(t);
+    }
+    return null;
+  }
+  // the tile: the biggest box around the picture that is still about its size
+  function tileOf(pic, root) {
+    const r = pic.getBoundingClientRect(); let tile = pic;
+    for (let el = pic.parentElement, i = 0; el && el !== root && i < 6; el = el.parentElement, i++) {
+      const b = el.getBoundingClientRect();
+      if (b.width > r.width + 24 || b.height > r.height + 60) break;
+      tile = el;
+    }
+    return tile === pic ? pic.parentElement : tile;
+  }
+  const money = (n) => `$${Number(n).toFixed(Number(n) % 1 ? 2 : 0)}`;
+  function markVault() {
+    const root = vaultWindow();
+    if (!root) return;
+    if (!vaultStyle.isConnected) (document.head || document.documentElement).append(vaultStyle);
+    loadMarks();
+    const pics = [...root.querySelectorAll('img'), ...root.querySelectorAll('[style*="background-image"]')].filter(p => p.getBoundingClientRect().width > 60);
+    for (const pic of pics) {
+      const tile = tileOf(pic, root); if (!tile) continue;
+      const mid = mediaOfTile(tile, pic);
+      const m = mid && marksFor === groupNow() ? marks.get(mid) : null;
+      const want = m ? m.status : '';
+      if ((tile.dataset.cmtVm || '') === want + (m ? m.price : '')) continue;
+      tile.classList.remove('cmt-vm', 'cmt-vm-rel', 'cmt-vm-bought', 'cmt-vm-not_bought', 'cmt-vm-free');
+      tile.querySelectorAll(':scope > .cmt-vm-tag').forEach(x => x.remove());
+      tile.dataset.cmtVm = want + (m ? m.price : '');
+      if (!m) continue;
+      tile.classList.add('cmt-vm', `cmt-vm-${m.status}`);
+      if (getComputedStyle(tile).position === 'static') tile.classList.add('cmt-vm-rel');
+      const tag = document.createElement('div'); tag.className = 'cmt-vm-tag';
+      tag.textContent = m.status === 'bought' ? `Bought${m.price ? ` ${money(m.price)}` : ''}` : m.status === 'not_bought' ? `Not bought · ${money(m.price)}` : 'Sent free';
+      tag.title = `${m.times > 1 ? `Sent ${m.times} times` : 'Sent'}${m.bundle ? ' in a bundle' : ''}, last ${new Date(m.at).toLocaleDateString()}`;
+      tile.append(tag);
+    }
+  }
+  let markTimer = null;
+  const markSoon = () => { if (markTimer) return; markTimer = setTimeout(() => { markTimer = null; markVault(); }, 150); };
+  new MutationObserver(() => markSoon()).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('scroll', markSoon, true);
+
   // ---- the request log (popup switch) also notes which controls are clicked: their label, never what is typed ----
   // (the worker keeps these only while logging is on, like the requests)
   document.addEventListener('click', (ev) => {
