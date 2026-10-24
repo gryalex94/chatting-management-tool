@@ -392,10 +392,12 @@ panel.get('/vault-marks', async (req, res) => {
       .eq('account_id', account.id).eq('fan_account_id', fan.fansly_account_id).eq('from_fan', false).not('attachments', 'is', null)
       .order('sent_at', { ascending: false }).limit(2000);
     if (error) throw error;
-    const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('item_id, category')
+    const { data: tx } = await supabaseAdmin.from('fansly_transactions').select('item_id, category, gross, created_at_fansly')
       .eq('account_id', account.id).eq('fan_account_id', fan.fansly_account_id).not('item_id', 'is', null).limit(2000);
     const owned = new Set((tx || []).filter(t => t.category !== 'refund').map(t => String(t.item_id)));
     const sent = [];
+    // what he bought on the creator's wall (posts), from the sales ledger
+    for (const t of tx || []) if (t.category === 'wall') sent.push({ item: String(t.item_id), at: t.created_at_fansly, sold: true, price: Math.abs(Number(t.gross) || 0) || null, wall: true });
     for (const m of msgs || []) for (const a of m.attachments || []) {
       const id = String(a.content_id || a.contentId || '');
       if (id) sent.push({ item: id, at: m.sent_at, sold: !!m.sold_at || owned.has(id), price: a.price });
@@ -411,8 +413,10 @@ panel.get('/vault-marks', async (req, res) => {
         const status = x.sold ? 'bought' : price > 0 ? 'not_bought' : 'free';
         const was = marks.get(mid);
         const rank = { bought: 3, not_bought: 2, free: 1 };
-        if (!was || rank[status] > rank[was.status]) marks.set(mid, { media_id: mid, status, price, at: x.at, times: (was?.times || 0) + 1, bundle: !it.media_id });
-        else was.times += 1;
+        // bought in the chat counts before bought on the wall; a later chat sale replaces a wall one
+        if (!was || rank[status] > rank[was.status] || (status === 'bought' && was.wall && !x.wall))
+          marks.set(mid, { media_id: mid, status, price, at: x.at, times: (was?.times || 0) + (x.wall ? 0 : 1), bundle: !it.media_id, wall: !!x.wall });
+        else if (!x.wall) was.times += 1;
       }
     }
     const mids = [...marks.keys()];

@@ -348,9 +348,9 @@
   }
   const vaultStyle = document.createElement('style');
   vaultStyle.textContent = '.cmt-vm-rel{position:relative}.cmt-vm::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:2}'
-    + '.cmt-vm-bought::after{box-shadow:inset 0 0 0 4px #22c55e}.cmt-vm-not_bought::after{box-shadow:inset 0 0 0 4px #ef4444}.cmt-vm-free::after{box-shadow:inset 0 0 0 4px #94a3b8}'
-    + '.cmt-vm-tag{position:absolute;left:6px;bottom:6px;z-index:3;pointer-events:none;padding:2px 7px;border-radius:5px;font:600 12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#fff}'
-    + '.cmt-vm-bought .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}.cmt-vm-free .cmt-vm-tag{background:#475569}';
+    + '.cmt-vm-bought::after,.cmt-vm-free::after{box-shadow:inset 0 0 0 4px #22c55e}.cmt-vm-not_bought::after{box-shadow:inset 0 0 0 4px #ef4444}'
+    + '.cmt-vm::after{z-index:20!important}.cmt-vm-tag{position:absolute;left:6px;bottom:6px;z-index:21;pointer-events:none;padding:2px 7px;border-radius:5px;font:600 12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#fff}'
+    + '.cmt-vm-bought .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}.cmt-vm-free .cmt-vm-tag{background:#16a34a}';
   // the vault window: Fansly's picker with its "Upload to Vault" and "Add … Media" buttons
   function vaultWindow() {
     for (const b of document.querySelectorAll('button, .btn, div[class*="btn"]')) {
@@ -443,7 +443,7 @@
     const nb = [...marks.values()];
     const text = marksFor !== groupNow() ? 'Chatting Manager: reading what he was sent…'
       : !nb.length ? 'Chatting Manager: nothing from the vault was sent to him yet.'
-        : `Chatting Manager: sent to him ${shown} · bought ${nb.filter(m => m.status === 'bought').length} · not bought ${nb.filter(m => m.status === 'not_bought').length}${pics.length ? ` · ${known} of ${pics.length} pictures here recognised` : ''}`;
+        : `Chatting Manager: sent to him ${nb.filter(m => !m.wall).length} · bought ${nb.filter(m => m.status === 'bought' && !m.wall).length} in chat, ${nb.filter(m => m.wall).length} on the wall · not bought ${nb.filter(m => m.status === 'not_bought').length}${pics.length ? ` · ${known} of ${pics.length} pictures here recognised` : ''}`;
     if (note.textContent !== text) note.textContent = text;
     const done = new Set();
     for (const pic of pics) {
@@ -460,8 +460,8 @@
       tile.classList.add('cmt-vm', `cmt-vm-${m.status}`);
       if (getComputedStyle(tile).position === 'static') tile.classList.add('cmt-vm-rel');
       const tag = document.createElement('div'); tag.className = 'cmt-vm-tag';
-      tag.textContent = m.status === 'bought' ? `Bought${m.price ? ` ${money(m.price)}` : ''}` : m.status === 'not_bought' ? `Not bought · ${money(m.price)}` : 'Sent free';
-      tag.title = `${m.times > 1 ? `Sent ${m.times} times` : 'Sent'}${m.bundle ? ' in a bundle' : ''}, last ${new Date(m.at).toLocaleDateString()}`;
+      tag.textContent = m.status === 'bought' ? `Bought${m.wall ? ' on wall' : ''}${m.price ? ` ${money(m.price)}` : ''}` : m.status === 'not_bought' ? `Not bought · ${money(m.price)}` : 'Sent free';
+      tag.title = m.wall ? `Bought in a post on the wall, ${new Date(m.at).toLocaleDateString()}` : `${m.times > 1 ? `Sent ${m.times} times` : 'Sent'}${m.bundle ? ' in a bundle' : ''}, last ${new Date(m.at).toLocaleDateString()}`;
       tile.append(tag);
     }
   }
