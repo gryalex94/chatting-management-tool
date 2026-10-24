@@ -246,8 +246,12 @@ async function ensureBridge(tabId) {
   if (alive) return true;
   try { await chrome.scripting.executeScript({ target: { tabId }, files: ['bridge.js'] }); return true; } catch { return false; }
 }
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((info) => {
   applyLock();
+  // a new install: the panel shows inside the Fansly page and makes room for itself (the chat beside it)
+  if (info && info.reason === 'install') chrome.storage.local.get(['panelMode', 'panelPrefs'], (s) => {
+    if (!s.panelMode) chrome.storage.local.set({ panelMode: 'page', panelOff: false, panelPrefs: { ...(s.panelPrefs || {}), push: true, collapsed: false } });
+  });
   chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => { void chrome.runtime.lastError; for (const t of tabs || []) ensureBridge(t.id); });
 });
 

@@ -822,8 +822,8 @@
           if (p.open) st.open = { ...st.open, ...p.open };
           if (Array.isArray(p.openStages)) st.openStages = new Set(p.openStages);
           if (p.trInChat != null) st.tr.inChat = !!p.trInChat;
-          // where the panel shows: 'side' (Chrome's side panel, the default), 'page' (inside Fansly), 'off'
-          const mode = s.panelMode || (s.panelOff ? 'off' : 'side');
+          // where the panel shows: 'page' (inside Fansly, making room for itself: the default), 'side' (Chrome's side panel), 'off'
+          const mode = s.panelMode || (s.panelOff ? 'off' : 'page');
           resolve(SIDE ? false : mode !== 'page');
         });
       } catch { resolve(false); }

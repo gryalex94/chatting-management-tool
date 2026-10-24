@@ -524,7 +524,7 @@
   let sideAsked = false, sideWanted = false;
   const readSide = () => { try { chrome.storage.local.get(['session', 'panelMode', 'panelOff'], (s) => {
     void chrome.runtime.lastError;
-    const mode = s.panelMode || (s.panelOff ? 'off' : 'side');
+    const mode = s.panelMode || (s.panelOff ? 'off' : 'page');
     sideWanted = !!(s.session && s.session.token) && mode === 'side';
   }); } catch { /* the extension was updated */ } };
   readSide();

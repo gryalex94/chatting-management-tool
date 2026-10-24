@@ -25,7 +25,7 @@ async function render() {
   $('ledger').textContent = ago(s.lastLedgerAt);
   $('ledgerHint').hidden = !!(s.lastLedgerAt && Date.now() - s.lastLedgerAt < 24 * 3600 * 1000);
   const { panelOff, panelMode } = await chrome.storage.local.get(['panelOff', 'panelMode']);
-  const mode = !hasSide && (panelMode || 'side') === 'side' ? 'page' : (panelMode || (panelOff ? 'off' : 'side'));
+  const mode = !hasSide && panelMode === 'side' ? 'page' : (panelMode || (panelOff ? 'off' : 'page'));
   if (document.activeElement !== $('panelMode')) $('panelMode').value = mode;
   $('openSide').hidden = mode !== 'side';
   $('sideHint').hidden = hasSide;
@@ -54,7 +54,7 @@ $('signout').addEventListener('click', async () => { await send({ type: 'popup-l
 const hasSide = !!(chrome.sidePanel && chrome.sidePanel.open);
 // on the Sign in click itself (Chrome opens the side panel only in answer to one); it shows the sign-in until it is done
 let sideMode = 'side';
-chrome.storage.local.get(['panelMode', 'panelOff'], (s) => { sideMode = s.panelMode || (s.panelOff ? 'off' : 'side'); });
+chrome.storage.local.get(['panelMode', 'panelOff'], (s) => { sideMode = s.panelMode || (s.panelOff ? 'off' : 'page'); });
 function openSideNow() {
   if (!hasSide || sideMode !== 'side') return;
   try { chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT }).catch(() => {}); } catch { /* ignore */ }
