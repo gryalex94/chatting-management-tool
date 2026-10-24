@@ -185,9 +185,22 @@ async function finishFetch({ status, progress, error }) {
 chrome.tabs.onRemoved.addListener((tabId) => { if (activeJob && activeJob.tabId === tabId) finishFetch({ status: 'cancelled', progress: activeJob.progress, error: 'The Fansly tab was closed' }); });
 
 // ---- wiring ----
+// An open Fansly tab keeps the old copy of the in-page script after the extension is updated or
+// reloaded, and that copy can no longer hear the panel (no English under his messages, no "put in the
+// box"). Put the current one into every open Fansly tab that doesn't answer, without reloading the tab.
+async function ensureBridge(tabId) {
+  const alive = await new Promise((res) => { try { chrome.tabs.sendMessage(tabId, { type: 'cmt-ping' }, (r) => { void chrome.runtime.lastError; res(!!(r && r.ok)); }); } catch { res(false); } });
+  if (alive) return true;
+  try { await chrome.scripting.executeScript({ target: { tabId }, files: ['bridge.js'] }); return true; } catch { return false; }
+}
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => { void chrome.runtime.lastError; for (const t of tabs || []) ensureBridge(t.id); });
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'fansly-event') { enqueue(msg); return false; }
   if (msg && msg.type === 'fansly-tab') { heartbeat(); return false; }
+  if (msg && msg.type === 'cmt-ensure-bridge' && msg.tabId != null) { ensureBridge(msg.tabId).then(ok => respond({ ok })); return true; }
   // "Open" on the Messages dashboard: the chat's own tab if it is open already, otherwise a new tab beside this one
   if (msg && msg.type === 'open-chat' && /^\d{5,25}$/.test(String(msg.group || ''))) {
     const url = `https://fansly.com/messages/${msg.group}`;

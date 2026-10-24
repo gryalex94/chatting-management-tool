@@ -255,7 +255,18 @@
   function showInChat() {
     const items = st.tr.fan === st.fanId ? (st.tr.messages || []).filter(m => m.text_en).map(m => ({ text: m.text, en: m.text_en })) : [];
     const msg = { type: 'cmt-translations', on: st.tr.inChat, items };
-    if (SIDE) { if (st.tabId != null) try { chrome.tabs.sendMessage(st.tabId, msg, () => void chrome.runtime.lastError); } catch { /* the tab is gone */ } }
+    if (SIDE) {
+      if (st.tabId == null) return;
+      const tab = st.tabId;
+      const send = (again) => { try { chrome.tabs.sendMessage(tab, msg, (r) => {
+        const missed = chrome.runtime.lastError || !(r && r.ok);
+        if (!missed) { if (st.tr.chatError) { st.tr.chatError = ''; render(); } return; }
+        // the tab still runs the old copy (the extension was updated): put the current one in, then try once more
+        if (!again) { try { chrome.runtime.sendMessage({ type: 'cmt-ensure-bridge', tabId: tab }, () => { void chrome.runtime.lastError; send(true); }); } catch { /* ignore */ } return; }
+        if (items.length || !msg.on) { st.tr.chatError = 'Reload the Fansly tab (F5) to see the English under his messages.'; render(); }
+      }); } catch { /* the tab is gone */ } };
+      send(false);
+    }
     else document.dispatchEvent(new CustomEvent('cmt-translations', { detail: JSON.stringify(msg) }));
   }
   const foreign = () => st.tr.language && st.tr.language.lang && st.tr.language.lang !== 'en';
@@ -603,6 +614,7 @@
           h('button', { class: 'primary', onclick: async () => { const where = await insertText(t.out); flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box'); } }, 'Put in message box'),
           h('button', { onclick: () => { t.out = ''; render(); } }, 'Clear')));
     }
+    if (t.chatError) content.push(h('div', { class: 'small', style: 'color:#fcd34d' }, t.chatError));
     if (t.error) content.push(h('div', { class: 'err small' }, t.error));
     return section('translate', 'Translator', content, foreign() ? h('span', { class: 'pill' }, lang.name) : null);
   }

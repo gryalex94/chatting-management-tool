@@ -5,6 +5,9 @@
  * message box (the chatter still presses send).
  */
 (() => {
+  // once per page: after an update the extension puts this script into open Fansly tabs again (background.js)
+  if (window.__cmtBridgeLive) return;
+  window.__cmtBridgeLive = true;
   const TAG = 'cmt-fansly';
   window.addEventListener('message', (ev) => {
     if (ev.source !== window || !ev.data || ev.data[TAG] !== 1) return;
@@ -255,6 +258,7 @@
   document.addEventListener('cmt-translations', (ev) => { try { setTranslations(JSON.parse(ev.detail || '{}')); } catch { /* ignore */ } });
 
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+    if (msg && msg.type === 'cmt-ping') { respond({ ok: true }); return false; }
     if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
     // a sequence's media step: the item's name into the search box of Fansly's open vault window
     if (msg && msg.type === 'cmt-search' && typeof msg.text === 'string') {
