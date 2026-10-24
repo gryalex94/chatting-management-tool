@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, Download, Search } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '@/services/api';
@@ -31,6 +31,32 @@ const TYPES = [
   { k: 'other', label: 'Other', color: '#888780' },
 ];
 
+/** What differs between the platforms: where the numbers come from, and what the page says about them. */
+const PLATFORMS = {
+  fansly: {
+    pages: '/api/fansly/messages/filters', report: '/api/fansly/reports', file: 'fansly', none: 'No Fansly page recorded yet.',
+    media: 'Posts and other media', massSplit: true,
+    notes: (data) => [
+      'Fansly does not say whether media was bought in a chat or on a post. Messages counts media bought from a chat message the extension has seen; the rest is under Posts and other media, and moves to Messages as more chats are opened with the extension on.',
+      'Chatting numbers count the chats the extension recorded; mass messages are left out.',
+      ...data.ledger.filter(l => l.total && l.read < l.total).map(l => ({ warn: true, text: `${l.page}: ${num(l.read)} of ${num(l.total)} sales read so far. Press Earnings, everything on the Pages tab to read the rest.` })),
+    ],
+    chatterNote: 'Credited sales follow the page\'s credit rules (PPVs to whoever sent them through the extension, tips to the last chatter within the hour or the chatters on shift). "No chatter signed in" are messages sent without the extension signed in, so nobody is credited for them.',
+  },
+  onlyfans: {
+    pages: '/api/reports/onlyfans/pages', report: '/api/reports/onlyfans', file: 'onlyfans', none: 'No OnlyFans page with an Infloww page id yet.',
+    media: 'Posts', massSplit: false,
+    notes: (data) => [
+      'Earnings are Infloww\'s sales, the same numbers as Infloww\'s Creator reports; a refunded sale is left out of the earnings and shown as Refunded. Subscriptions bought and active subscribers come from Infloww\'s creator reports.',
+      `Chatting numbers come from the uploaded chat exports${data.chats_until ? ` (up to ${new Date(data.chats_until).toLocaleDateString([], { day: 'numeric', month: 'short', timeZone: 'UTC' })}; days after that are not in them yet)` : ''}, counted like the OnlyFans dashboard: reply time only for replies to a fan message under 2 hours.`,
+    ],
+    chatterNote: 'Credited sales follow Infloww\'s own sales rules (the message sender for PPVs, the last chatter for tips). PPV sales are the chat PPVs bought, from the chat exports.',
+  },
+};
+const PlatformCtx = createContext(PLATFORMS.fansly);
+/** The kinds of earning, named for this platform. */
+function useTypes() { const p = useContext(PlatformCtx); return TYPES.map(t => (t.k === 'media' ? { ...t, label: p.media } : t)); }
+
 /** The change against the days just before, as a percentage (null when there was nothing before). */
 const change = (now, before) => (before ? ((now - before) / Math.abs(before)) * 100 : null);
 
@@ -46,7 +72,8 @@ function Delta({ now, before, className, lowerBetter }) {
  * earnings by day, the breakdown and a row per page. Creator performance: one
  * page at a time, with the hours sales come in, top fans and subscribers.
  */
-export default function FanslyReports() {
+export default function CreatorReports({ platform = 'fansly' }) {
+  const cfg = PLATFORMS[platform];
   const [view, setView] = useState('overview');
   const [pages, setPages] = useState(null);
   const [picked, setPicked] = useState([]);           // the pages in the overview (empty: all)
@@ -57,9 +84,9 @@ export default function FanslyReports() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    api.get('/api/fansly/messages/filters').then(r => { setPages(r.data.accounts || []); setOne(r.data.accounts?.[0]?.id || ''); })
+    api.get(cfg.pages).then(r => { setPages(r.data.accounts || []); setOne(r.data.accounts?.[0]?.id || ''); })
       .catch(e => setError(e?.response?.data?.error || 'Could not load the pages'));
-  }, []);
+  }, [cfg.pages]);
   const { from, to } = range;
   const accounts = view === 'performance' ? (one ? [one] : []) : picked;
   const query = `from=${from}&to=${to}&accounts=${accounts.join(',')}${gross ? '&gross=1' : ''}`;
@@ -68,16 +95,17 @@ export default function FanslyReports() {
     let live = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(d => (d ? { ...d, loading: true } : null));
-    api.get(`/api/fansly/reports?${query}`).then(r => { if (live) setData(r.data); }).catch(e => { if (live) setError(e?.response?.data?.error || 'Could not load the report'); });
+    api.get(`${cfg.report}?${query}`).then(r => { if (live) setData(r.data); }).catch(e => { if (live) setError(e?.response?.data?.error || 'Could not load the report'); });
     return () => { live = false; };
-  }, [query, pages, view, one]);
+  }, [query, pages, view, one, cfg.report]);
 
   if (error) return <p className='text-sm text-muted-foreground'>{error}</p>;
   if (!pages) return <Skeleton className='h-64 w-full' />;
-  if (!pages.length) return <p className='text-sm text-muted-foreground'>No Fansly page recorded yet.</p>;
+  if (!pages.length) return <p className='text-sm text-muted-foreground'>{cfg.none}</p>;
   const reset = () => { setRange({ from: addDays(amsToday(), -6), to: amsToday() }); setPicked([]); setGross(false); };
 
   return (
+    <PlatformCtx.Provider value={cfg}>
     <div className='grid grid-cols-[minmax(0,1fr)] gap-4'>
       <div className='flex flex-wrap items-center gap-2'>
         <div className='inline-flex rounded-md border p-0.5'>
@@ -98,6 +126,7 @@ export default function FanslyReports() {
         ? <Overview data={data} from={from} to={to} gross={gross} />
         : <Performance data={data} pages={pages} one={one} setOne={setOne} from={from} to={to} />}
     </div>
+    </PlatformCtx.Provider>
   );
 }
 
@@ -130,6 +159,7 @@ function buckets(byHour, from, to, by) {
     }
   }
   for (const h of byHour) {
+    if (by === 'hour' ? h.hour == null : !h.day) continue;
     const k = by === 'hour' ? h.hour : by === 'day' ? h.day : by === 'month' ? h.day.slice(0, 7) : weekStart(h.day);
     const b = out.get(k); if (!b) continue;
     for (const t of TYPES) b[t.k] += h[t.k] || 0;
@@ -142,7 +172,8 @@ function EarningsChart({ data, from, to, only }) {
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
   const [by, setBy] = useState(days > 120 ? 'month' : days > 45 ? 'week' : 'day');
   const rows = useMemo(() => buckets(data.by_hour, from, to, by), [data.by_hour, from, to, by]);
-  const shown = only ? TYPES.filter(t => t.k === only) : TYPES;
+  const types = useTypes();
+  const shown = only ? types.filter(t => t.k === only) : types;
   return (
     <section className='rounded-lg border bg-card p-4'>
       <div className='mb-2 flex items-center justify-between'>
@@ -159,7 +190,7 @@ function EarningsChart({ data, from, to, only }) {
             <CartesianGrid vertical={false} stroke='currentColor' strokeOpacity={0.1} />
             <XAxis dataKey='label' tick={{ fontSize: 11, fill: 'currentColor', opacity: 0.6 }} tickLine={false} axisLine={false} interval='preserveStartEnd' />
             <YAxis tick={{ fontSize: 11, fill: 'currentColor', opacity: 0.6 }} tickLine={false} axisLine={false} tickFormatter={short} width={48} />
-            <Tooltip cursor={{ fillOpacity: 0.06 }} contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }} formatter={(v, k) => [money(v), TYPES.find(t => t.k === k)?.label]} />
+            <Tooltip cursor={{ fillOpacity: 0.06 }} contentStyle={{ background: 'var(--popover)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }} formatter={(v, k) => [money(v), types.find(t => t.k === k)?.label]} />
             {shown.map((t, i) => <Bar key={t.k} dataKey={t.k} stackId='a' fill={t.color} radius={i === shown.length - 1 ? [3, 3, 0, 0] : 0} maxBarSize={56} />)}
           </BarChart>
         </ResponsiveContainer>
@@ -170,7 +201,7 @@ function EarningsChart({ data, from, to, only }) {
 }
 
 function Breakdown({ totals }) {
-  const parts = TYPES.map(t => ({ ...t, value: totals[t.k] || 0 }));
+  const parts = useTypes().map(t => ({ ...t, value: totals[t.k] || 0 }));
   const sum = parts.reduce((s, p) => s + p.value, 0);
   return (
     <section className='rounded-lg border bg-card p-4'>
@@ -215,10 +246,10 @@ function Overview({ data, from, to, gross }) {
     const esc = (v) => (v == null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-    const a = document.createElement('a'); a.href = url; a.download = `fansly-creators-${from}-${to}${gross ? '-gross' : ''}.csv`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `${cfg.file}-creators-${from}-${to}${gross ? '-gross' : ''}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
-  const incomplete = data.ledger.filter(l => l.total && l.read < l.total);
+  const cfg = useContext(PlatformCtx), types = useTypes();
 
   return (
     <div className={cn('grid grid-cols-[minmax(0,1fr)] gap-4', data.loading && 'opacity-60')}>
@@ -231,13 +262,13 @@ function Overview({ data, from, to, gross }) {
           <p className='tabular-nums'>{money(t.refunds)}</p>
           <p className='mt-2 text-xs text-muted-foreground'>{num(t.sales)} purchases · compared with {dayLabel(data.prev_from)} → {dayLabel(data.prev_to)}</p>
         </div>
-        {[...TYPES.slice(0, 2), TYPES[3], TYPES[2], TYPES[4]].map(x => (
+        {[...types.slice(0, 2), types[3], types[2], types[4]].map(x => (
           <div key={x.k} className='rounded-lg border bg-card p-3'>
             <p className='flex items-center gap-1.5 text-sm text-muted-foreground'><span className='size-2 rounded-full' style={{ background: x.color }} />{x.label}</p>
             <p className='mt-0.5 text-xl font-semibold tabular-nums'>{money(t[x.k])}</p>
             <div className='flex items-center gap-2'>
               <Delta now={t[x.k]} before={p[x.k]} />
-              {x.k === 'messages' && <span className='text-xs text-muted-foreground'>chat {money(t.messages_chat)} · mass {money(t.messages_mass)}</span>}
+              {x.k === 'messages' && cfg.massSplit && <span className='text-xs text-muted-foreground'>chat {money(t.messages_chat)} · mass {money(t.messages_mass)}</span>}
             </div>
           </div>
         ))}
@@ -291,15 +322,15 @@ function Overview({ data, from, to, gross }) {
       </section>
 
       <div className='grid gap-1 text-xs text-muted-foreground'>
-        <p>Changes compare with the same number of days just before. Ratio: messages and tips for every dollar of subscriptions (target 5). LTV: earnings for every subscription bought or renewed. Unlock: chat PPVs bought out of those sent. Golden: chat PPVs out of all chat messages sent. Reply time: typical wait from a fan&apos;s message to the reply. Chatting numbers count the chats the extension recorded; mass messages are left out. Active subscribers: as of the last time the Subscribers list was read.</p>
-        <p>Fansly does not say whether media was bought in a chat or on a post. Messages counts media bought from a chat message the extension has seen; the rest is under Posts and other media, and moves to Messages as more chats are opened with the extension on.</p>
-        {incomplete.map(l => <p key={l.account_id} className='text-amber-600'>{l.page}: {num(l.read)} of {num(l.total)} sales read so far. Press Earnings, everything on the Pages tab to read the rest.</p>)}
+        <p>Changes compare with the same number of days just before. Ratio: messages and tips for every dollar of subscriptions (target 5). LTV: earnings for every subscription bought or renewed. Unlock: chat PPVs bought out of those sent. Golden: chat PPVs out of all chat messages sent. Reply time: typical wait from a fan&apos;s message to the reply. Active subscribers: as of the last time the Subscribers list was read.</p>
+        {cfg.notes(data).map((n, k) => <p key={k} className={cn(n.warn && 'text-amber-600')}>{n.text || n}</p>)}
       </div>
     </div>
   );
 }
 
 function Performance({ data, pages, one, setOne, from, to }) {
+  const types = useTypes();
   const [q, setQ] = useState('');
   const [only, setOnly] = useState('');
   const t = data.totals, p = data.prev_totals;
@@ -320,7 +351,7 @@ function Performance({ data, pages, one, setOne, from, to }) {
       <div className={cn('grid min-w-0 gap-4', data.loading && 'opacity-60')}>
         <div className='flex flex-wrap gap-1'>
           <Button size='sm' variant={!only ? 'default' : 'outline'} onClick={() => setOnly('')}>All</Button>
-          {TYPES.map(x => <Button key={x.k} size='sm' variant={only === x.k ? 'default' : 'outline'} onClick={() => setOnly(x.k)}>{x.label}</Button>)}
+          {types.map(x => <Button key={x.k} size='sm' variant={only === x.k ? 'default' : 'outline'} onClick={() => setOnly(x.k)}>{x.label}</Button>)}
         </div>
         <EarningsChart data={data} from={from} to={to} only={only} />
 
@@ -330,7 +361,7 @@ function Performance({ data, pages, one, setOne, from, to }) {
             <p className='text-lg font-semibold tabular-nums'>{money(t.total)}</p>
             <Delta now={t.total} before={p.total} />
           </div>
-          {TYPES.map(x => (
+          {types.map(x => (
             <div key={x.k} className='rounded-lg border bg-card p-3'>
               <p className='flex items-center gap-1.5 text-xs text-muted-foreground'><span className='size-2 rounded-full' style={{ background: x.color }} />{x.label}</p>
               <p className='text-lg font-semibold tabular-nums'>{money(t[x.k])}</p>
@@ -348,13 +379,14 @@ function Performance({ data, pages, one, setOne, from, to }) {
 
 /** The OnlyFans dashboard's own numbers: ratio, LTV, unlock, golden, reply time, and the chatting behind them. */
 function ChattingMetrics({ data }) {
+  const cfg = useContext(PlatformCtx);
   const m = data.metrics, c = data.chatting, pm = m.prev, pc = c.prev;
   const tiles = [
     { label: 'Ratio', value: m.ratio == null ? '·' : m.ratio.toFixed(2), now: m.ratio, before: pm.ratio, cls: ratioColor(m.ratio), hint: '(messages + tips) ÷ subscriptions · target 5' },
     { label: 'LTV', value: money(m.ltv), now: m.ltv, before: pm.ltv, hint: `earnings ÷ ${num(m.subscriptions_bought)} subscriptions bought` },
     { label: 'Unlock rate', value: pct(c.unlock_rate), now: c.unlock_rate, before: pc.unlock_rate, hint: `${num(c.ppv_bought)} of ${num(c.ppv_sent)} chat PPVs bought` },
     { label: 'Golden ratio', value: pct(c.golden_ratio), now: c.golden_ratio, before: pc.golden_ratio, hint: 'chat PPVs ÷ chat messages' },
-    { label: 'Messages sent', value: num(c.messages), now: c.messages, before: pc.messages, hint: `${num(c.mass)} mass messages besides` },
+    { label: 'Messages sent', value: num(c.messages), now: c.messages, before: pc.messages, hint: cfg.massSplit ? `${num(c.mass)} mass messages besides` : 'chat messages, mass left out' },
     { label: 'Fans chatted', value: num(c.fans), now: c.fans, before: pc.fans, hint: `${num(c.buyers)} bought a PPV` },
     { label: 'PPV sales', value: money(c.ppv_sales), now: c.ppv_sales, before: pc.ppv_sales, hint: 'chat PPVs bought' },
     { label: 'Reply time', value: secs(c.reply_s), now: c.reply_s, before: pc.reply_s, lower: true, hint: `typical, over ${num(c.replies)} replies` },
@@ -379,6 +411,7 @@ function ChattingMetrics({ data }) {
 
 /** One row per chatter on this page, like the chatter table on the OnlyFans dashboard. */
 function ChatterTable({ rows }) {
+  const cfg = useContext(PlatformCtx);
   return (
     <section className='rounded-lg border bg-card'>
       <h3 className='border-b px-4 py-2 text-sm font-medium'>By chatter</h3>
@@ -406,7 +439,7 @@ function ChatterTable({ rows }) {
           </TableBody>
         </Table>
       )}
-      <p className='border-t px-4 py-2 text-xs text-muted-foreground'>Credited sales follow the page&apos;s credit rules (PPVs to whoever sent them through the extension, tips to the last chatter within the hour or the chatters on shift). &quot;No chatter signed in&quot; are messages sent without the extension signed in, so nobody is credited for them.</p>
+      <p className='border-t px-4 py-2 text-xs text-muted-foreground'>{cfg.chatterNote}</p>
     </section>
   );
 }

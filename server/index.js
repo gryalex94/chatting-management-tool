@@ -149,6 +149,10 @@ app.use('/api/payroll', staffOnly, payrollRoutes);
 const fanvueRoutes = require('./src/routes/fanvue');
 app.use('/api/fanvue', staffOnly, fanvueRoutes);
 
+// Creator reports per platform (the router itself is managers and up).
+const reportRoutes = require('./src/routes/reports');
+app.use('/api/reports', staffOnly, reportRoutes);
+
 // Fansly: the browser extension's door (login, ingest, presence) and the dashboard.
 // Login is public; the route checks the session itself for everything else.
 const fanslyRoutes = require('./src/routes/fansly');

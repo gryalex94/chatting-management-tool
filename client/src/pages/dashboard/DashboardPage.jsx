@@ -17,6 +17,8 @@ import { yesterday } from '@/utils/dates';
 import { usePlatform } from '@/context/PlatformContext';
 import FanvueDashboard from './FanvueDashboard';
 import FanslyDashboard from './FanslyDashboard';
+import CreatorReports from './CreatorReports';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
 
@@ -405,5 +407,21 @@ export default function DashboardPage() {
   const { platform } = usePlatform();
   if (platform === 'fanvue') return <FanvueDashboard />;
   if (platform === 'fansly') return <FanslyDashboard />;
-  return <OnlyFansDashboard />;
+  return <OnlyFansTabs />;
+}
+
+// OnlyFans: the Creator reports (like Infloww's, as on Fansly) and the daily overview.
+function OnlyFansTabs() {
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('of-tab') || 'reports'; } catch { return 'reports'; } });
+  const pick = (v) => { setTab(v); try { localStorage.setItem('of-tab', v); } catch { /* ignore */ } };
+  return (
+    <Tabs value={tab} onValueChange={pick} className='gap-4'>
+      <TabsList>
+        <TabsTrigger value='reports'>Creator reports</TabsTrigger>
+        <TabsTrigger value='daily'>Daily overview</TabsTrigger>
+      </TabsList>
+      <TabsContent value='reports'><CreatorReports platform='onlyfans' /></TabsContent>
+      <TabsContent value='daily'><OnlyFansDashboard /></TabsContent>
+    </Tabs>
+  );
 }

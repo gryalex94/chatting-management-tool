@@ -13,7 +13,7 @@ import { num } from '@/utils/numbers';
 import FanslyMessages from './FanslyMessages';
 import FanslyScripts from './FanslyScripts';
 import FanslyRevenue from './FanslyRevenue';
-import FanslyReports from './FanslyReports';
+import CreatorReports from './CreatorReports';
 import FanslySettings from './FanslySettings';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
@@ -43,7 +43,7 @@ export default function FanslyDashboard() {
         <TabsTrigger value='revenue'>Revenue</TabsTrigger>
         <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
-      <TabsContent value='reports'><FanslyReports /></TabsContent>
+      <TabsContent value='reports'><CreatorReports platform='fansly' /></TabsContent>
       <TabsContent value='overview'><FanslyOverview /></TabsContent>
       <TabsContent value='messages'><FanslyMessages /></TabsContent>
       <TabsContent value='revenue'><FanslyRevenue /></TabsContent>

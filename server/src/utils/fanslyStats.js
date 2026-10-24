@@ -63,10 +63,15 @@ async function all(build, page = 1000) {
 // ---------- Amsterdam days ----------
 const amsDay = (iso) => new Date(iso).toLocaleDateString('sv-SE', { timeZone: TZ });
 /** Midnight of an Amsterdam day, as a real instant. */
+// (worked out from Amsterdam's own wall clock, so it is right whatever clock the computer runs on)
+const AMS_PARTS = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+function amsOffset(ts) {
+  const p = Object.fromEntries(AMS_PARTS.formatToParts(new Date(ts)).map(x => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(ts / 1000) * 1000;
+}
 function dayStartUtc(day) {
-  const guess = new Date(`${day}T00:00:00Z`);
-  const local = new Date(guess.toLocaleString('en-US', { timeZone: TZ }));
-  return new Date(guess.getTime() - (local.getTime() - guess.getTime()));
+  const guess = Date.parse(`${day}T00:00:00Z`);
+  return new Date(guess - amsOffset(guess - amsOffset(guess)));
 }
 const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 
