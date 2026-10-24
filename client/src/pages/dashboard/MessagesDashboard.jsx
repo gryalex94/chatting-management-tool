@@ -254,7 +254,8 @@ function Messages({ cfg }) {
                   <TableCell className='whitespace-nowrap text-xs'>{r.page}</TableCell>
                   <TableCell className='max-w-md'>
                     {r.prev_fan_text && <p className='line-clamp-2 text-xs text-muted-foreground'>{r.prev_fan_text}</p>}
-                    <p className={cn('line-clamp-3 text-sm', r.unsent_at && 'line-through opacity-60')}>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p>
+                    <p className={cn('line-clamp-3 text-sm', r.unsent_at && 'text-muted-foreground')}>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p>
+                    {r.unsent_at && <p className='mt-0.5 flex items-center gap-1 text-xs text-red-500'><span className='size-1.5 rounded-full bg-red-500' />Unsent {when(r.unsent_at)}</p>}
                   </TableCell>
                   <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{when(r.sent_at)}</TableCell>
                   <TableCell className='whitespace-nowrap text-right text-xs tabular-nums'>{r.reply_s != null && r.reply_s <= 259200 ? wait(r.reply_s) : <span className='text-muted-foreground' title={r.reply_s != null ? `The fan's last message was ${wait(r.reply_s)} before: a new start, not a reply` : 'Not a reply to a fan message'}>·</span>}</TableCell>
@@ -263,7 +264,7 @@ function Messages({ cfg }) {
                     {r.sold_at ? <span className='text-emerald-600' title={`Bought ${when(r.sold_at)}`}>Yes{r.sold_net != null ? ` · ${money(r.sold_net)}` : ''}</span> : r.price > 0 ? <span className='text-muted-foreground'>No</span> : ''}
                   </TableCell>
                   <TableCell className='whitespace-nowrap text-xs'>
-                    {r.unsent_at ? <Badge variant='outline' className='text-red-600' title={`Unsent ${when(r.unsent_at)}`}>Unsent</Badge> : <Badge variant='outline'>Sent</Badge>}
+                    {r.unsent_at ? <span className='text-red-500'>Unsent</span> : <span className='text-muted-foreground'>Sent</span>}
                   </TableCell>
                   <TableCell className='max-w-40 truncate text-xs'>
                     <button type='button' className='hover:underline' title='Show only messages to this fan' onClick={() => set('fan')({ id: r.fan_account_id, name: fanName(r) })}>{fanName(r)}</button>
@@ -384,7 +385,7 @@ function MassList({ data, error, showPage }) {
                   <TableCell className='text-right text-sm tabular-nums'>{money(r.price)}</TableCell>
                   <TableCell className='text-right text-sm tabular-nums'>{r.price > 0 ? num(r.ppv_sold) : ''}</TableCell>
                   <TableCell className='text-right text-sm tabular-nums'>{r.sold_net ? money(r.sold_net) : ''}</TableCell>
-                  <TableCell className='whitespace-nowrap text-xs'>{r.unsent_at ? <Badge variant='outline' className='text-red-600'>unsent {when(r.unsent_at)}</Badge> : ''}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs'>{r.unsent_at ? <span className='flex items-center gap-1 text-red-500'><span className='size-1.5 rounded-full bg-red-500' />Unsent {when(r.unsent_at)}</span> : ''}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
