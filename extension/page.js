@@ -49,6 +49,9 @@
     if (!API.test(url) || !body || body.success === false) return null;
     const p = path(url), r = body.response, q = query(url);
     if (method === 'GET') {
+      // the vault, as Fansly's own page loads it (albums; one page of an album's media)
+      if (p === '/vault/albumsnew' && r) return { kind: 'vault_albums', data: { albums: (r.albums || []).map(a => ({ id: a.id, type: a.type, title: a.title, itemCount: a.itemCount, pos: a.pos })) } };
+      if (p === '/media/vaultnew' && r) return { kind: 'vault_media', data: { albumId: q.albumId || null, media: (r.media || []).map(slimMedia), albumMedia: (r.albumMedia || []).map(x => ({ mediaId: x.mediaId, albumId: x.albumId, customFilename: x.customFilename })) } };
       if (p === '/account/me' && r && r.account) return { kind: 'me', data: { ...slimAccount(r.account), subscriptionTiers: (r.account.subscriptionTiers || []).map(slimTier) } };
       if (p === '/subscriptions/tiers' && r) return { kind: 'tiers', data: { tiers: firstList(r).map(slimTier) } };
       if (p === '/messaging/groups' && r) return { kind: 'groups', data: { data: r.data, aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), groups: (r.aggregationData && r.aggregationData.groups || []).map(slimGroup) } } };

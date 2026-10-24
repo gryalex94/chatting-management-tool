@@ -11,9 +11,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import ScriptSteps from './ScriptSteps';
 
 const STAGE_LABEL = { opener: 'Opener', warmup: 'Warm-up', sexting: 'Sexting', ppv_pitch: 'PPV pitch', after_no: 'After a no', reengage: 'Re-engage', custom: 'Custom request', aftercare: 'Aftercare', other: 'Other' };
-const EMPTY = { stage: 'opener', title: '', text: '', account_id: 'all', active: true, item_ids: '' };
+const EMPTY = { stage: 'opener', title: '', text: '', account_id: 'all', active: true, item_ids: '', steps: [] };
 
 const NAME = { fansly: 'Fansly', onlyfans: 'OnlyFans', fanvue: 'Fanvue' };
 
@@ -43,7 +44,10 @@ export default function ScriptsLibrary({ platform = 'fansly' }) {
   const save = async () => {
     setSaving(true);
     const body = {
-      platform, stage: edit.stage, title: edit.title, text: edit.text, active: edit.active,
+      platform, stage: edit.stage, title: edit.title, active: edit.active,
+      // a sequence keeps a text too (the panel's list shows it): its first text step, else its title
+      text: edit.text?.trim() || (edit.steps || []).find(x => x.kind !== 'wait' && x.text?.trim())?.text || edit.title,
+      ...(panel ? { steps: (edit.steps || []).length ? edit.steps : null } : {}),
       account_id: edit.account_id === 'all' ? null : edit.account_id,
       ...(panel ? { item_ids: String(edit.item_ids || '').split(/[\s,]+/).filter(Boolean) } : {}),
     };
@@ -98,7 +102,15 @@ export default function ScriptsLibrary({ platform = 'fansly' }) {
                     <Badge variant='secondary' className='ml-2'>{s.account_id ? pageName(s.account_id) : 'All pages'}</Badge>
                     {s.item_ids?.length > 0 && <Badge variant='outline' className='ml-2'>{s.item_ids.length} vault item{s.item_ids.length === 1 ? '' : 's'}</Badge>}
                   </p>
-                  <p className='mt-1 whitespace-pre-wrap text-sm text-muted-foreground'>{s.text}</p>
+                  {s.steps?.length ? (
+                    <ol className='mt-1 grid gap-0.5 text-sm text-muted-foreground'>
+                      {s.steps.map((st, k) => (
+                        <li key={k}>{k + 1}. {st.kind === 'wait' ? <i>wait for his reply</i> : st.kind === 'media'
+                          ? <>{st.price > 0 ? <b>PPV ${Number(st.price).toFixed(2)}</b> : <b>free media</b>} ({st.media_ids.length} item{st.media_ids.length === 1 ? '' : 's'}){st.text ? `: ${st.text}` : ''}</>
+                          : st.text}</li>
+                      ))}
+                    </ol>
+                  ) : <p className='mt-1 whitespace-pre-wrap text-sm text-muted-foreground'>{s.text}</p>}
                   {panel && <p className='mt-1 text-xs text-muted-foreground'>
                     Used {s.uses} time{s.uses === 1 ? '' : 's'} in 90 days
                     {s.uses > 0 && ` · PPV sent after it ${s.ppv_after} time${s.ppv_after === 1 ? '' : 's'}, sold ${s.sold_after}${s.ppv_after ? ` (${Math.round((s.sold_after / s.ppv_after) * 100)}%)` : ''}`}
@@ -108,7 +120,7 @@ export default function ScriptsLibrary({ platform = 'fansly' }) {
                   {!panel && <Button size='icon' variant='ghost' className='size-7' aria-label='Copy'
                     onClick={() => navigator.clipboard.writeText(s.text).then(() => toast.success('Copied'), () => toast.error('Could not copy'))}><Copy className='size-3.5' /></Button>}
                   <Switch checked={s.active} onCheckedChange={() => toggle(s)} aria-label={panel ? 'Shown in the panel' : 'Shown'} />
-                  <Button size='icon' variant='ghost' className='size-7' onClick={() => setEdit({ ...s, account_id: s.account_id || 'all', item_ids: (s.item_ids || []).join(', ') })} aria-label='Edit'><Pencil className='size-3.5' /></Button>
+                  <Button size='icon' variant='ghost' className='size-7' onClick={() => setEdit({ ...s, account_id: s.account_id || 'all', item_ids: (s.item_ids || []).join(', '), steps: s.steps || [] })} aria-label='Edit'><Pencil className='size-3.5' /></Button>
                   <Button size='icon' variant='ghost' className='size-7' onClick={() => remove(s)} aria-label='Delete'><Trash2 className='size-3.5' /></Button>
                 </div>
               </li>
@@ -118,7 +130,7 @@ export default function ScriptsLibrary({ platform = 'fansly' }) {
       ))}
 
       <Dialog open={!!edit} onOpenChange={(v) => !v && setEdit(null)}>
-        <DialogContent className='sm:max-w-lg'>
+        <DialogContent className='max-h-[90vh] overflow-y-auto sm:max-w-xl'>
           <DialogHeader><DialogTitle>{edit?.id ? 'Edit script' : 'New script'}</DialogTitle></DialogHeader>
           {edit && (
             <div className='grid gap-3'>
@@ -145,15 +157,22 @@ export default function ScriptsLibrary({ platform = 'fansly' }) {
                 <Label>Title</Label>
                 <Input value={edit.title} maxLength={120} onChange={e => setEdit(x => ({ ...x, title: e.target.value }))} placeholder='e.g. Shower tease before the video' />
               </div>
-              <div className='grid gap-1.5'>
+              {panel && (
+                <div className='flex items-center gap-2 text-sm'>
+                  <Switch checked={!!(edit.steps || []).length} onCheckedChange={v => setEdit(x => ({ ...x, steps: v ? [{ kind: 'text', text: x.text || '' }] : [] }))} />
+                  A sequence: text and media / PPV steps, one after another
+                </div>
+              )}
+              {panel && (edit.steps || []).length > 0 ? (
+                <div className='grid gap-1.5'>
+                  <Label>Steps</Label>
+                  <ScriptSteps steps={edit.steps} onChange={steps => setEdit(x => ({ ...x, steps }))} accounts={info.accounts || []} account={edit.account_id} />
+                </div>
+              ) : <div className='grid gap-1.5'>
                 <Label>Text</Label>
                 <Textarea value={edit.text} rows={6} maxLength={4000} onChange={e => setEdit(x => ({ ...x, text: e.target.value }))} placeholder={panel ? 'hey {name}, just got out of the shower…' : 'hey babe, just got out of the shower…'} />
-              </div>
-              {panel && <div className='grid gap-1.5'>
-                <Label>Vault items (optional)</Label>
-                <Input value={edit.item_ids} onChange={e => setEdit(x => ({ ...x, item_ids: e.target.value }))} placeholder='Fansly media ids, separated by commas' />
-                <p className='text-xs text-muted-foreground'>The panel warns when the fan already bought one of these.</p>
               </div>}
+
               <label className='flex items-center gap-2 text-sm'><Switch checked={edit.active} onCheckedChange={v => setEdit(x => ({ ...x, active: v }))} /> {panel ? 'Shown in the panel' : 'Shown (not hidden)'}</label>
             </div>
           )}

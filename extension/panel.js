@@ -73,6 +73,10 @@
     select { font: inherit; color: inherit; background: #1e1e24; border: 1px solid #34343c; border-radius: 6px; padding: 3px 6px; max-width: 100%; }
     .tmsg { background: #1e1e24; border: 1px solid #2c2c33; border-radius: 6px; padding: 5px 8px; margin: 4px 0; }
     .tr-out { margin-top: 6px; border-color: #4f46e5; }
+    .seqbox { cursor: default; }
+    .seq { margin: 4px 0 6px 16px; padding: 0; font-size: 12px; color: #a1a1aa; }
+    .seq li.done { text-decoration: line-through; opacity: .6; }
+    .seq li.now { color: #e7e7ea; font-weight: 600; }
     section { border: 1px solid #2c2c33; border-radius: 8px; margin: 8px 0; background: #1b1b20; }
     section > h3 { margin: 0; padding: 7px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9a9aa5; cursor: pointer; display: flex; justify-content: space-between; user-select: none; }
     section > .c { padding: 2px 10px 10px; }
@@ -269,7 +273,7 @@
   async function loadScripts() {
     if (!st.signedIn || !st.accountId || st.scriptsFor === st.accountId) return;
     st.scriptsFor = st.accountId;
-    try { const r = await call('GET', `/api/fansly/panel/scripts?account=${encodeURIComponent(st.accountId)}`); st.scripts = r.scripts || []; }
+    try { const r = await call('GET', `/api/fansly/panel/scripts?account=${encodeURIComponent(st.accountId)}`); st.scripts = r.scripts || []; st.scriptMedia = r.media || {}; st.albums = r.albums || []; }
     catch (e) { st.scripts = []; st.scriptsFor = null; st.error = st.error || e.message; }
     render();
   }
@@ -602,6 +606,71 @@
     return section('translate', 'Translator', content, foreign() ? h('span', { class: 'pill' }, lang.name) : null);
   }
 
+  // ---------- sequences: text and vault media / PPV steps, one after another, for this fan ----------
+  const len = (sec) => (sec == null ? '' : `${Math.floor(sec / 60)}:${String(Math.round(sec % 60)).padStart(2, '0')}`);
+  const mediaName = (id) => { const m = (st.scriptMedia || {})[id]; return m ? (m.filename || `${m.type === 2 ? 'Video' : 'Photo'}${m.duration_s ? ` ${len(m.duration_s)}` : ''}`) : 'Vault item'; };
+  const albumName = (id) => { const a = (st.albums || []).find(x => x.album_id === id); return a ? (a.title || `album ${a.pos != null ? a.pos + 1 : ''}`.trim()) : null; };
+  function stepOf(sc) { const r = st.data && st.data.runs && st.data.runs[sc.id]; return r ? r.step : 0; }
+  async function setStep(sc, step) {
+    const fan = st.fanId; if (!fan) return;
+    try { await call('POST', `/api/fansly/panel/scripts/${sc.id}/step`, { account: st.accountId, fan, step }); if (st.data && fan === st.fanId) { st.data.runs = { ...(st.data.runs || {}), [sc.id]: { step } }; } }
+    catch (e) { flash(e.message); }
+    render();
+  }
+  async function stepText(text) {
+    let t = fillPlaceholders(text || '');
+    if (!t.trim()) return;
+    if (foreign() && st.tr.scripts) {
+      try { const r = await call('POST', '/api/fansly/panel/translate', { account: st.accountId, fan: st.fanId, text: t }); if (r.text) t = r.text; } catch { /* the English goes in */ }
+    }
+    const where = await insertText(t);
+    flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box');
+  }
+  // the price goes into Fansly's own price box ("Amount"), once the media is added there
+  async function fillPrice(price) {
+    const msg = { type: 'cmt-price', price: Number(price).toFixed(2) };
+    const r = SIDE ? (st.tabId != null ? await new Promise((res) => { try { chrome.tabs.sendMessage(st.tabId, msg, (x) => { void chrome.runtime.lastError; res(x || null); }); } catch { res(null); } }) : null)
+      : { ok: setPriceBox(msg.price) };
+    flash(r && r.ok ? `Price ${msg.price} filled in: check it and press send yourself` : 'Fansly\'s price box is not open: add the media from the Vault first, then press this again');
+  }
+  function setPriceBox(price) {
+    const box = [...document.querySelectorAll('input[aria-label="Amount"]')].find(el => el.getBoundingClientRect().width > 0);
+    if (!box) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    box.focus(); setter.call(box, String(price)); box.dispatchEvent(new Event('input', { bubbles: true })); box.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  }
+  function sequence(sc) {
+    const steps = sc.steps || [], at = Math.min(stepOf(sc), steps.length), cur = steps[at];
+    const owned = new Set((st.data && st.data.owned_media_ids) || []), sent = new Set((st.data && st.data.sent_media_ids) || []);
+    const head = h('div', { class: 'st' }, sc.title, h('span', { class: 'pill' }, at >= steps.length ? 'done' : `step ${at + 1} of ${steps.length}`));
+    const list = h('ol', { class: 'seq' }, steps.map((x, k) => h('li', { class: k < at ? 'done' : k === at ? 'now' : '' },
+      x.kind === 'wait' ? 'wait for his reply' : x.kind === 'media' ? `${x.price > 0 ? `PPV $${Number(x.price).toFixed(2)}` : 'free'}: ${x.media_ids.map(mediaName).join(', ')}` : fillPlaceholders(x.text || '').slice(0, 60))));
+    const body = [];
+    if (!st.fanId) body.push(h('div', { class: 'muted small' }, 'Open a chat to use it with him.'));
+    else if (!cur) body.push(h('div', { class: 'row' }, h('span', { class: 'muted small' }, 'He has had every step.'), h('button', { onclick: () => setStep(sc, 0) }, 'Start again')));
+    else if (cur.kind === 'wait') body.push(h('div', { class: 'row' }, h('span', { class: 'muted small' }, 'Wait for his reply.'), h('button', { class: 'primary', onclick: () => setStep(sc, at + 1) }, 'He replied: next')));
+    else {
+      if (cur.text) body.push(h('div', { class: 'tx' }, fillPlaceholders(cur.text)));
+      if (cur.kind === 'media') {
+        const has = cur.media_ids.filter(id => owned.has(id)), had = cur.media_ids.filter(id => sent.has(id) && !owned.has(id));
+        body.push(h('div', { class: 'small' }, h('b', null, cur.media_ids.length > 1 ? `Bundle of ${cur.media_ids.length}: ` : ''), cur.media_ids.map(id => {
+          const m = (st.scriptMedia || {})[id], al = m && (m.album_ids || []).map(albumName).filter(Boolean)[0];
+          return h('div', null, `• ${mediaName(id)}${al ? ` (${al})` : ''}`);
+        })));
+        if (has.length) body.push(h('div', { class: 'small', style: 'color:#fca5a5' }, `He already bought: ${has.map(mediaName).join(', ')}`));
+        if (had.length) body.push(h('div', { class: 'small', style: 'color:#fcd34d' }, `Already sent to him: ${had.map(mediaName).join(', ')}`));
+        body.push(h('div', { class: 'muted small' }, `In Fansly: add ${cur.media_ids.length > 1 ? 'these' : 'it'} from the Vault${cur.price > 0 ? `, then fill the price ($${Number(cur.price).toFixed(2)})` : ''} and send.`));
+      }
+      body.push(h('div', { class: 'row' },
+        cur.text ? h('button', { onclick: () => stepText(cur.text) }, foreign() && st.tr.scripts ? `Text in ${st.tr.language.name}` : 'Put text in box') : null,
+        cur.kind === 'media' && cur.price > 0 ? h('button', { onclick: () => fillPrice(cur.price) }, `Fill price $${Number(cur.price).toFixed(2)}`) : null,
+        h('button', { class: 'primary', style: 'margin-left:auto', onclick: () => { setStep(sc, at + 1); call('POST', `/api/fansly/panel/scripts/${sc.id}/use`, { account: st.accountId, fan: st.fanId }).catch(() => {}); } }, 'Sent: next')));
+    }
+    if (at > 0) body.push(h('div', { class: 'row small' }, h('button', { onclick: () => setStep(sc, at - 1) }, 'Back a step'), h('button', { onclick: () => setStep(sc, 0) }, 'Start over')));
+    return h('div', { class: 'script seqbox' }, head, list, body);
+  }
+
   function scripts() {
     const all = st.scripts;
     if (!all) return section('scripts', 'Scripts', h('div', { class: 'muted small' }, 'Loading…'));
@@ -619,6 +688,7 @@
           h('div', { class: 'h', onclick: () => { if (st.openStages.has(k)) st.openStages.delete(k); else st.openStages.add(k); save(); render(); } }, h('span', null, STAGE_LABEL[k], h('span', { class: 'pill' }, String(byStage.get(k).length))), h('span', null, open ? '–' : '+')),
           open ? h('div', null, byStage.get(k).map(s => {
             const has = (s.item_ids || []).filter(id => owned.has(String(id)));
+            if (s.steps && s.steps.length) return sequence(s);
             return h('div', { class: 'script', title: 'Click: put it in the message box', onclick: () => useScript(s) },
               h('div', { class: 'st' }, s.title, has.length ? h('span', { class: 'pill', style: 'color:#fcd34d' }, 'he owns its content') : null),
               h('div', { class: 'tx' }, fillPlaceholders(s.text)));

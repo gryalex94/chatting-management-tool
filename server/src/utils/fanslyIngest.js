@@ -207,7 +207,7 @@ function mediaItemRow(ctx, am) {
   try { duration = JSON.parse(media.metadata || '{}').duration ?? null; } catch { /* not JSON */ }
   const forFan = (am.whitelist || []).map(w => str(w.accountId)).find(id => id !== ctx.creatorId) || null;
   return {
-    account_id: ctx.account.id, item_id: str(am.id), kind: 'media', price: itemPrice(am),
+    account_id: ctx.account.id, item_id: str(am.id), kind: 'media', price: itemPrice(am), media_id: str(am.mediaId),
     media_type: media.type ?? null, mimetype: media.mimetype || null, duration_s: duration, media_count: 1,
     for_fan_account_id: forFan, lifetime_sales: am.saleStats?.sales ?? null, lifetime_net: am.saleStats ? dollars(am.saleStats.total) : null,
     created_at_fansly: tsSec(am.createdAt), updated_at: new Date().toISOString(),
@@ -258,6 +258,7 @@ async function applyEvents(ctx, events) {
     }
   };
   const unsent = new Set(), broadcasts = new Map(), historyDone = new Set(), netRows = [];
+  const vaultAlbums = new Map(), vaultMedia = new Map();
   const tiers = {};                    // tier id → { name, color, price }: the chip colours in Fansly's chat list
   const takeTier = (id, name, color, price) => { if (!id) return; const k = str(id); tiers[k] = { ...(tiers[k] || {}), ...(name ? { name } : {}), ...(color ? { color } : {}), ...(price != null ? { price: dollars(price) } : {}) }; };
 
@@ -416,6 +417,22 @@ async function applyEvents(ctx, events) {
           for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
           bump('notifications', (d.notifications || []).length); break;
         }
+        case 'vault_albums': {                             // the vault's albums
+          for (const a of d.albums || []) if (a && a.id != null) vaultAlbums.set(str(a.id), { account_id: ctx.account.id, album_id: str(a.id), title: a.title || null, type: a.type ?? null, item_count: a.itemCount ?? null, pos: a.pos ?? null, updated_at: new Date().toISOString() });
+          break;
+        }
+        case 'vault_media': {                              // one page of an album's media
+          const name = new Map((d.albumMedia || []).map(x => [str(x.mediaId), x.customFilename || null]));
+          for (const m of d.media || []) {
+            if (!m || m.id == null) continue;
+            let duration = null; try { duration = JSON.parse(m.metadata || '{}').duration ?? null; } catch { /* not JSON */ }
+            const prev = vaultMedia.get(str(m.id));
+            vaultMedia.set(str(m.id), { account_id: ctx.account.id, media_id: str(m.id), type: m.type ?? null, mimetype: m.mimetype || null, width: m.width ?? null, height: m.height ?? null,
+              duration_s: duration, filename: name.get(str(m.id)) || m.filename || null, album_ids: [...new Set([...(prev?.album_ids || []), ...(d.albumId ? [str(d.albumId)] : [])])],
+              created_at_fansly: m.createdAt ? (m.createdAt > 1e12 ? tsMs(m.createdAt) : tsSec(m.createdAt)) : null, updated_at: new Date().toISOString() });
+          }
+          bump('vault_media_seen', (d.media || []).length); break;
+        }
         case 'net': {                                      // the request log (popup switch): addresses and counts only
           netRows.push({ organisation_id: ctx.user.organisationId, account_id: ctx.account.id, user_id: ctx.user.id, at: new Date(e.at || Date.now()).toISOString(),
             page: String(d.page || '').slice(0, 200), method: String(d.method || '').slice(0, 10), path: String(d.path || '').slice(0, 300), query: d.query || {}, status: d.status ?? null, rows: d.rows || {},
@@ -498,6 +515,26 @@ async function applyEvents(ctx, events) {
     counts.unattributed = rows.filter(r => r.attribution === 'unattributed').length;
   }
   if (items.size) { await upsert('fansly_items', [...items.values()], 'account_id,item_id'); counts.items_written = items.size; }
+  // a bundle's vault media: the media of its items (known now, or from earlier batches)
+  const bundles = [...items.values()].filter(r => r.kind === 'bundle' && Array.isArray(r.raw?.accountMediaIds) && r.raw.accountMediaIds.length);
+  if (bundles.length) {
+    const ids = [...new Set(bundles.flatMap(b => b.raw.accountMediaIds.map(String)))];
+    const { data: its } = await supabaseAdmin.from('fansly_items').select('item_id, media_id').eq('account_id', ctx.account.id).in('item_id', ids.slice(0, 1000));
+    const mediaOf = new Map((its || []).filter(x => x.media_id).map(x => [x.item_id, x.media_id]));
+    for (const b of bundles) {
+      const list = [...new Set(b.raw.accountMediaIds.map(id => mediaOf.get(String(id))).filter(Boolean))];
+      if (list.length) await supabaseAdmin.from('fansly_items').update({ media_ids: list }).eq('account_id', ctx.account.id).eq('item_id', b.item_id);
+    }
+  }
+  // the vault, as Fansly's page loaded it
+  if (vaultAlbums.size) { await upsert('fansly_vault_albums', [...vaultAlbums.values()], 'account_id,album_id'); counts.vault_albums = vaultAlbums.size; }
+  if (vaultMedia.size) {
+    // a media item seen in several albums keeps all of them
+    const ids = [...vaultMedia.keys()];
+    const { data: had } = await supabaseAdmin.from('fansly_vault_media').select('media_id, album_ids').eq('account_id', ctx.account.id).in('media_id', ids.slice(0, 1000));
+    for (const h of had || []) { const r = vaultMedia.get(h.media_id); if (r) r.album_ids = [...new Set([...(h.album_ids || []), ...r.album_ids])]; }
+    await upsert('fansly_vault_media', [...vaultMedia.values()], 'account_id,media_id'); counts.vault_media = vaultMedia.size;
+  }
   if (fans.size) {
     // a fan row we already have keeps what the new one doesn't say
     const ids = [...fans.keys()];

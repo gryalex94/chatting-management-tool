@@ -189,6 +189,14 @@ panel.get('/fan', async (req, res) => {
     const lastId = msgs[msgs.length - 1]?.message_id || null;
     // items he already owns: what he bought (for "he already owns this" next to scripts with vault items)
     const owned = [...new Set((tx || []).filter(t => t.item_id && t.category !== 'refund').map(t => String(t.item_id)))];
+    // the same as vault media (a PPV is a priced copy of a vault item): what he owns, and what was already sent to him
+    const sentItems = msgs.filter(m => !m.from_fan).flatMap(m => (m.attachments || []).map(x => String(x.content_id || x.contentId || '')).filter(Boolean));
+    const boughtItems = [...owned, ...msgs.filter(m => !m.from_fan && m.sold_at).flatMap(m => (m.attachments || []).map(x => String(x.content_id || x.contentId || '')).filter(Boolean))];
+    const itemIds = [...new Set([...sentItems, ...boughtItems])];
+    const { data: its } = itemIds.length ? await supabaseAdmin.from('fansly_items').select('item_id, media_id, media_ids').eq('account_id', account.id).in('item_id', itemIds.slice(0, 1000)) : { data: [] };
+    const mediaOf = new Map((its || []).map(x => [x.item_id, x.media_id ? [x.media_id] : (x.media_ids || [])]));
+    const toMedia = (ids) => [...new Set(ids.flatMap(id => mediaOf.get(id) || []))];
+    const { data: runs } = await supabaseAdmin.from('fansly_script_runs').select('script_id, step, updated_at').eq('account_id', account.id).eq('fan_account_id', fanId);
     res.json({
       found: true, page, shift,
       fan: { ...fan, name: fan.nickname || fan.display_name || fan.username || null, lists: listNames,
@@ -202,6 +210,8 @@ panel.get('/fan', async (req, res) => {
       note: { text: note?.text || '', updated_at: note?.updated_at || null, by: note?.users?.name || null },
       summary: summary ? { ...summary.summary, built_at: summary.built_at, stale: summary.last_message_id !== lastId, messages_used: summary.messages_used } : null,
       owned_item_ids: owned,
+      owned_media_ids: toMedia(boughtItems), sent_media_ids: toMedia(sentItems),
+      runs: Object.fromEntries((runs || []).map(r => [r.script_id, { step: r.step, at: r.updated_at }])),
       // where else he sits in the agency and what he spent there (utils/fanAgency.js)
       agency: await Agency.agencySpend(req.user.organisationId, fanId, { thisAccountId: account.id, fanslyOnly: true }).catch(e => { console.error('[fansly-panel] agency:', e.message); return null; }),
     });
@@ -400,15 +410,34 @@ panel.get('/scripts', async (req, res) => {
   try {
     const account = await accountOf(req, req.query.account);
     if (account && !account.assigned) return res.json({ stages: STAGES, scripts: [], not_assigned: true });
-    let q = supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, item_ids').eq('organisation_id', req.user.organisationId).eq('platform', 'fansly').eq('active', true);
+    let q = supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, item_ids, steps').eq('organisation_id', req.user.organisationId).eq('platform', 'fansly').eq('active', true);
     q = account ? q.or(`account_id.is.null,account_id.eq.${account.id}`) : q.is('account_id', null);
     const { data, error } = await q.order('position').order('created_at');
     if (error) throw error;
-    res.json({ stages: STAGES, scripts: data || [] });
+    // the vault media the steps use: name, photo or video, length (to find it in Fansly's vault picker)
+    const ids = [...new Set((data || []).flatMap(sc => (sc.steps || []).flatMap(st => st.media_ids || [])))];
+    const { data: media } = ids.length && account ? await supabaseAdmin.from('fansly_vault_media').select('media_id, type, filename, duration_s, width, height, created_at_fansly, album_ids').eq('account_id', account.id).in('media_id', ids.slice(0, 1000)) : { data: [] };
+    const { data: albums } = account ? await supabaseAdmin.from('fansly_vault_albums').select('album_id, title, type, item_count, pos').eq('account_id', account.id) : { data: [] };
+    res.json({ stages: STAGES, scripts: data || [], media: Object.fromEntries((media || []).map(m => [m.media_id, m])), albums: albums || [] });
   } catch (e) { fail(res, e, 'load the scripts'); }
 });
 
 // POST /api/fansly/panel/scripts/:id/use { account, fan }
+// POST /api/fansly/panel/scripts/:id/step { account, fan, step } — where this fan is in a sequence (the next step to do)
+panel.post('/scripts/:id/step', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fan = /^\d{5,25}$/.test(String(req.body?.fan || '')) ? String(req.body.fan) : null;
+    const { data: sc } = await supabaseAdmin.from('fansly_scripts').select('id, steps').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!sc || !fan) return res.status(404).json({ error: 'No such script or fan' });
+    const step = Math.max(0, Math.min((sc.steps || []).length, Math.floor(Number(req.body?.step) || 0)));
+    const { error } = await supabaseAdmin.from('fansly_script_runs').upsert({ account_id: account.id, fan_account_id: fan, script_id: sc.id, step, updated_at: new Date().toISOString(), updated_by: req.user.id }, { onConflict: 'account_id,fan_account_id,script_id' });
+    if (error) throw error;
+    res.json({ ok: true, step });
+  } catch (e) { fail(res, e, 'save the step'); }
+});
+
 panel.post('/scripts/:id/use', async (req, res) => {
   try {
     const { data: s } = await supabaseAdmin.from('fansly_scripts').select('id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
@@ -580,7 +609,7 @@ scripts.get('/', async (req, res) => {
   const orgId = req.user.organisationId;
   const platform = platformOf(req.query.platform);
   try {
-    const { data: rows, error } = await supabaseAdmin.from('fansly_scripts').select('id, account_id, creator_id, stage, title, text, position, active, item_ids, created_at, updated_at')
+    const { data: rows, error } = await supabaseAdmin.from('fansly_scripts').select('id, account_id, creator_id, stage, title, text, position, active, item_ids, steps, created_at, updated_at')
       .eq('organisation_id', orgId).eq('platform', platform).order('position').order('created_at');
     if (error) throw error;
     // the page a script belongs to goes out as account_id on every platform
@@ -620,6 +649,47 @@ scripts.get('/', async (req, res) => {
   } catch (e) { fail(res, e, 'load the scripts'); }
 });
 
+// GET /api/fansly/scripts/vault?account=<page id>&album=&q=&type=&offset= → the page's vault as the extension saw it,
+// with what each item sold for in chats (for picking media for a sequence's steps)
+scripts.get('/vault', async (req, res) => {
+  try {
+    const orgId = req.user.organisationId;
+    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id').eq('id', String(req.query.account || '')).eq('organisation_id', orgId).maybeSingle();
+    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
+    const offset = Math.max(0, Math.floor(Number(req.query.offset) || 0));
+    let q = supabaseAdmin.from('fansly_vault_media').select('media_id, type, filename, duration_s, width, height, created_at_fansly, album_ids', { count: 'exact' }).eq('account_id', acc.id);
+    if (/^\d{5,25}$/.test(String(req.query.album || ''))) q = q.contains('album_ids', [String(req.query.album)]);
+    if (['1', '2'].includes(String(req.query.type || ''))) q = q.eq('type', Number(req.query.type));
+    const term = String(req.query.q || '').replace(/[%_,()]/g, '').trim().slice(0, 60);
+    if (term) q = q.ilike('filename', `%${term}%`);
+    const { data: media, count, error } = await q.order('created_at_fansly', { ascending: false, nullsFirst: false }).range(offset, offset + 59);
+    if (error) throw error;
+    const ids = (media || []).map(m => m.media_id);
+    const { data: items } = ids.length ? await supabaseAdmin.from('fansly_items').select('media_id, price, lifetime_sales, lifetime_net').eq('account_id', acc.id).in('media_id', ids) : { data: [] };
+    const sold = new Map();
+    for (const it of items || []) { const x = sold.get(it.media_id) || { sent: 0, sales: 0, net: 0 }; x.sent += 1; x.sales += it.lifetime_sales || 0; x.net += Number(it.lifetime_net) || 0; sold.set(it.media_id, x); }
+    const { data: albums } = await supabaseAdmin.from('fansly_vault_albums').select('album_id, title, type, item_count, pos').eq('account_id', acc.id).order('pos');
+    res.json({ total: count || 0, offset, media: (media || []).map(m => ({ ...m, chats: sold.get(m.media_id) || null })), albums: albums || [] });
+  } catch (e) { fail(res, e, 'load the vault'); }
+});
+
+/** A script's steps, checked: up to 20 of text / vault media (free or a price in dollars) / wait for his reply. */
+function cleanSteps(v) {
+  if (v == null || (Array.isArray(v) && !v.length)) return null;
+  if (!Array.isArray(v)) throw Object.assign(new Error('The steps could not be read'), { status: 400 });
+  const out = v.slice(0, 20).map(st => {
+    const kind = ['text', 'media', 'wait'].includes(st?.kind) ? st.kind : null;
+    if (!kind) throw Object.assign(new Error('A step is text, media or wait'), { status: 400 });
+    const text = String(st.text || '').slice(0, 4000);
+    if (kind === 'text' && !text.trim()) throw Object.assign(new Error('A text step needs its text'), { status: 400 });
+    if (kind !== 'media') return kind === 'wait' ? { kind } : { kind, text };
+    const media_ids = [...new Set((st.media_ids || []).map(String).filter(x => /^\d{5,25}$/.test(x)))].slice(0, 20);
+    if (!media_ids.length) throw Object.assign(new Error('A media step needs at least one item from the vault'), { status: 400 });
+    const price = Math.max(0, Math.min(1000, Math.round((Number(st.price) || 0) * 100) / 100));
+    return { kind, text, media_ids, price };
+  });
+  return out;
+}
 function scriptFields(body, partial) {
   const out = {};
   if (!partial || body.title != null) { const t = String(body.title || '').trim().slice(0, 120); if (!t) throw Object.assign(new Error('A script needs a title'), { status: 400 }); out.title = t; }
@@ -627,6 +697,7 @@ function scriptFields(body, partial) {
   if (!partial || body.stage != null) out.stage = STAGES.includes(body.stage) ? body.stage : 'other';
   if (body.account_id !== undefined) out.account_id = /^[0-9a-f-]{36}$/i.test(String(body.account_id || '')) ? String(body.account_id) : null;
   if (body.active != null) out.active = !!body.active;
+  if (body.steps !== undefined) out.steps = cleanSteps(body.steps);
   if (body.item_ids !== undefined) out.item_ids = Array.isArray(body.item_ids) ? body.item_ids.map(String).filter(x => /^\d{5,25}$/.test(x)).slice(0, 50) : null;
   return out;
 }

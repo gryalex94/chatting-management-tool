@@ -256,6 +256,14 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
+    // a sequence's PPV step: its price into Fansly's own price box ("Amount"), once the chatter added the media
+    if (msg && msg.type === 'cmt-price') {
+      const box = [...document.querySelectorAll('input[aria-label="Amount"]')].find(el => el.getBoundingClientRect().width > 0);
+      if (!box) { respond({ ok: false }); return false; }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      box.focus(); setter.call(box, String(msg.price)); box.dispatchEvent(new Event('input', { bubbles: true })); box.dispatchEvent(new Event('change', { bubbles: true }));
+      respond({ ok: true }); return false;
+    }
     if (msg && msg.type === 'cmt-insert' && typeof msg.text === 'string') { respond({ ok: insert(msg.text) }); return false; }
     if (msg && msg.type === 'cmt-fetch-stop') { stopped = true; respond({ ok: true }); return false; }
     return false;
