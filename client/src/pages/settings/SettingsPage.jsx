@@ -113,7 +113,6 @@ export default function SettingsPage() {
   const [members, setMembers] = useState([]);
   const [creators, setCreators] = useState([]);
   const [chatters, setChatters] = useState([]);
-  const [shifts, setShifts] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Forms
@@ -124,14 +123,13 @@ export default function SettingsPage() {
   const [memberForm, setMemberForm] = useState({ name:'', email:'', password:'', role:'chatter' });
   const [inviteToken, setInviteToken] = useState(null);
   const [invitations, setInvitations] = useState([]);
-  const [shiftForm, setShiftForm] = useState({ name:'', start_time:'', end_time:'' });
   const [templates, setTemplates] = useState([]);
   const [templateForm, setTemplateForm] = useState(EMPTY_TEMPLATE);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   // ?tab=fanvue opens that tab (where Fanvue's approval comes back to).
   // (the old Infloww and Fanvue tabs now live under Pages)
-  const [tab, setTab] = useState(() => { const t = new URLSearchParams(window.location.search).get('tab'); return !t || ['infloww', 'fanvue'].includes(t) ? 'creators' : t; });
+  const [tab, setTab] = useState(() => { const t = new URLSearchParams(window.location.search).get('tab'); return !t || ['infloww', 'fanvue', 'shifts', 'cycles'].includes(t) ? 'creators' : t; });
   const [creatorDetail, setCreatorDetail] = useState(null);
   const [tzOffset, setTzOffset] = useState(getInflowwOffset());
   const [savingTz, setSavingTz] = useState(false);
@@ -142,13 +140,13 @@ export default function SettingsPage() {
 
   const load = useCallback(async()=>{
     try {
-      const [m,cr,ch,sh,tp,cfg]=await Promise.all([
+      const [m,cr,ch,tp,cfg]=await Promise.all([
         api.get('/api/organisations/members'), api.get('/api/creators'),
-        api.get('/api/chatters'), api.get('/api/shifts'),
+        api.get('/api/chatters'),
         api.get('/api/tasks/templates').catch(()=>({data:[]})),
         api.get('/api/organisations/config').catch(()=>({data:{config:{}}})),
       ]);
-      setMembers(m.data); setCreators(cr.data); setChatters(ch.data); setShifts(sh.data); setTemplates(tp.data);
+      setMembers(m.data); setCreators(cr.data); setChatters(ch.data); setTemplates(tp.data);
       const off = Number(cfg.data?.config?.infloww_offset_hours) || 0;
       setTzOffset(off); setInflowwOffset(off);
     } catch(e){console.error(e?.message || e?.toString?.());}
@@ -205,12 +203,6 @@ export default function SettingsPage() {
     } catch(err) { toast.error(err.response?.data?.error||'Failed'); }
   }
 
-  async function addShift(e) {
-    e.preventDefault(); if(!shiftForm.name||!shiftForm.start_time||!shiftForm.end_time) return;
-    try { await api.post('/api/shifts',shiftForm); toast.success('Shift added'); setShiftForm({name:'',start_time:'',end_time:''}); load(); }
-    catch { toast.error('Failed'); }
-  }
-
   async function updateChatterStatus(id, status) {
     try { await api.put(`/api/chatters/${id}`,{status}); toast.success('Updated'); load(); }
     catch { toast.error('Failed'); }
@@ -259,25 +251,13 @@ export default function SettingsPage() {
     catch{toast.error('Failed');}
   }
 
-  async function startCycle() {
-    try{await api.post('/api/cycles/start');toast.success('Cycle started');load();}catch{toast.error('Failed');}
-  }
-
-  async function closeWeek() {
-    try{
-      const{data:active}=await api.get('/api/cycles/active');
-      if(!active) return toast.error('No active cycle');
-      await api.post(`/api/cycles/${active.id}/close`);
-      toast.success('Week closed! Tasks rolled over.');load();
-    }catch{toast.error('Failed');}
-  }
-
   // The person opens this link to choose a name and password (pages/auth/AcceptInvitePage).
   const inviteLink = inviteToken ? `${window.location.origin}/invite/${inviteToken}` : '';
   const copyToken = () => { try { navigator.clipboard?.writeText(inviteLink); toast.success('Invite link copied'); } catch { /* ignore */ } };
 
   // Pages: the platform picked in the menu — its connection (Infloww, Fanvue, the Fansly extension) and its pages
-  const tabs = [['creators','Pages'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles']];
+  // (shift times live on the Shifts page; task cycles run by themselves)
+  const tabs = [['creators','Pages'],['chatters','Chatters'],['team','Team'],['templates','Templates']];
 
   if(loading) return (
     <div className='flex flex-col gap-4 sm:gap-6'>
@@ -330,11 +310,9 @@ export default function SettingsPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className='gap-4'>
-        <div className='-mx-1 overflow-x-auto px-1'>
-          <TabsList>
-            {tabs.map(([k,l])=><TabsTrigger key={k} value={k}>{l}</TabsTrigger>)}
-          </TabsList>
-        </div>
+        <TabsList className='h-auto flex-wrap'>
+          {tabs.map(([k,l])=><TabsTrigger key={k} value={k}>{l}</TabsTrigger>)}
+        </TabsList>
 
         {/* Pages: the platform's connection, then its pages */}
         <TabsContent value='creators' className='grid gap-4'>
@@ -585,30 +563,6 @@ export default function SettingsPage() {
           )}
         </TabsContent>
 
-        {/* Shifts */}
-        <TabsContent value='shifts'>
-          <Section title='Shifts' sub={`${shifts.length} shifts configured`}>
-            {shifts.length === 0 ? <Empty>No shifts yet.</Empty> : (
-              <div className='grid gap-1.5'>
-                {shifts.map(s=>(
-                  <div key={s.id} className='flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border bg-background px-3 py-2'>
-                    <Clock className='size-4 text-muted-foreground'/>
-                    <span className='min-w-0 flex-1 text-sm font-medium'>{s.name}</span>
-                    <span className='font-mono text-xs tabular-nums text-muted-foreground'>{s.start_time?.slice(0,5)} – {s.end_time?.slice(0,5)}</span>
-                    {s.is_default&&<Chip tone='neutral'>Default</Chip>}
-                    <span className='text-xs text-muted-foreground'>{s.shift_type}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {isAdmin&&<form onSubmit={addShift} className='flex flex-wrap gap-2'>
-              <Input value={shiftForm.name} onChange={e=>setShiftForm(p=>({...p,name:e.target.value}))} placeholder='Shift name' aria-label='Shift name' required className='min-w-40 flex-1'/>
-              <Input value={shiftForm.start_time} onChange={e=>setShiftForm(p=>({...p,start_time:e.target.value}))} type='time' aria-label='Start time' required className='w-28'/>
-              <Input value={shiftForm.end_time} onChange={e=>setShiftForm(p=>({...p,end_time:e.target.value}))} type='time' aria-label='End time' required className='w-28'/>
-              <Button type='submit'><Plus/>Add</Button>
-            </form>}
-          </Section>
-        </TabsContent>
 
         {/* Templates */}
         <TabsContent value='templates'>
@@ -683,15 +637,6 @@ export default function SettingsPage() {
           </Section>
         </TabsContent>
 
-        {/* Cycles */}
-        <TabsContent value='cycles'>
-          <Section title='Weekly cycles' sub='Manage task cycles'>
-            <div className='flex flex-wrap gap-2'>
-              <Button onClick={startCycle}><Plus/>Start new cycle</Button>
-              <Button variant='outline' onClick={closeWeek}>Close week</Button>
-            </div>
-          </Section>
-        </TabsContent>
       </Tabs>
 
       {creatorDetail && (
