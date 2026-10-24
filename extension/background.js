@@ -199,22 +199,35 @@ async function lockedNow() {
   const { session } = await settings();
   return !(session && session.token && state.staff === true);
 }
+async function signedOutNow() { const { session } = await settings(); return !(session && session.token); }
+const SIGN_IN = chrome.runtime.getURL('signin.html');
 async function applyLock() {
   const locked = await lockedNow();
+  const signedOut = await signedOutNow();
+  const main = ['main_frame'];
+  // signed out: Fansly itself is closed, our sign-in page shows instead;
+  // a chatter: Fansly opens on the chats only (any other Fansly address goes to the chats before it loads)
+  const rules = !locked ? [] : [
+    { id: 1, priority: 1, action: { type: 'block' }, condition: { resourceTypes: main, excludedRequestDomains: OPEN_SITES } },
+    signedOut
+      ? { id: 2, priority: 2, action: { type: 'redirect', redirect: { extensionPath: '/signin.html' } }, condition: { resourceTypes: main, requestDomains: ['fansly.com'] } }
+      : { id: 2, priority: 2, action: { type: 'redirect', redirect: { url: 'https://fansly.com/messages' } }, condition: { resourceTypes: main, requestDomains: ['fansly.com'] } },
+    ...(signedOut ? [] : [{ id: 3, priority: 3, action: { type: 'allow' }, condition: { resourceTypes: main, urlFilter: '|https://fansly.com/messages' } }]),
+  ];
   try {
-    await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [1],
-      addRules: locked ? [{ id: 1, priority: 1, action: { type: 'block' }, condition: { resourceTypes: ['main_frame'], excludedRequestDomains: OPEN_SITES } }] : [],
-    });
+    await chrome.declarativeNetRequest.updateDynamicRules({ removeRuleIds: [1, 2, 3], addRules: rules });
   } catch (e) { console.warn('[cmt] site lock:', e.message); }
-  // the block stops new pages only: a website already open goes to the chats
+  // the rules stop new pages only: what is open already moves too
   if (locked) chrome.tabs.query({}, (tabs) => {
     void chrome.runtime.lastError;
     for (const t of tabs || []) {
-      let host = ''; try { host = new URL(t.url || t.pendingUrl || '').hostname; } catch { continue; }
-      if (!/^https?:/.test(t.url || t.pendingUrl || '')) continue;   // Chrome's own pages and ours
-      if (OPEN_SITES.some(d => host === d || host.endsWith(`.${d}`))) continue;
-      chrome.tabs.update(t.id, { url: 'https://fansly.com/messages' }, () => void chrome.runtime.lastError);
+      const url = t.url || t.pendingUrl || '';
+      if (!/^https?:/.test(url)) continue;                          // Chrome's own pages and ours
+      let u; try { u = new URL(url); } catch { continue; }
+      const fansly = u.hostname === 'fansly.com' || u.hostname.endsWith('.fansly.com');
+      if (!fansly && OPEN_SITES.some(d => u.hostname === d || u.hostname.endsWith(`.${d}`))) continue;
+      if (fansly && !signedOut && /^\/messages(\/|$)/.test(u.pathname)) continue;
+      chrome.tabs.update(t.id, { url: signedOut ? SIGN_IN : 'https://fansly.com/messages' }, () => void chrome.runtime.lastError);
     }
   });
   chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => {
@@ -241,7 +254,7 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'fansly-event') { enqueue(msg); return false; }
   if (msg && msg.type === 'fansly-tab') { heartbeat(); return false; }
-  if (msg && msg.type === 'cmt-secure-get') { lockedNow().then(locked => respond({ chatOnly: locked })); return true; }
+  if (msg && msg.type === 'cmt-secure-get') { Promise.all([lockedNow(), signedOutNow()]).then(([locked, signedOut]) => respond({ chatOnly: locked, signedOut })); return true; }
   if (msg && msg.type === 'cmt-ensure-bridge' && msg.tabId != null) { ensureBridge(msg.tabId).then(ok => respond({ ok })); return true; }
   // "Open" on the Messages dashboard: the chat's own tab if it is open already, otherwise a new tab beside this one
   if (msg && msg.type === 'open-chat' && /^\d{5,25}$/.test(String(msg.group || ''))) {
@@ -268,7 +281,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return respond({ error: data.error || ('Could not sign in (HTTP ' + res.status + ')') });
         await set({ session: data, apiUrl });
-        state.staff = STAFF.has(data.user && data.user.role); await saveState(); applyLock();
+        state.staff = STAFF.has(data.user && data.user.role); await saveState(); await applyLock();
         state.lastError = null; await saveState();
         heartbeat(); scheduleFlush();
         respond({ ok: true, user: data.user });
@@ -279,7 +292,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'popup-logout') {
     (async () => {
       try { await api('/api/fansly/presence', { action: 'logout' }); } catch { /* already out */ }
-      await set({ session: null }); state.staff = false; await saveState(); applyLock(); respond({ ok: true });
+      await set({ session: null }); state.staff = false; await saveState(); await applyLock(); respond({ ok: true });
     })();
     return true;
   }

@@ -199,6 +199,7 @@
     'creator dashboard', 'co-performers', 'earning statistics', 'earnings', 'profile statistics', 'statistics', 'tracking links', 'scheduled post queue',
     'tax documentation', 'payments', 'payouts', 'wallet', 'settings', 'creator hub (fansly guide)', 'creator hub', 'contact support', 'help center',
     'merch store', 'logout', 'log out', 'sign out', 'switch account', 'add account', 'switch accounts', 'management sessions',
+    'leaderboard', 'referrals', 'terms', 'privacy policy', 'profile statistics beta', 'home', 'explore', 'search',
     // the same menu when Fansly runs in German
     'profil', 'abonnements', 'abos', 'medientresor', 'mediensammlung', 'listen', 'lesezeichen', 'benachrichtigungen', 'ersteller',
     'creator-dashboard', 'statistiken', 'einnahmen', 'einnahmestatistiken', 'profilstatistiken', 'tracking-links', 'geplante beiträge',
@@ -209,18 +210,39 @@
     'configuración', 'ajustes', 'cerrar sesión', 'cambiar de cuenta', 'профиль', 'подписки', 'списки', 'закладки', 'уведомления',
     'статистика', 'доходы', 'заработок', 'платежи', 'выплаты', 'кошелёк', 'кошелек', 'настройки', 'выйти', 'выход', 'сменить аккаунт']);
   // and by where a link goes, whatever the language: everything in Fansly's menus but the chats
-  const HIDE_PATHS = /^\/(settings|creator|wallet|payments?|payouts?|statistics|earnings|notifications|lists|bookmarks|subscriptions|vault|mediavault|collection|tracking|tax|support|help|referrals?|explore|home|search|management)(\/|$)/i;
+  const HIDE_PATHS = /^\/(settings|leaderboard|terms|privacy|tos|creator|wallet|payments?|payouts?|statistics|earnings|notifications|lists|bookmarks|subscriptions|vault|mediavault|collection|tracking|tax|support|help|referrals?|explore|home|search|management)(\/|$)/i;
   // logout and account-switch buttons by their icon
   const HIDE_ICONS = '[class*="sign-out"], [class*="right-from-bracket"], [class*="arrow-right-from"], [class*="fa-wallet"]';  // (not the dollar icon: the PPV price button uses it)
   const secureStyle = document.createElement('style');
-  secureStyle.textContent = '.cmt-hidden{display:none!important}.cmt-masked{visibility:hidden!important}';
+  // by Fansly's own building blocks, so nothing shows even for a moment: the wallet balance, every top-bar
+  // and account-menu item but the messages, the account menu itself; and the whole page while it is
+  // on its way back from somewhere that isn't the chats
+  secureStyle.textContent = '.cmt-hidden{display:none!important}.cmt-masked{visibility:hidden!important}'
+    + 'html.cmt-chat-only app-balance-display,'
+    + 'html.cmt-chat-only app-nav-bar-top [data-menu-item]:not([data-menu-item*="message" i]):not([data-menu-item*="chat" i]),'
+    + 'html.cmt-chat-only app-nav-bar-top app-account-avatar,'
+    + 'html.cmt-chat-only app-nav-bar-top .user-dropdown, html.cmt-chat-only app-nav-bar-top [class*="dropdown-menu"],'
+    + 'html.cmt-chat-only app-nav-bar-mobile{display:none!important}'
+    + 'html.cmt-away app-root{visibility:hidden!important}';
+  (document.head || document.documentElement).append(secureStyle);
+  document.documentElement.classList.add('cmt-chat-only');
   let lastOpen = OPEN_PATHS.test(location.pathname) ? location.pathname : '/messages';
   const route = () => {
-    if (OPEN_PATHS.test(location.pathname)) { lastOpen = location.pathname; return; }
-    if (chatOnly) location.replace(lastOpen);            // back to the chat they were in
+    if (OPEN_PATHS.test(location.pathname)) { lastOpen = location.pathname; document.documentElement.classList.remove('cmt-away'); return; }
+    if (!chatOnly) return;
+    document.documentElement.classList.add('cmt-away');   // hidden until it is back
+    // Fansly sends a browser signed out of Fansly from the chats to its front page: don't bounce forever
+    let n = []; try { n = JSON.parse(sessionStorage.getItem('cmtBounce') || '[]').filter(t => Date.now() - t < 10000); } catch { /* ignore */ }
+    if (n.length >= 3) { document.documentElement.classList.remove('cmt-away'); return; }
+    try { sessionStorage.setItem('cmtBounce', JSON.stringify([...n, Date.now()])); } catch { /* ignore */ }
+    location.replace(lastOpen);                           // back to the chat they were in
   };
+  // page.js says at once when Fansly changes its address (not only on the 400 ms check)
+  window.addEventListener('message', (ev) => { if (ev.source === window && ev.data && ev.data['cmt-route'] === 1) route(); });
   function hideForChatters() {
+    document.documentElement.classList.toggle('cmt-chat-only', !!chatOnly);
     if (!chatOnly) {
+      document.documentElement.classList.remove('cmt-away');
       document.querySelectorAll('.cmt-hidden, .cmt-masked').forEach(el => el.classList.remove('cmt-hidden', 'cmt-masked'));
       return;
     }
@@ -245,20 +267,23 @@
       if (item && !(host && host.contains(item)) && !item.closest('form, [contenteditable]')) item.classList.add('cmt-hidden');
     }
     // the wallet balance at the top of the page ("$49.84", "49,84 $", "49,84 €")
-    for (const el of document.querySelectorAll('div, span, a')) {
-      if (el.children.length || (host && host.contains(el))) continue;
+    for (const el of document.querySelectorAll('div, span, a, button')) {
+      if (el.children.length > 2 || (host && host.contains(el))) continue;
       if (!/^(\$\s?[\d.,]+|[\d.,]+\s?[$€])$/.test(String(el.textContent || '').trim())) continue;
       if (el.getBoundingClientRect().top < 90) (el.closest('a, button, [role="button"]') || el).classList.add('cmt-masked');
     }
     for (const v of document.querySelectorAll('video:not([controlslist~="nodownload"])')) v.setAttribute('controlslist', 'nodownload noplaybackrate');
   }
   let hideTimer = null;
-  const hideSoon = () => { clearTimeout(hideTimer); hideTimer = setTimeout(hideForChatters, 120); };
-  new MutationObserver(() => { if (chatOnly) hideSoon(); }).observe(document.documentElement, { childList: true, subtree: true });
+  // once per frame, before it is drawn, so a menu that opens never shows its hidden items
+  const hideSoon = () => { if (hideTimer) return; hideTimer = requestAnimationFrame(() => { hideTimer = null; hideForChatters(); }); };
+  new MutationObserver((list) => { if (chatOnly && list.some(m => m.addedNodes.length)) hideSoon(); }).observe(document.documentElement, { childList: true, subtree: true });
   setInterval(route, 400);
   // a link to anything but the chats does nothing for a chatter
   document.addEventListener('click', (ev) => {
     if (!chatOnly) return;
+    const mi = ev.target && ev.target.closest && ev.target.closest('app-nav-bar-top [data-menu-item]');
+    if (mi && !/message|chat/i.test(mi.getAttribute('data-menu-item') || '')) { ev.preventDefault(); ev.stopPropagation(); return; }
     const a = ev.target && ev.target.closest && ev.target.closest('a[href]');
     if (!a) return;
     let u; try { u = new URL(a.getAttribute('href'), location.href); } catch { return; }

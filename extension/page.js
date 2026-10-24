@@ -130,6 +130,13 @@
     if (ev.source === window && ev.data && ev.data['cmt-secure'] === 1) { chatOnly = !!ev.data.chatOnly; chatOnlyKnown(); }
   });
   const sensitive = (url) => API.test(url) && SENSITIVE.test(path(url));
+  // Fansly moves between its pages without loading one: tell bridge.js at once, so a chatter's browser
+  // goes back to the chats before the other page shows
+  for (const k of ['pushState', 'replaceState']) {
+    const real = history[k];
+    history[k] = function (...a) { const r = real.apply(this, a); try { window.postMessage({ 'cmt-route': 1 }, '*'); } catch { /* ignore */ } return r; };
+  }
+  window.addEventListener('popstate', () => window.postMessage({ 'cmt-route': 1 }, '*'));
   const blockedBody = () => JSON.stringify({ success: false, error: { code: 403, details: 'Not available while chatting (Chatting Manager)' } });
 
   // ---- fetch ----
