@@ -377,10 +377,20 @@
     const byPic = mediaOfPic(picOf(pic));
     if (byPic) return byPic;
     // its name on the tile ("IMG_6883.jpeg")
-    for (const el of tile.querySelectorAll('span, div')) {
+    // Fansly cuts long names short on the tile ("copy_735726F0-541E-4211-A..."): the start must fit one item only
+    for (const el of tile.querySelectorAll('span, div, [title]')) {
       if (el.children.length > 1) continue;
-      const t = String(el.textContent || '').trim().toLowerCase();
-      if (t && t.length < 120 && vaultName.has(t)) return vaultName.get(t);
+      for (const raw of [el.getAttribute('title'), el.textContent]) {
+        const t = String(raw || '').trim().toLowerCase();
+        if (!t || t.length > 160) continue;
+        if (vaultName.has(t)) return vaultName.get(t);
+        const cut = /(\.\.\.|…)$/.test(t) ? t.replace(/(\.\.\.|…)$/, '').trim() : null;
+        if (cut && cut.length >= 8) {
+          const hits = new Set();
+          for (const [name, id] of vaultName) if (name.startsWith(cut)) hits.add(id);
+          if (hits.size === 1) return [...hits][0];
+        }
+      }
     }
     return null;
   }
@@ -406,7 +416,17 @@
     let note = root.querySelector(':scope > .cmt-vm-note');
     if (!note) { note = document.createElement('div'); note.className = 'cmt-vm-note'; note.style.cssText = 'font:12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#9ca3af;padding:4px 12px'; root.prepend(note); }
     let shown = 0, known = 0;
-    for (const pic of pics) { const t = tileOf(pic, root); if (t && mediaOfTile(t, pic)) known += 1; }
+    const missed = [];
+    for (const pic of pics) {
+      const t = tileOf(pic, root); if (!t) continue;
+      if (mediaOfTile(t, pic)) { known += 1; continue; }
+      // why a tile wasn't recognised (hover the line): its label, what shows the picture, the kind of address
+      const label = [...t.querySelectorAll('span, div')].map(e => e.children.length > 1 ? '' : String(e.textContent || '').trim()).find(x => /\.\w{2,4}(\.\.\.|…)?$|\.\.\.$|…$/.test(x)) || '?';
+      const src = picOf(pic); let kind = 'none';
+      try { if (src) { const u = new URL(src, location.href); kind = u.protocol === 'blob:' ? 'blob' : u.protocol === 'data:' ? 'data' : `${u.hostname}${u.pathname.replace(/\d{6,}/g, '#')}`; } } catch { kind = 'bad'; }
+      missed.push(`${label} · ${pic.tagName.toLowerCase()} · ${kind}`);
+    }
+    note.title = missed.length ? `Not recognised:\n${[...new Set(missed)].slice(0, 15).join('\n')}` : '';
     shown = [...marks.keys()].length;
     const nb = [...marks.values()];
     const text = marksFor !== groupNow() ? 'Chatting Manager: reading what he was sent…'
