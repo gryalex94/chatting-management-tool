@@ -52,6 +52,7 @@
       if (depth > 6 || v == null) return;
       if (typeof v === 'string') {
         if (/^https?:\/\//.test(v)) { try { keys.push([new URL(v).pathname, mid]); } catch { /* not an address */ } }
+        else if (/^\/[\w/.-]+\.\w{2,5}$/.test(v)) keys.push([v, mid]);                // "location": the file's path
         else if (/^\d{15,25}$/.test(v)) keys.push([v, mid]);
         return;
       }

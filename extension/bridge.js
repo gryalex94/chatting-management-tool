@@ -326,7 +326,8 @@
   let marks = new Map(), marksFor = null, marksAt = 0, marksBusy = false;
   window.addEventListener('message', (ev) => {
     if (ev.source !== window || !ev.data || ev.data['cmt-vault-keys'] !== 1) return;
-    for (const [k, v] of ev.data.keys || []) vaultKey.set(String(k), String(v));
+    // a key shared by several items (the creator's own account id is in every one) points to none
+    for (const [k, v] of ev.data.keys || []) { const was = vaultKey.get(String(k)); vaultKey.set(String(k), was && was !== String(v) ? '' : String(v)); }
     for (const [k, v] of ev.data.names || []) vaultName.set(String(k).trim().toLowerCase(), String(v));
     markSoon();
   });
@@ -366,8 +367,8 @@
   };
   function mediaOfPic(src) {
     let u; try { u = new URL(src, location.href); } catch { return null; }
-    if (vaultKey.has(u.pathname)) return vaultKey.get(u.pathname);
-    for (const seg of u.pathname.split(/[/._-]/)) if (/^\d{15,25}$/.test(seg) && vaultKey.has(seg)) return vaultKey.get(seg);
+    if (vaultKey.get(u.pathname)) return vaultKey.get(u.pathname);
+    for (const seg of u.pathname.split(/[/._-]/)) if (/^\d{15,25}$/.test(seg) && vaultKey.get(seg)) return vaultKey.get(seg);
     return null;
   }
   function mediaOfTile(tile, pic) {
@@ -398,6 +399,17 @@
     if (!vaultStyle.isConnected) (document.head || document.documentElement).append(vaultStyle);
     loadMarks();
     const pics = [...root.querySelectorAll('img'), ...root.querySelectorAll('[style*="background-image"]')].filter(p => p.getBoundingClientRect().width > 60);
+    // a line in the window: what is known about him, and how many of those pictures are on screen
+    let note = root.querySelector(':scope > .cmt-vm-note');
+    if (!note) { note = document.createElement('div'); note.className = 'cmt-vm-note'; note.style.cssText = 'font:12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#9ca3af;padding:4px 12px'; root.prepend(note); }
+    let shown = 0, known = 0;
+    for (const pic of pics) { const t = tileOf(pic, root); if (t && mediaOfTile(t, pic)) known += 1; }
+    shown = [...marks.keys()].length;
+    const nb = [...marks.values()];
+    const text = marksFor !== groupNow() ? 'Chatting Manager: reading what he was sent…'
+      : !nb.length ? 'Chatting Manager: nothing from the vault was sent to him yet.'
+        : `Chatting Manager: sent to him ${shown} · bought ${nb.filter(m => m.status === 'bought').length} · not bought ${nb.filter(m => m.status === 'not_bought').length}${pics.length ? ` · ${known} of ${pics.length} pictures here recognised` : ''}`;
+    if (note.textContent !== text) note.textContent = text;
     for (const pic of pics) {
       const tile = tileOf(pic, root); if (!tile) continue;
       const mid = mediaOfTile(tile, pic);
