@@ -196,8 +196,12 @@
   function annotate() {
     document.querySelectorAll('.cmt-tr').forEach(el => { if (!trOn || !trItems.has(el.dataset.src)) el.remove(); });
     if (!trOn || !trItems.size) return;
+    // the conversation column: the message box's ancestor that is as wide as the chat (the box itself is
+    // narrower than the bubbles: the buttons beside it take room), so the chat list beside it stays out
     const box = messageBox();
-    const col = box && box.getBoundingClientRect();
+    let pane = box;
+    while (pane && pane.parentElement && pane.getBoundingClientRect().width < 420) pane = pane.parentElement;
+    const col = pane && pane.getBoundingClientRect();
     const host = document.getElementById('cmt-panel-host');
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     const seen = new Set();
