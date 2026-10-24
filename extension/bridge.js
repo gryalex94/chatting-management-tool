@@ -186,7 +186,50 @@
     }
     done(stopped ? 'cancelled' : 'done', stopped ? 'stopped' : 'time limit (10 min) reached');
   }
+  // ---- the translator: his message's English, shown under it in Fansly's own chat ----
+  // The panel sends [{ text, en }] for the open chat. Each of his bubbles whose text is exactly one of
+  // those gets a small "EN: …" line under its text (his text itself is left as it is). Only bubbles in
+  // the conversation column count (not the chat list on the left); Fansly redraws as it scrolls, so a
+  // watcher puts the lines back on new bubbles. Nothing is sent anywhere.
+  let trItems = new Map(), trOn = true, trTimer = null;
+  const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+  function annotate() {
+    document.querySelectorAll('.cmt-tr').forEach(el => { if (!trOn || !trItems.has(el.dataset.src)) el.remove(); });
+    if (!trOn || !trItems.size) return;
+    const box = messageBox();
+    const col = box && box.getBoundingClientRect();
+    const host = document.getElementById('cmt-panel-host');
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const seen = new Set();
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const el = n.parentElement;
+      if (!el || seen.has(el) || (host && host.contains(el)) || el.closest('.cmt-tr, textarea, [contenteditable="true"]')) continue;
+      seen.add(el);
+      const key = norm(el.textContent);
+      if (!key || !trItems.has(key)) continue;
+      if (col) { const r = el.getBoundingClientRect(); if (r.right < col.left || r.left > col.right) continue; }   // the conversation column only
+      const next = el.nextElementSibling;
+      if (next && next.classList.contains('cmt-tr') && next.dataset.src === key) continue;
+      const line = document.createElement('div');
+      line.className = 'cmt-tr'; line.dataset.src = key;
+      line.textContent = `EN: ${trItems.get(key)}`;
+      line.style.cssText = 'margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,.15);font-size:.85em;opacity:.75;font-style:italic;white-space:pre-wrap;';
+      el.after(line);
+    }
+  }
+  const annotateSoon = () => { clearTimeout(trTimer); trTimer = setTimeout(annotate, 250); };
+  new MutationObserver((list) => { if (trItems.size && trOn && list.some(m => [...m.addedNodes].some(x => !(x.classList && x.classList.contains('cmt-tr'))))) annotateSoon(); })
+    .observe(document.documentElement, { childList: true, subtree: true });
+  function setTranslations(msg) {
+    trOn = msg.on !== false;
+    trItems = new Map((msg.items || []).filter(x => x && x.text && x.en).map(x => [norm(x.text), String(x.en)]));
+    annotate();
+  }
+  // from the panel inside this page (the same tab): a page event
+  document.addEventListener('cmt-translations', (ev) => { try { setTranslations(JSON.parse(ev.detail || '{}')); } catch { /* ignore */ } });
+
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+    if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
     if (msg && msg.type === 'cmt-insert' && typeof msg.text === 'string') { respond({ ok: insert(msg.text) }); return false; }
     if (msg && msg.type === 'cmt-fetch-stop') { stopped = true; respond({ ok: true }); return false; }
     return false;

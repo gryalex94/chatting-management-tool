@@ -36,7 +36,7 @@
     noteDraft: '', editing: null, editDraft: '', toast: '',
     note: { fan: null, text: '', dirty: false, saving: false, savedAt: null, by: null, error: '' },   // the fan's one note, saved as you type
     suggest: null, suggestBusy: false, suggestError: '',
-    tr: { fan: null, messages: [], language: null, languages: {}, busy: false, error: '', draft: '', out: '', outBusy: false, scripts: true },   // the translator
+    tr: { fan: null, messages: [], language: null, languages: {}, busy: false, error: '', draft: '', out: '', outBusy: false, scripts: true, inChat: true },   // the translator
     linkQ: '', linkResults: null, linkBusy: false,   // { draft_id, messages, goal, why, inserted, group }
     width: 420, collapsed: false, push: true, open: { suggest: true, card: true, agency: true, metrics: true, notes: true, summary: true, translate: true, scripts: true },
   };
@@ -226,6 +226,7 @@
       const r = await call('GET', `/api/fansly/panel/translate?${new URLSearchParams({ account: st.accountId, fan })}`);
       if (fan !== st.fanId) return;
       st.tr.messages = r.messages || []; st.tr.language = r.language || null; st.tr.languages = r.languages || {}; st.tr.error = '';
+      showInChat();
     } catch (e) { if (fan === st.fanId) st.tr.error = e.message; }
     finally { st.tr.busy = false; renderSoon(); }
   }
@@ -244,6 +245,13 @@
     try { const r = await call('PUT', '/api/fansly/panel/translate/language', { account: st.accountId, fan, lang: lang || null }); if (fan === st.fanId) { st.tr.language = r.language; st.tr.out = ''; } }
     catch (e) { st.tr.error = e.message; }
     render();
+  }
+  // his messages' English, under his bubbles in Fansly's own chat (bridge.js draws them)
+  function showInChat() {
+    const items = st.tr.fan === st.fanId ? (st.tr.messages || []).filter(m => m.text_en).map(m => ({ text: m.text, en: m.text_en })) : [];
+    const msg = { type: 'cmt-translations', on: st.tr.inChat, items };
+    if (SIDE) { if (st.tabId != null) try { chrome.tabs.sendMessage(st.tabId, msg, () => void chrome.runtime.lastError); } catch { /* the tab is gone */ } }
+    else document.dispatchEvent(new CustomEvent('cmt-translations', { detail: JSON.stringify(msg) }));
   }
   const foreign = () => st.tr.language && st.tr.language.lang && st.tr.language.lang !== 'en';
   async function loadSummary(force) {
@@ -275,7 +283,7 @@
     flushNote();
     st.note = { fan: null, text: '', dirty: false, saving: false, savedAt: null, by: null, error: '' };
     dropSuggestion();
-    st.groupId = g; st.fanId = null; st.data = null; st.summary = null; st.summaryError = ''; st.noteDraft = ''; st.editing = null; st.linkQ = ''; st.linkResults = null;
+    st.groupId = g; st.fanId = null; st.data = null; st.summary = null; showInChat(); st.summaryError = ''; st.noteDraft = ''; st.editing = null; st.linkQ = ''; st.linkResults = null;
     loadFan(false);
   }
   let lastHref = SIDE ? '' : location.href;
@@ -585,7 +593,8 @@
       h('textarea', { class: 'tr-draft', rows: 3, placeholder: 'Write it in English…', value: t.draft, oninput: (e) => { t.draft = e.target.value; t.out = ''; } }),
       h('div', { class: 'row' },
         h('button', { class: 'primary', disabled: t.outBusy || !t.draft.trim() || !foreign(), onclick: translateReply, title: foreign() ? '' : 'He writes in English: pick a language above to translate into another one' }, t.outBusy ? 'Translating…' : `Translate${foreign() ? ` to ${lang.name}` : ''}`),
-        h('label', { class: 'small muted', style: 'margin-left:auto' }, h('input', { type: 'checkbox', checked: t.scripts, onchange: (e) => { t.scripts = e.target.checked; } }), ' scripts too')));
+        h('label', { class: 'small muted', style: 'margin-left:auto' }, h('input', { type: 'checkbox', checked: t.scripts, onchange: (e) => { t.scripts = e.target.checked; } }), ' scripts too')),
+      h('label', { class: 'small muted' }, h('input', { type: 'checkbox', checked: t.inChat, onchange: (e) => { t.inChat = e.target.checked; save(); showInChat(); } }), ' Show the English under his messages in the chat'));
     if (t.out) {
       content.push(h('textarea', { class: 'tr-out', rows: 3, placeholder: 'In his language', value: t.out, oninput: (e) => { t.out = e.target.value; } }),
         h('div', { class: 'row' },
@@ -687,7 +696,7 @@
 
   // ---------- remembered per browser ----------
   function save() {
-    try { chrome.storage.local.set({ panelPrefs: { width: st.width, collapsed: st.collapsed, push: st.push, open: st.open, openStages: [...st.openStages] } }); } catch { /* ignore */ }
+    try { chrome.storage.local.set({ panelPrefs: { width: st.width, collapsed: st.collapsed, push: st.push, open: st.open, openStages: [...st.openStages], trInChat: st.tr.inChat } }); } catch { /* ignore */ }
   }
   function restore() {
     return new Promise((resolve) => {
@@ -700,6 +709,7 @@
           if (p.push != null) st.push = !!p.push;
           if (p.open) st.open = { ...st.open, ...p.open };
           if (Array.isArray(p.openStages)) st.openStages = new Set(p.openStages);
+          if (p.trInChat != null) st.tr.inChat = !!p.trInChat;
           // where the panel shows: 'side' (Chrome's side panel, the default), 'page' (inside Fansly), 'off'
           const mode = s.panelMode || (s.panelOff ? 'off' : 'side');
           resolve(SIDE ? false : mode !== 'page');
