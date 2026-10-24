@@ -353,6 +353,8 @@
     + '.cmt-vm-bought .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}.cmt-vm-free .cmt-vm-tag{background:#16a34a}';
   // the vault window: Fansly's picker with its "Upload to Vault" and "Add … Media" buttons
   function vaultWindow() {
+    const mv = document.querySelector('app-media-vault');
+    if (mv) return mv.closest('.modal') || mv;
     for (const b of document.querySelectorAll('button, .btn, div[class*="btn"]')) {
       const t = String(b.textContent || '').trim();
       if (!/^add \d+ media$/i.test(t) && !/^upload to vault$/i.test(t)) continue;
@@ -411,10 +413,12 @@
   }
   const money = (n) => `$${Number(n).toFixed(Number(n) % 1 ? 2 : 0)}`;
   function markVault() {
-    const root = vaultWindow();
-    if (!root) return;
+    if (!groupNow()) return;
     if (!vaultStyle.isConnected) (document.head || document.documentElement).append(vaultStyle);
     loadMarks();
+    const root = vaultWindow();
+    markChat(root);
+    if (!root) return;
     // photos are pictures; a video tile plays a short preview instead (a video element, sometimes a canvas)
     const pics = [...root.querySelectorAll('img, video, canvas'), ...root.querySelectorAll('[style*="background-image"]')].filter(p => p.getBoundingClientRect().width > 60);
     // a line in the window: what is known about him, and how many of those pictures are on screen
@@ -450,13 +454,33 @@
       const tile = tileOf(pic, root); if (!tile || done.has(tile)) continue;
       const mid = mediaOfTile(tile, pic);
       if (mid) done.add(tile);
+      paint(tile, mid);
+    }
+  }
+  // the pictures and videos in the chat itself: each has Fansly's item number on it, no window needed
+  function markChat(vault) {
+    const host = document.getElementById('cmt-panel-host');
+    const done = new Set();
+    for (const box of document.querySelectorAll('[data-media-id]')) {
+      if ((vault && vault.contains(box)) || (host && host.contains(box)) || box.getBoundingClientRect().width < 60) continue;
+      const tile = tileOf(box, document.body); if (!tile || done.has(tile)) continue;
+      const dm = box.getAttribute('data-media-id');
+      const mid = /^\d{5,25}$/.test(dm || '') ? (vaultKey.get(dm) || dm) : null;
+      // a video carries its preview's number: only a known one paints, else the next box of the same tile may
+      if (!mid || (!marks.has(mid) && box.nextElementSibling && box.nextElementSibling.matches('[data-media-id]'))) continue;
+      done.add(tile);
+      paint(tile, mid);
+    }
+  }
+  function paint(tile, mid) {
+    {
       const m = mid && marksFor === groupNow() ? marks.get(mid) : null;
       const want = m ? m.status : '';
-      if ((tile.dataset.cmtVm || '') === want + (m ? m.price : '')) continue;
+      if ((tile.dataset.cmtVm || '') === want + (m ? m.price : '')) return;
       tile.classList.remove('cmt-vm', 'cmt-vm-rel', 'cmt-vm-bought', 'cmt-vm-not_bought', 'cmt-vm-free');
       tile.querySelectorAll(':scope > .cmt-vm-tag').forEach(x => x.remove());
       tile.dataset.cmtVm = want + (m ? m.price : '');
-      if (!m) continue;
+      if (!m) return;
       tile.classList.add('cmt-vm', `cmt-vm-${m.status}`);
       if (getComputedStyle(tile).position === 'static') tile.classList.add('cmt-vm-rel');
       const tag = document.createElement('div'); tag.className = 'cmt-vm-tag';
