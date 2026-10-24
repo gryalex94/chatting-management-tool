@@ -59,8 +59,9 @@ const totalsOut = (t = {}) => ({ messages: Number(t.messages || 0), fans: Number
 async function ofList(orgId, f, { csv = false } = {}) {
   const pages = await OF.ofPages(orgId);
   const name = new Map(pages.map(p => [p.id, p.page]));
-  const { data: all } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId).eq('platform', 'onlyfans');
+  const { data: all } = await supabaseAdmin.from('creators').select('id, name, infloww_creator_id').eq('organisation_id', orgId).eq('platform', 'onlyfans');
   for (const c of all || []) if (!name.has(c.id)) name.set(c.id, c.name);
+  const cid = new Map((all || []).filter(c => c.infloww_creator_id).map(c => [c.id, String(c.infloww_creator_id)]));
   const args = {
     p_org: orgId, p_creators: f.account ? [f.account] : null, p_sender: f.chatter === 'none' ? null : f.chatter,
     p_start: dayWindow(f.from).start, p_end: dayWindow(f.to).end, p_q: f.q, p_fan: f.fan, p_price_min: f.price_min, p_price_max: f.price_max,
@@ -73,6 +74,18 @@ async function ofList(orgId, f, { csv = false } = {}) {
   if (res.error) throw res.error;
   if (tot.error) throw tot.error;
   const t = totalsOut((tot.data || [])[0]);
+  // "Open in Infloww": the same link as Infloww's own "Copy chat link" (the page's Infloww id and the fan's
+  // OnlyFans id: the number in a default "u<number>" username, or one learned from Infloww's sales)
+  const odd = [...new Set((res.data || []).map(m => m.sent_to_username).filter(u => u && !/^u\d+$/.test(u)))];
+  const fanId = new Map();
+  for (let i = 0; i < odd.length; i += 200) {
+    const { data } = await supabaseAdmin.from('fan_infloww_ids').select('username, of_user_id').eq('organisation_id', orgId).in('username', odd.slice(i, i + 200));
+    for (const x of data || []) fanId.set(x.username, String(x.of_user_id));
+  }
+  const link = (m) => {
+    const fid = /^u(\d+)$/.exec(m.sent_to_username || '')?.[1] || fanId.get(m.sent_to_username);
+    return fid && cid.get(m.creator_id) ? `infloww://open?fid=${fid}&cid=${cid.get(m.creator_id)}&type=chatLink` : null;
+  };
   return {
     rows: (res.data || []).map(m => ({
       account_id: m.creator_id, message_id: m.id, group_id: null, fan_account_id: m.sent_to_username, page: name.get(m.creator_id) || 'OnlyFans page',
@@ -80,7 +93,7 @@ async function ofList(orgId, f, { csv = false } = {}) {
       prev_fan_text: m.fan_message_text || null, message: m.creator_message_text, sent_at: exportInstant(m.sent_datetime),
       reply_s: m.fan_message_text && m.replay_time_seconds > 0 ? m.replay_time_seconds : null, price: Number(m.price) || 0,
       sold_at: m.purchased ? exportInstant(m.sent_datetime) : null, sold_net: m.purchased ? Number(m.price) : null,
-      unsent_at: m.status === 'Unsent' ? exportInstant(m.sent_datetime) : null, chat_url: null,
+      unsent_at: m.status === 'Unsent' ? exportInstant(m.sent_datetime) : null, chat_url: link(m),
     })),
     page: f.page, size: f.size, total: t.messages, totals: t, my_browsers: [],
   };

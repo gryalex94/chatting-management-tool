@@ -45,8 +45,8 @@ function pageList(page, pages) {
 const PLATFORM = {
   fansly: { base: '/api/fansly/messages', mass: true, open: true, replied: true, nobody: 'Not attributed',
     note: 'A message shows who sent it only when it went out through the extension with a chatter signed in; older ones say Not attributed. Open goes to your own browser when your extension is on that page now; otherwise fansly.com opens in a new tab.' },
-  onlyfans: { base: '/api/reports/onlyfans/messages', mass: false, open: false, replied: false, nobody: '·',
-    note: 'From the uploaded chat exports (Infloww\'s Message dashboard files): the sender, the fan message each reply answered and its reply time are Infloww\'s own. Days after the last upload are not in them yet.' },
+  onlyfans: { base: '/api/reports/onlyfans/messages', mass: false, open: false, infloww: true, replied: false, nobody: '·',
+    note: 'From the uploaded chat exports (Infloww\'s Message dashboard files): the sender, the fan message each reply answered and its reply time are Infloww\'s own. Days after the last upload are not in them yet. Open in Infloww opens the chat in the Infloww app, like Infloww\'s own chat link (it needs the fan\'s OnlyFans id, known for nearly every fan).' },
   fanvue: { base: '/api/reports/fanvue/messages', mass: false, open: false, replied: true, nobody: 'Nobody on shift',
     note: 'From the chats copied from Fanvue every hour. Fanvue does not say who sent a message, so the sender is whoever was on the page\'s Fanvue shift then. AI-written marks replies written with Fanvue\'s AI.' },
 };
@@ -273,6 +273,11 @@ function Messages({ cfg }) {
                     {cfg.open && <Button size='sm' variant='outline' className='h-7 px-2 text-xs' disabled={!r.group_id} onClick={() => openChat(r)}
                       title={(data.my_browsers || []).includes(r.account_id) ? 'Opens this chat in your browser where the extension is on this page' : 'Opens this chat on fansly.com in a new tab'}>
                       <ExternalLink className='size-3' /> Open
+                    </Button>}
+                    {cfg.infloww && <Button size='sm' variant='outline' className='h-7 px-2 text-xs' disabled={!r.chat_url}
+                      onClick={() => { window.location.href = r.chat_url; }}
+                      title={r.chat_url ? 'Opens this chat in the Infloww app' : "This fan's OnlyFans id isn't known yet, so Infloww can't be opened at the chat"}>
+                      <ExternalLink className='size-3' /> Open in Infloww
                     </Button>}
                   </TableCell>
                 </TableRow>
