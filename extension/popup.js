@@ -30,6 +30,10 @@ async function render() {
   $('openSide').hidden = mode !== 'side';
   $('sideHint').hidden = hasSide;
   $('panelMode').querySelector('option[value="side"]').disabled = !hasSide;
+  const logging = s.netLogUntil > Date.now();
+  $('netlog').textContent = logging ? 'Stop logging requests' : 'Log Fansly\'s requests (15 min)';
+  $('netlogState').hidden = !logging;
+  $('netlogState').textContent = logging ? `Logging what Fansly's page requests (addresses and counts only) for ${Math.ceil((s.netLogUntil - Date.now()) / 60000)} more min.` : '';
   $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '')
     || (s.assigned === false ? 'You are not on the roster for this page. Your messages are still recorded under your name, but the side panel stays closed. Ask a manager to add you on the Shifts page.' : '');
 }
@@ -56,6 +60,7 @@ $('openSide').addEventListener('click', () => {
   chrome.sidePanel.open({ windowId }).then(() => window.close()).catch((e) => { $('statusError').textContent = 'Could not open the side panel: ' + e.message; });
 });
 if (!hasSide) chrome.storage.local.get('panelMode', ({ panelMode }) => { if (!panelMode || panelMode === 'side') chrome.storage.local.set({ panelMode: 'page' }); });
+$('netlog').addEventListener('click', async () => { const st = await send({ type: 'popup-status' }); await send({ type: 'popup-netlog', on: !((st.state || {}).netLogUntil > Date.now()) }); render(); });
 $('flush').addEventListener('click', async () => { await send({ type: 'popup-flush' }); render(); });
 
 render();

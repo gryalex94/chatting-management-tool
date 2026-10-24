@@ -80,9 +80,17 @@
     return null;
   }
 
-  const handle = (method, url, text, sent) => {
+  // "what the page requested" (logged only while switched on in the popup): address, settings, list sizes; no bodies
+  const lists = (r) => {
+    const out = {};
+    const add = (o, pre) => { for (const [k, v] of Object.entries(o || {})) if (Array.isArray(v)) out[pre + k] = v.length; };
+    if (Array.isArray(r)) out.response = r.length; else if (r && typeof r === 'object') { add(r, ''); if (r.aggregationData) add(r.aggregationData, 'aggregationData.'); if (r.total != null) out.total = r.total; }
+    return out;
+  };
+  const handle = (method, url, text, sent, status) => {
     if (!API.test(url)) return;
     let body; try { body = JSON.parse(text); } catch { return; }
+    post('net', url, { method: String(method || 'GET').toUpperCase(), path: path(url), query: query(url), status: status || null, page: location.pathname, rows: lists(body && body.response) });
     const got = pick(String(method || 'GET').toUpperCase(), url, body, sent);
     if (got) post(got.kind, url, got.data);
     // purchases riding along on any other answer (the app caches them from aggregationData too)
@@ -97,7 +105,7 @@
     const method = (init && init.method) || (input && input.method) || 'GET';
     const sent = init && typeof init.body === 'string' ? init.body : null;
     const result = realFetch.apply(this, arguments);
-    if (API.test(url)) result.then(res => { try { res.clone().text().then(t => handle(method, url, t, sent)).catch(() => {}); } catch { /* ignore */ } }).catch(() => {});
+    if (API.test(url)) result.then(res => { try { res.clone().text().then(t => handle(method, url, t, sent, res.status)).catch(() => {}); } catch { /* ignore */ } }).catch(() => {});
     return result;
   };
 
@@ -109,7 +117,7 @@
     if (info && API.test(info.url)) {
       const sent = typeof reqBody === 'string' ? reqBody : null;
       this.addEventListener('load', () => {
-        try { if (this.responseType === '' || this.responseType === 'text') handle(info.method, info.url, this.responseText, sent); else if (this.responseType === 'json' && this.response) handle(info.method, info.url, JSON.stringify(this.response), sent); } catch { /* ignore */ }
+        try { if (this.responseType === '' || this.responseType === 'text') handle(info.method, info.url, this.responseText, sent, this.status); else if (this.responseType === 'json' && this.response) handle(info.method, info.url, JSON.stringify(this.response), sent, this.status); } catch { /* ignore */ }
       });
     }
     return XS.apply(this, arguments);

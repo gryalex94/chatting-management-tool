@@ -80,7 +80,9 @@ function noteAccount(kind, data) {
 
 // ---- the queue ----
 async function enqueue(msg) {
-  if (!KEEP.has(msg.kind)) return;
+  // the request log only while switched on (popup: 15 minutes)
+  if (msg.kind === 'net') { if (!(state.netLogUntil > Date.now())) return; }
+  else if (!KEEP.has(msg.kind)) return;
   noteAccount(msg.kind, msg.data);
   if (msg.kind === 'ledger') { state.lastLedgerAt = Date.now(); saveState(); }      // the popup reminds to open Earnings once a day
   const body = JSON.stringify(msg.data);
@@ -234,6 +236,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
       .catch(e => respond({ ok: false, error: e.message, noSession: !!e.noSession }));
     return true;
   }
+  if (msg && msg.type === 'popup-netlog') { state.netLogUntil = msg.on ? Date.now() + 15 * 60_000 : 0; saveState(); respond({ ok: true, until: state.netLogUntil }); return false; }
   if (msg && msg.type === 'popup-flush') { flush().then(() => respond({ ok: true, queue: queue.length })); return true; }
   return false;
 });

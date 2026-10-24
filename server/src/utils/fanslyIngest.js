@@ -257,7 +257,7 @@ async function applyEvents(ctx, events) {
       orders.set(`${fan}:${item}`, { fan, item, at: ts(o.createdAt), id: str(o.id) });
     }
   };
-  const unsent = new Set(), broadcasts = new Map(), historyDone = new Set();
+  const unsent = new Set(), broadcasts = new Map(), historyDone = new Set(), netRows = [];
   const tiers = {};                    // tier id → { name, color, price }: the chip colours in Fansly's chat list
   const takeTier = (id, name, color, price) => { if (!id) return; const k = str(id); tiers[k] = { ...(tiers[k] || {}), ...(name ? { name } : {}), ...(color ? { color } : {}), ...(price != null ? { price: dollars(price) } : {}) }; };
 
@@ -416,6 +416,11 @@ async function applyEvents(ctx, events) {
           for (const a of d.accounts || []) putFan(fanRowFromAccount(ctx, a));
           bump('notifications', (d.notifications || []).length); break;
         }
+        case 'net': {                                      // the request log (popup switch): addresses and counts only
+          netRows.push({ organisation_id: ctx.user.organisationId, account_id: ctx.account.id, user_id: ctx.user.id, at: new Date(e.at || Date.now()).toISOString(),
+            page: String(d.page || '').slice(0, 200), method: String(d.method || '').slice(0, 10), path: String(d.path || '').slice(0, 300), query: d.query || {}, status: d.status ?? null, rows: d.rows || {} });
+          break;
+        }
         case 'tiers': { for (const t of d.tiers || []) takeTier(t.id, t.name, t.color, t.price); bump('tiers', (d.tiers || []).length); break; }
         case 'orders': { takeOrders(d.accountMediaOrders); bump('orders_seen', (d.accountMediaOrders || []).length); break; }
         case 'msg_deleted': { if (d.messageId) unsent.add(str(d.messageId)); bump('unsent'); break; }
@@ -558,6 +563,7 @@ async function applyEvents(ctx, events) {
   if (subs.size) await upsert('fansly_subscriptions', [...subs.values()], 'account_id,subscription_id');
   if (followers.size) await upsert('fansly_followers', [...followers].map(id => ({ account_id: ctx.account.id, fan_account_id: id, last_seen_at: nowIso })), 'account_id,fan_account_id');
   if (notifs.size) await upsert('fansly_notifications', [...notifs.values()], 'account_id,notification_id');
+  if (netRows.length) { const { error } = await supabaseAdmin.from('fansly_net_log').insert(netRows); if (error) errors.push(`net log: ${error.message}`); }
   if (snapshots.length) { const { error } = await supabaseAdmin.from('fansly_stats_snapshots').insert(snapshots); if (error) errors.push(`stats: ${error.message}`); }
 
   if (Object.keys(tiers).length) {
