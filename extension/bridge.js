@@ -60,6 +60,21 @@
     }
     return false;
   };
+  // a list with numbered pages ("1–10 of 756" and arrows): where it stands, and its "next" control
+  function pager() {
+    const label = [...document.querySelectorAll('div, span, p')].find(x => x.childElementCount === 0 && /^\d+\s*[–-]\s*\d+\s+of\s+\d+$/i.test((x.textContent || '').trim()) && visible(x));
+    if (!label) return null;
+    const [, from, to, total] = (label.textContent.trim().match(/^(\d+)\s*[–-]\s*(\d+)\s+of\s+(\d+)$/i) || []).map(Number);
+    // the pager's controls sit next to the label; "next" is the last one (an arrow), or one that says so
+    let box = label.parentElement, next = null;
+    for (let i = 0; i < 4 && box && !next; i++, box = box.parentElement) {
+      const ctrls = [...box.querySelectorAll('button, a, [role="button"], li, .pagination-item, span')].filter(x => visible(x) && x !== label && !label.contains(x));
+      next = ctrls.find(x => /next/i.test(x.getAttribute('aria-label') || x.getAttribute('title') || '')) || ctrls.find(x => /^[›>»→]$/.test((x.textContent || '').trim()))
+        || (ctrls.length > 2 ? ctrls.filter(x => x.childElementCount <= 1 && !/^\d+$|^…$|^\.\.\.$/.test((x.textContent || '').trim())).pop() : null);
+    }
+    const disabled = !next || next.disabled || next.getAttribute('aria-disabled') === 'true' || /disabled/.test(next.className || '');
+    return { from, to, total, next: disabled ? null : next };
+  }
   function scrollEverything() {
     const boxes = [...document.querySelectorAll('*')].filter(el => el.scrollHeight > el.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(el).overflowY));
     for (const el of boxes) { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll', { bubbles: true })); }
@@ -69,6 +84,7 @@
   async function runFetch(job) {
     const p = { rows: 0, total: ledgerTotal, pages: 0, note: 'starting' };
     let lastSize = null, lastLimit = null, seenStats = 0;
+    const ids = new Set();
     const want = job.kind === 'ledger' ? 'ledger' : job.kind === 'subscribers' ? 'subscribers' : 'stats';
     window.addEventListener('message', (ev) => {
       if (ev.source !== window || !ev.data || ev.data[TAG] !== 1 || ev.data.kind !== want) return;
@@ -79,7 +95,9 @@
       if (want === 'ledger' && Number(d.total) > 0) p.total = Number(d.total);
       if (want === 'ledger' && !p.total && ledgerTotal) p.total = ledgerTotal;
       if (limit && limit <= 5) return;                                      // the small "recent purchases" box, not the list
-      p.rows += rows.length; p.pages += 1; lastSize = rows.length; lastLimit = limit;
+      // each sale (or subscription) once, by its id: the CSV and the first pages hold the same newest ones
+      for (const r of rows) ids.add(String((r && (r.transactionId || r.id)) ?? `${ids.size}:${Math.random()}`));
+      p.rows = ids.size; p.pages += 1; lastSize = rows.length; lastLimit = limit;
     });
     const report = (note) => { p.note = note; try { chrome.runtime.sendMessage({ type: 'fetch-progress', progress: { ...p } }); } catch { /* worker restarting */ } };
     const done = (status, note, error) => { p.note = note; try { chrome.runtime.sendMessage({ type: 'fetch-done', status, progress: { ...p }, error }); } catch { /* ignore */ } };
@@ -100,6 +118,46 @@
       }
       sessionStorage.removeItem('cmtStatsEarnings');
       return done(seenStats ? 'done' : 'failed', seenStats ? 'statistics read' : 'the statistics did not load', seenStats ? null : 'Fansly\'s statistics did not load in this tab');
+    }
+    // a list with numbered pages (Fansly's wallet history): press "next" until the last page
+    if (job.kind === 'ledger') {
+      clickText(/^wallet history$/i);
+      for (let i = 0; i < 8 && !pager(); i++) await sleep(1000);
+      // fastest first: "Download CSV → This year" makes Fansly's page fetch the whole year's sales at once
+      // (recorded with every detail, as always; Fansly also saves the CSV file to Downloads)
+      if (clickText(/^download csv$/i)) {
+        await sleep(1500);
+        if (clickText(/^this year$/i)) {
+          report('reading this year\'s sales');
+          let quiet = 0, seen = p.rows;
+          for (let i = 0; i < 60 && quiet < 6; i++) { await sleep(1000); quiet = p.rows === seen ? quiet + 1 : 0; seen = p.rows; }
+          p.csvRows = p.rows;
+          if (p.total && p.rows >= p.total) return done('done', 'every sale read');
+        } else clickText(/^cancel$/i);
+      }
+    }
+    // a list with numbered pages (the wallet history, maybe subscribers): press "next" to the last page
+    if (job.kind !== 'statistics') {
+      for (let i = 0; i < 4 && !pager(); i++) await sleep(1000);
+      if (pager()) {
+        const stopAt = Date.now() + 15 * 60_000;
+        let pg = pager(), stuck = 0, lastTo = -1;
+        while (!stopped && pg && Date.now() < stopAt) {
+          if (pg.total) p.total = pg.total;
+          p.rows = Math.max(ids.size, pg.to);                                 // sales read (each once), at least as far as this page
+          p.note = `page ${Math.ceil(pg.to / Math.max(1, pg.to - pg.from + 1))} of ${Math.ceil(pg.total / Math.max(1, pg.to - pg.from + 1))}`;
+          report(p.note);
+          if (pg.to >= pg.total) return done('done', 'every page read');
+          if (!pg.next) return done(pg.to >= pg.total ? 'done' : 'failed', 'no next page button', `Stopped at ${pg.to} of ${pg.total}: the next-page button wasn't found`);
+          pg.next.click();
+          await humanPause();
+          pg = pager();
+          stuck = pg && pg.to === lastTo ? stuck + 1 : 0;
+          lastTo = pg ? pg.to : lastTo;
+          if (stuck >= 4) return done('failed', 'the page did not move on', `Stopped at ${lastTo} of ${p.total}: the next page didn't load`);
+        }
+        return done(stopped ? 'cancelled' : 'done', stopped ? 'stopped' : 'time limit reached');
+      }
     }
     const end = Date.now() + 10 * 60_000;
     let still = 0, before = -1, viewAllTried = false;
@@ -122,8 +180,8 @@
         // the sales list: if the statistics page showed none, Fansly's wallet history is the other place it lives (tried once)
         if (!p.pages && job.kind === 'ledger' && !sessionStorage.getItem('cmtLedgerFallback')) {
           sessionStorage.setItem('cmtLedgerFallback', '1');
-          report('trying the wallet history page');
-          location.href = 'https://fansly.com/creator/wallet/history';
+          report('trying the statistics page');
+          location.href = 'https://fansly.com/creator/stats/earnings';
           return;                                                              // this tab reloads and the read goes on there
         }
         sessionStorage.removeItem('cmtLedgerFallback');
