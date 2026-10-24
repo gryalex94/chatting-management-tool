@@ -354,6 +354,45 @@ panel.post('/summary', async (req, res) => {
   } catch (e) { fail(res, e, 'summarise the fan'); }
 });
 
+// ---------- the translator (utils/fanslyTranslate.js); nothing is sent to Fansly ----------
+const TR = require('../utils/fanslyTranslate');
+const fanParam = (v) => (/^\d{5,25}$/.test(String(v || '')) ? String(v) : null);
+
+// GET /api/fansly/panel/translate?account&fan → his recent messages in English (new ones translated now) and the language to answer in
+panel.get('/translate', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.query.account);
+    if (!account) return;
+    const fan = fanParam(req.query.fan);
+    if (!fan) return res.status(404).json({ error: 'No such fan on this page' });
+    const msgs = await TR.incoming(req.user.organisationId, account, fan);       // first: it learns his language
+    res.json({ ...msgs, language: await TR.language(account, fan), languages: TR.NAMES });
+  } catch (e) { fail(res, e, 'translate his messages'); }
+});
+
+// POST /api/fansly/panel/translate { account, fan, text, lang? } → the text in his language (or lang)
+panel.post('/translate', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fan = fanParam(req.body?.fan);
+    if (!fan) return res.status(404).json({ error: 'No such fan on this page' });
+    const lang = req.body?.lang && TR.NAMES[req.body.lang] ? req.body.lang : (await TR.language(account, fan)).lang;
+    res.json(await TR.outgoing(req.user.organisationId, account, fan, req.body?.text, lang));
+  } catch (e) { fail(res, e, 'translate the reply'); }
+});
+
+// PUT /api/fansly/panel/translate/language { account, fan, lang | null } → answer him in this language (null: his own)
+panel.put('/translate/language', async (req, res) => {
+  try {
+    const account = await workable(req, res, req.body?.account);
+    if (!account) return;
+    const fan = fanParam(req.body?.fan);
+    if (!fan) return res.status(404).json({ error: 'No such fan on this page' });
+    res.json({ language: await TR.setLanguage(account, fan, req.body?.lang && TR.NAMES[req.body.lang] ? req.body.lang : null) });
+  } catch (e) { fail(res, e, 'set his language'); }
+});
+
 // ---------- scripts, as the chatter sees them ----------
 
 // GET /api/fansly/panel/scripts?account=<fansly id of the page>

@@ -36,8 +36,9 @@
     noteDraft: '', editing: null, editDraft: '', toast: '',
     note: { fan: null, text: '', dirty: false, saving: false, savedAt: null, by: null, error: '' },   // the fan's one note, saved as you type
     suggest: null, suggestBusy: false, suggestError: '',
+    tr: { fan: null, messages: [], language: null, languages: {}, busy: false, error: '', draft: '', out: '', outBusy: false, scripts: true },   // the translator
     linkQ: '', linkResults: null, linkBusy: false,   // { draft_id, messages, goal, why, inserted, group }
-    width: 420, collapsed: false, push: true, open: { suggest: true, card: true, agency: true, metrics: true, notes: true, summary: true, scripts: true },
+    width: 420, collapsed: false, push: true, open: { suggest: true, card: true, agency: true, metrics: true, notes: true, summary: true, translate: true, scripts: true },
   };
 
   // ---------- the host element and its shadow root ----------
@@ -68,6 +69,10 @@
     button:disabled { opacity: .5; cursor: default; }
     textarea, input { font: inherit; color: inherit; background: #1e1e24; border: 1px solid #34343c; border-radius: 6px; padding: 6px 8px; width: 100%; }
     textarea { resize: vertical; min-height: 52px; }
+    input[type=checkbox] { width: auto; padding: 0; vertical-align: middle; }
+    select { font: inherit; color: inherit; background: #1e1e24; border: 1px solid #34343c; border-radius: 6px; padding: 3px 6px; max-width: 100%; }
+    .tmsg { background: #1e1e24; border: 1px solid #2c2c33; border-radius: 6px; padding: 5px 8px; margin: 4px 0; }
+    .tr-out { margin-top: 6px; border-color: #4f46e5; }
     section { border: 1px solid #2c2c33; border-radius: 8px; margin: 8px 0; background: #1b1b20; }
     section > h3 { margin: 0; padding: 7px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9a9aa5; cursor: pointer; display: flex; justify-content: space-between; user-select: none; }
     section > .c { padding: 2px 10px 10px; }
@@ -209,7 +214,38 @@
       }
     } catch (e) { if (seq === loadSeq) st.error = e.message; }
     finally { if (seq === loadSeq) { st.loading = false; render(); } }
+    if (st.data && st.data.found) loadTranslations();
   }
+  // ---------- the translator: his messages in English, a reply in his language ----------
+  async function loadTranslations() {
+    const fan = st.fanId;
+    if (!fan || st.tr.busy) return;
+    if (st.tr.fan !== fan) st.tr = { ...st.tr, fan, messages: [], language: null, error: '', draft: '', out: '' };
+    st.tr.busy = true;
+    try {
+      const r = await call('GET', `/api/fansly/panel/translate?${new URLSearchParams({ account: st.accountId, fan })}`);
+      if (fan !== st.fanId) return;
+      st.tr.messages = r.messages || []; st.tr.language = r.language || null; st.tr.languages = r.languages || {}; st.tr.error = '';
+    } catch (e) { if (fan === st.fanId) st.tr.error = e.message; }
+    finally { st.tr.busy = false; renderSoon(); }
+  }
+  async function translateReply() {
+    const fan = st.fanId, text = st.tr.draft.trim();
+    if (!fan || !text || st.tr.outBusy) return;
+    st.tr.outBusy = true; st.tr.error = ''; render();
+    try {
+      const r = await call('POST', '/api/fansly/panel/translate', { account: st.accountId, fan, text: fillPlaceholders(text) });
+      if (fan === st.fanId) st.tr.out = r.text || '';
+    } catch (e) { if (fan === st.fanId) st.tr.error = e.message; }
+    finally { st.tr.outBusy = false; render(); }
+  }
+  async function setReplyLanguage(lang) {
+    const fan = st.fanId; if (!fan) return;
+    try { const r = await call('PUT', '/api/fansly/panel/translate/language', { account: st.accountId, fan, lang: lang || null }); if (fan === st.fanId) { st.tr.language = r.language; st.tr.out = ''; } }
+    catch (e) { st.tr.error = e.message; }
+    render();
+  }
+  const foreign = () => st.tr.language && st.tr.language.lang && st.tr.language.lang !== 'en';
   async function loadSummary(force) {
     if (!st.fanId || st.summaryBusy) return;
     const fan = st.fanId;
@@ -361,7 +397,13 @@
     flushNote(); flash('Added to his note'); render();
   }
   async function useScript(s) {
-    const where = await insertText(fillPlaceholders(s.text));
+    let text = fillPlaceholders(s.text);
+    if (foreign() && st.tr.scripts) {
+      flash(`Translating into ${st.tr.language.name}…`);
+      try { const r = await call('POST', '/api/fansly/panel/translate', { account: st.accountId, fan: st.fanId, text }); if (r.text) text = r.text; }
+      catch (e) { flash(`Not translated (${e.message}); the English goes in`); }
+    }
+    const where = await insertText(text);
     flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box');
     if (where) call('POST', `/api/fansly/panel/scripts/${s.id}/use`, { account: st.accountId, fan: st.fanId }).catch(() => {});
   }
@@ -524,6 +566,36 @@
     return section('summary', 'AI summary', content);
   }
 
+  function translator() {
+    const t = st.tr, lang = t.language, names = t.languages || {};
+    const theirs = (t.messages || []).filter(m => m.text_en).slice(-6);
+    const content = [];
+    if (lang) {
+      const pick = h('select', { onchange: (e) => setReplyLanguage(e.target.value) },
+        h('option', { value: '', selected: !lang.set_by_chatter }, `His language${lang.his ? ` (${lang.his.name})` : ' (English)'}`),
+        Object.entries(names).map(([k, v]) => h('option', { value: k, selected: lang.set_by_chatter && lang.lang === k }, v)));
+      content.push(h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Answer in'), pick));
+    }
+    if (theirs.length) {
+      content.push(h('div', { class: 'lbl' }, 'His messages in English'));
+      for (const m of theirs) content.push(h('div', { class: 'tmsg' }, h('div', null, m.text), h('div', { class: 'muted small' }, `EN: ${m.text_en}`)));
+    } else if (!t.busy) content.push(h('div', { class: 'muted small' }, (t.messages || []).length ? 'He writes in English: nothing to translate.' : 'His messages appear here once they are recorded.'));
+    if (t.busy) content.push(h('div', { class: 'muted small' }, 'Reading his messages…'));
+    content.push(h('div', { class: 'lbl' }, `Your reply in English${foreign() ? `, into ${lang.name}` : ''}`),
+      h('textarea', { class: 'tr-draft', rows: 3, placeholder: 'Write it in English…', value: t.draft, oninput: (e) => { t.draft = e.target.value; t.out = ''; } }),
+      h('div', { class: 'row' },
+        h('button', { class: 'primary', disabled: t.outBusy || !t.draft.trim() || !foreign(), onclick: translateReply, title: foreign() ? '' : 'He writes in English: pick a language above to translate into another one' }, t.outBusy ? 'Translating…' : `Translate${foreign() ? ` to ${lang.name}` : ''}`),
+        h('label', { class: 'small muted', style: 'margin-left:auto' }, h('input', { type: 'checkbox', checked: t.scripts, onchange: (e) => { t.scripts = e.target.checked; } }), ' scripts too')));
+    if (t.out) {
+      content.push(h('textarea', { class: 'tr-out', rows: 3, placeholder: 'In his language', value: t.out, oninput: (e) => { t.out = e.target.value; } }),
+        h('div', { class: 'row' },
+          h('button', { class: 'primary', onclick: async () => { const where = await insertText(t.out); flash(where === 'box' ? 'In the message box: check it and press send yourself' : where === 'clipboard' ? 'Copied: paste it into the message box' : 'Could not reach the message box'); } }, 'Put in message box'),
+          h('button', { onclick: () => { t.out = ''; render(); } }, 'Clear')));
+    }
+    if (t.error) content.push(h('div', { class: 'err small' }, t.error));
+    return section('translate', 'Translator', content, foreign() ? h('span', { class: 'pill' }, lang.name) : null);
+  }
+
   function scripts() {
     const all = st.scripts;
     if (!all) return section('scripts', 'Scripts', h('div', { class: 'muted small' }, 'Loading…'));
@@ -560,7 +632,7 @@
     else if (!d) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, st.loading ? 'Loading the fan…' : ''));
     else if (!d.found && d.reason === 'not_assigned') { parts.push(h('div', { class: 'warn high' }, d.message || 'You are not on the roster for this page.')); return h('div', { class: 'body' }, parts); }
     else if (!d.found) parts.push(h('div', { class: 'muted', style: 'padding:6px 0' }, d.reason === 'page' ? 'This Fansly page is not in the tool yet; it appears after the first messages are recorded.' : 'This chat is not recorded yet. It will be in a few seconds; scroll up in it to record older messages.'));
-    else parts.push(suggestion(d), fanCard(d), agency(d), metrics(d), notes(d), summary());
+    else parts.push(suggestion(d), fanCard(d), agency(d), metrics(d), notes(d), summary(), translator());
     parts.push(scripts());
     return h('div', { class: 'body' }, parts);
   }
