@@ -10,6 +10,13 @@ const canEdit = requireMinRole('manager');
 const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && Number.isFinite(Date.parse(`${d}T00:00:00Z`));
 const todayAms = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
 const missing = (res) => res.status(409).json({ error: R.READY_ERROR });
+
+// Any change to the rota: the Fansly extension's "may this person work this page" and the sales credit
+// read it again at once (they keep it a few minutes), so someone just added can start straight away.
+router.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (res.statusCode < 400) { require('../utils/fanslyIngest').forgetRoster(); require('../utils/fanslyStats').forgetRoster(); } });
+  next();
+});
 const PARTS_ERROR = 'Run migration 027 (part shifts / overtime) in Supabase to turn this on';
 const needs027 = (msg) => /start_time|end_time|roster_changes_organisation_id_date_chatter_id_key/.test(String(msg || ''));
 const slotOf = async (orgId, shiftId) => (await R.loadSlots(orgId, null)).find(x => x.id === shiftId) || null;

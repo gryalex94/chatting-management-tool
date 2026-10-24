@@ -707,4 +707,7 @@ async function sweepPresence(orgId) {
   if (data?.length) await supabaseAdmin.from('fansly_presence').update({ ended_at: new Date().toISOString(), ended_reason: 'timeout' }).in('id', data.map(r => r.id));
 }
 
-module.exports = { applyEvents, inferAccountId, provenAccountIds, ensureAccount, forgetAccount, chatterFor, pagesFor, mayWork, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };
+/** The rota changed (Shifts page): who may work which page, and the shift times, are read again at once. */
+function forgetRoster() { pagesCache.clear(); shiftCache.clear(); chatterCache.clear(); }
+
+module.exports = { forgetRoster, applyEvents, inferAccountId, provenAccountIds, ensureAccount, forgetAccount, chatterFor, pagesFor, mayWork, shiftsFor, shiftAt, heartbeat, endPresence, sweepPresence, messageRow, itemPrice, dollars, ONLINE_MS };

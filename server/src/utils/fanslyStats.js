@@ -316,4 +316,7 @@ async function refreshAll(orgId = null, back = 3) {
   return (data || []).length;
 }
 
-module.exports = { onShiftAt, matchSales, rebuildDaily, reapplyRules, rulesOf, DEFAULT_RULES, schedule, refreshAll, amsDay, dayStartUtc, addDays };
+/** The rota changed: the credit rules read it again at once. */
+const forgetRoster = () => rosterCache.clear();
+
+module.exports = { forgetRoster, onShiftAt, matchSales, rebuildDaily, reapplyRules, rulesOf, DEFAULT_RULES, schedule, refreshAll, amsDay, dayStartUtc, addDays };
