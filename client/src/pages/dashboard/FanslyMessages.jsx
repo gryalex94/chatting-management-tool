@@ -5,7 +5,6 @@ import api from '@/services/api';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import DateRangePicker from '@/components/shared/DateRangePicker';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -19,10 +18,14 @@ const wait = (s) => (s == null ? '' : s < 60 ? `${s} s` : s < 3600 ? `${Math.rou
 const ymd = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 const fanName = (r) => r.fan_nickname || r.display_name || (r.fan_username ? `@${r.fan_username}` : r.fan_account_id ? `#${String(r.fan_account_id).slice(-6)}` : 'Mass message');
 
-const amsToday = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
-const addDays = (d, n) => new Date(Date.parse(`${d}T12:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
-// the filters to start from: the last 7 days (Amsterdam days), everything else open
-const start = () => ({ account: 'all', chatter: 'all', from: addDays(amsToday(), -6), to: amsToday(), view: 'chat', purchased: 'all', status: 'all', replied: 'all', price_min: '', price_max: '', q: '', fan: null });
+const RANGES = [
+  { v: 'today', label: 'Today', days: 0 },
+  { v: '7', label: 'Last 7 days', days: 6 },
+  { v: '30', label: 'Last 30 days', days: 29 },
+  { v: 'all', label: 'All time', days: null },
+  { v: 'custom', label: 'Pick dates', days: null },
+];
+const START = { account: 'all', chatter: 'all', range: '7', from: '', to: '', view: 'chat', purchased: 'all', status: 'all', replied: 'all', price_min: '', price_max: '', q: '', fan: null };
 
 /** Page numbers to show: the first, the last, and two either side of the current one. */
 function pageList(page, pages) {
@@ -40,7 +43,7 @@ function pageList(page, pages) {
  */
 export default function FanslyMessages() {
   const [opts, setOpts] = useState({ accounts: [], chatters: [] });
-  const [f, setF] = useState(start);
+  const [f, setF] = useState(START);
   const [mass, setMass] = useState(null);       // { rows, totals, truncated } in the mass view
   const [search, setSearch] = useState('');
   const [price, setPrice] = useState({ min: '', max: '' });
@@ -65,7 +68,9 @@ export default function FanslyMessages() {
     const p = new URLSearchParams();
     if (f.account !== 'all') p.set('account', f.account);
     if (f.chatter !== 'all') p.set('chatter', f.chatter);
-    p.set('from', f.from); p.set('to', f.to);
+    const r = RANGES.find(x => x.v === f.range);
+    if (f.range === 'custom') { if (f.from) p.set('from', f.from); if (f.to) p.set('to', f.to); }
+    else if (r && r.days != null) { const now = new Date(); p.set('from', ymd(new Date(now.getTime() - r.days * 86400000))); p.set('to', ymd(now)); }
     if (f.q.trim()) p.set('q', f.q.trim());
     if (f.fan) p.set('fan', f.fan.id);
     if (f.price_min !== '') p.set('price_min', f.price_min);
@@ -124,7 +129,7 @@ export default function FanslyMessages() {
   const rows = data?.rows;
   const t = data?.totals;
   const pages = data ? Math.max(1, Math.ceil(data.total / size)) : 1;
-  const changed = JSON.stringify({ ...f, view: 'chat' }) !== JSON.stringify(start());
+  const changed = JSON.stringify({ ...f, view: 'chat' }) !== JSON.stringify(START);
 
   return (
     <div className='grid gap-4'>
@@ -137,7 +142,15 @@ export default function FanslyMessages() {
           <Search className='absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder='Search in the text' className='pl-8' />
         </div>
-        <DateRangePicker value={{ from: f.from, to: f.to }} onChange={(r) => setF(x => ({ ...x, ...r }))} />
+        <Select value={f.range} onValueChange={set('range')}>
+          <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
+          <SelectContent>{RANGES.map(r => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
+        </Select>
+        {f.range === 'custom' && <>
+          <Input type='date' value={f.from} max={f.to || undefined} onChange={e => set('from')(e.target.value)} className='w-36' aria-label='From' />
+          <span className='text-xs text-muted-foreground'>to</span>
+          <Input type='date' value={f.to} min={f.from || undefined} onChange={e => set('to')(e.target.value)} className='w-36' aria-label='To' />
+        </>}
         {f.view === 'chat' && <Button size='sm' variant='outline' onClick={exportCsv} disabled={exporting}>
           {exporting ? <Loader2 className='size-3.5 animate-spin' /> : <Download className='size-3.5' />} CSV
         </Button>}
@@ -193,7 +206,7 @@ export default function FanslyMessages() {
             <SelectItem value='unsent'>Unsent</SelectItem>
           </SelectContent>
         </Select>
-        {changed && <Button size='sm' variant='ghost' onClick={() => { setF(x => ({ ...start(), view: x.view })); setSearch(''); setPrice({ min: '', max: '' }); }}>Clear filters</Button>}
+        {changed && <Button size='sm' variant='ghost' onClick={() => { setF(x => ({ ...START, view: x.view })); setSearch(''); setPrice({ min: '', max: '' }); }}>Clear filters</Button>}
       </div>
 
       {f.view === 'mass' ? <MassList data={mass} error={error} showPage={opts.accounts.length > 1 && f.account === 'all'} /> : <>
