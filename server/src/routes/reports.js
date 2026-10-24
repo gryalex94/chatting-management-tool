@@ -4,6 +4,7 @@ const Stats = require('../utils/fanslyStats');
 const OF = require('../utils/ofReports');
 const FV = require('../utils/fanvueReports');
 const MD = require('../utils/messagesDash');
+const { buildPlatformOverview } = require('../utils/platformOverview');
 
 // Creator reports per platform (the Fansly one lives at /api/fansly/reports). Money: managers and up.
 router.use(requireMinRole('manager'));
@@ -33,6 +34,13 @@ router.get('/fanvue/pages', async (req, res) => {
 });
 router.get('/fanvue', async (req, res) => {
   try { res.json(await FV.report(req.user.organisationId, range(req.query))); } catch (e) { fail(res, e, 'load the report'); }
+});
+
+// GET /api/reports/:platform/daily?date= → the Daily overview for Fansly or Fanvue (OnlyFans: /api/daily-check/overview)
+router.get('/:platform/daily', async (req, res) => {
+  if (!['fansly', 'fanvue'].includes(req.params.platform)) return res.status(404).json({ error: 'No such platform' });
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? String(req.query.date) : Stats.addDays(Stats.amsDay(new Date()), -1);
+  try { res.json(await buildPlatformOverview(req.user.organisationId, req.params.platform, date)); } catch (e) { fail(res, e, 'build the overview'); }
 });
 
 // ---------- the Messages dashboard for OnlyFans and Fanvue (Fansly's lives at /api/fansly/messages) ----------

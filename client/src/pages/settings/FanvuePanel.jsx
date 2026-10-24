@@ -160,7 +160,7 @@ function Progress({ p }) {
 // A YYYY-MM-DD day, n days earlier.
 const daysBefore = (day, n) => { const d = new Date(`${day}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - n); return d.toISOString().slice(0, 10); };
 
-// Also on the Fanvue dashboard (pages/dashboard/FanvueDashboard.jsx).
+// (Fanvue numbers on the dashboard: Creator reports and Daily overview.)
 export function Volume({ stats }) {
   const today = stats.today;                                 // Amsterdam day, from the server
   const { rows, avg } = useMemo(() => {

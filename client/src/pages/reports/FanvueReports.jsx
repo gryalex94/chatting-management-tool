@@ -24,7 +24,7 @@ export default function FanvueReports() {
 
   if (!info) return <Skeleton className='h-40 w-full' />;
   if (info.error) return <p className='text-sm text-muted-foreground'>{info.error}</p>;
-  const settings = isAdmin && <Button asChild size='sm' variant='outline'><Link to='/settings?tab=fanvue'>Open Settings → Fanvue</Link></Button>;
+  const settings = isAdmin && <Button asChild size='sm' variant='outline'><Link to='/settings?tab=fanvue'>Open Settings → Pages</Link></Button>;
   if (!info.accounts?.length) {
     return (
       <PlatformNotice platform='fanvue' title='No Fanvue page connected yet' action={settings}>

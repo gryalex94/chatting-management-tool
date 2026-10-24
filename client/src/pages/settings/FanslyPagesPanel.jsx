@@ -6,14 +6,9 @@ import api from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import PlatformNotice from '@/components/shared/PlatformNotice';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { num } from '@/utils/numbers';
-import MessagesDashboard from './MessagesDashboard';
-import ScriptsLibrary from './ScriptsLibrary';
-import CreatorReports from './CreatorReports';
-import FanslySettings from './FanslySettings';
+import FanslySettings from '@/pages/dashboard/FanslySettings';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
 const since = (iso) => {
@@ -21,35 +16,13 @@ const since = (iso) => {
   const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
   return min < 1 ? 'just now' : min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${min % 60} min`;
 };
-const money = (n) => (n == null ? '·' : `$${Number(n).toFixed(2)}`);
-const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '·');
-const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
 
 /**
- * The dashboard when Fansly is picked in the menu: every Fansly account the
- * browser extension has recorded, who is in it right now, and today's numbers
- * per chatter. Phase 1 of FANSLY_EXTENSION_PLAN.md: recording only.
+ * Settings → Pages on Fansly: every Fansly account the browser extension has
+ * recorded, who is in it now, reading whole lists from Fansly, the page's own
+ * settings (credit rules, creator profile), pausing and removing it.
  */
-export default function FanslyDashboard() {
-  const [tab, setTab] = useState(() => { try { return (localStorage.getItem('fansly-tab') || 'reports').replace(/^revenue$/, 'reports'); } catch { return 'overview'; } });
-  const pick = (v) => { setTab(v); try { localStorage.setItem('fansly-tab', v); } catch { /* ignore */ } };
-  return (
-    <Tabs value={tab} onValueChange={pick} className='gap-4'>
-      <TabsList>
-        <TabsTrigger value='reports'>Creator reports</TabsTrigger>
-        <TabsTrigger value='overview'>Pages</TabsTrigger>
-        <TabsTrigger value='messages'>Messages dashboard</TabsTrigger>
-        <TabsTrigger value='scripts'>Scripts</TabsTrigger>
-      </TabsList>
-      <TabsContent value='reports'><CreatorReports platform='fansly' /></TabsContent>
-      <TabsContent value='overview'><FanslyOverview /></TabsContent>
-      <TabsContent value='messages'><MessagesDashboard platform='fansly' /></TabsContent>
-      <TabsContent value='scripts'><ScriptsLibrary platform='fansly' /></TabsContent>
-    </Tabs>
-  );
-}
-
-function FanslyOverview() {
+export default function FanslyPagesPanel() {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
   const [settingsFor, setSettingsFor] = useState(null);
@@ -73,6 +46,12 @@ function FanslyOverview() {
   }
 
   const pause = (a) => api.post(`/api/fansly/accounts/${a.id}`, { status: a.status === 'paused' ? 'active' : 'paused' }).then(load);
+  // disconnect: the page and everything recorded from it go; the extension adds it again if it opens the page later
+  const remove = async (a) => {
+    const name = a.page || a.username || 'this Fansly page';
+    if (!window.confirm(`Disconnect ${name}? Every chat, sale and note recorded from it is deleted from this tool (nothing changes on Fansly). If the extension opens this page again later, it starts recording it as a new page.`)) return;
+    try { await api.delete(`/api/fansly/accounts/${a.id}`); toast.success(`${name} disconnected`); load(); } catch (e) { toast.error(e?.response?.data?.error || 'Could not disconnect'); }
+  };
 
   return (
     <div className='grid gap-6'>
@@ -92,10 +71,11 @@ function FanslyOverview() {
                 : <Badge variant='secondary'>Nobody in it now</Badge>}
               <Button size='sm' variant='outline' onClick={() => setSettingsFor(a)}>Settings</Button>
               {isAdmin && <Button size='sm' variant='outline' onClick={() => pause(a)}>{a.status === 'paused' ? 'Resume' : 'Pause'}</Button>}
+              {isAdmin && <Button size='sm' variant='outline' className='text-red-600' onClick={() => remove(a)}>Disconnect</Button>}
             </div>
           </header>
 
-          <div className='grid gap-4 px-4 py-3 md:grid-cols-[1fr_1fr]'>
+          <div className='grid gap-4 px-4 py-3'>
             <div>
               <p className='mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>In the account now</p>
               {a.online.length ? (
@@ -105,55 +85,10 @@ function FanslyOverview() {
               ) : <p className='text-sm text-muted-foreground'>No browser with the extension is on this account.</p>}
               {a.online.length > 1 && <p className='mt-2 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> Two people are logged in at once. Sends are credited to whoever&apos;s browser sent them.</p>}
             </div>
-            <div>
-              <p className='mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>Today</p>
-              <div className='grid grid-cols-3 gap-2 text-sm'>
-                <Stat label='Sent in chats' value={`${num(a.today.sent)}${a.today.mass ? ` + ${num(a.today.mass)} mass` : ''}`} />
-                <Stat label='Received' value={num(a.today.received)} />
-                <Stat label='Fans' value={num(a.today.fans)} />
-                <Stat label='PPVs sent' value={num(a.today.ppv_sent)} />
-                <Stat label='Chat PPV net' value={money(a.today.net.chat_ppv || 0)} />
-                <Stat label='Tips net' value={money(a.today.net.chat_tip || 0)} />
-              </div>
-              {a.today.unattributed > 0 && <p className='mt-2 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> {a.today.unattributed} message{a.today.unattributed === 1 ? '' : 's'} sent today from a browser without the extension.</p>}
-            </div>
           </div>
 
           <ReadFromFansly a={a} onChanged={load} />
 
-          {a.last14?.length > 0 && (
-            <div className='border-t'>
-              <p className='px-4 pt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground'>Last 14 days</p>
-              <Table>
-                <TableHeader><TableRow>
-                  <TableHead>Chatter</TableHead><TableHead className='text-right'>Days</TableHead><TableHead className='text-right'>Sent</TableHead><TableHead className='text-right'>Mass</TableHead>
-                  <TableHead className='text-right'>PPVs sent</TableHead><TableHead className='text-right'>Sold</TableHead><TableHead className='text-right'>Sell rate</TableHead>
-                  <TableHead className='text-right'>PPV net</TableHead><TableHead className='text-right'>of it mass</TableHead><TableHead className='text-right'>Tips net</TableHead><TableHead className='text-right'>Reply time</TableHead>
-                </TableRow></TableHeader>
-                <TableBody>
-                  {a.last14.map(c => (
-                    <TableRow key={c.name}>
-                      <TableCell>{c.name}{c.unattributed > 0 && <span className='ml-1 text-xs text-amber-600'>({c.unattributed} not attributed)</span>}</TableCell>
-                      <TableCell className='text-right'>{num(c.days)}</TableCell><TableCell className='text-right'>{num(c.sent)}</TableCell><TableCell className='text-right'>{num(c.mass_sent)}</TableCell>
-                      <TableCell className='text-right'>{num(c.ppv_sent)}</TableCell><TableCell className='text-right'>{num(c.ppv_sold)}</TableCell><TableCell className='text-right'>{pct(c.ppv_sold, c.ppv_sent)}</TableCell>
-                      <TableCell className='text-right'>{money(c.ppv_net)}</TableCell><TableCell className='text-right'>{money(c.mass_ppv_net)}</TableCell><TableCell className='text-right'>{money(c.tips_net)}</TableCell><TableCell className='text-right'>{secs(c.median_reply_s)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
-          {a.today.by_chatter.length > 0 && (
-            <Table>
-              <TableHeader><TableRow><TableHead>Chatter</TableHead><TableHead className='text-right'>Sent</TableHead><TableHead className='text-right'>PPVs</TableHead><TableHead className='text-right'>Fans</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {a.today.by_chatter.map(c => (
-                  <TableRow key={c.name}><TableCell>{c.name}</TableCell><TableCell className='text-right'>{num(c.sent)}</TableCell><TableCell className='text-right'>{num(c.ppv)}</TableCell><TableCell className='text-right'>{num(c.fans)}</TableCell></TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
         </section>
       ))}
 
@@ -223,6 +158,3 @@ function ReadFromFansly({ a, onChanged }) {
   );
 }
 
-function Stat({ label, value }) {
-  return <div className='rounded-md border px-2.5 py-1.5'><p className='text-[11px] text-muted-foreground'>{label}</p><p className='font-medium tabular-nums'>{value}</p></div>;
-}

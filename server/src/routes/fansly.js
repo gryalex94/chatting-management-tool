@@ -586,4 +586,19 @@ router.post('/accounts/:id', requireMinRole('admin'), async (req, res) => {
   } catch (e) { fail(res, e, 'change the account'); }
 });
 
+// DELETE /api/fansly/accounts/:id — disconnect a Fansly page: it and everything recorded from it go
+// (chats, fans, sales, notes…, by the tables' own cascade). Nothing changes on Fansly.
+router.delete('/accounts/:id', requireMinRole('admin'), async (req, res) => {
+  try {
+    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, creator_id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
+    const { error } = await supabaseAdmin.from('fansly_accounts').delete().eq('id', acc.id);
+    if (error) throw error;
+    F.forgetAccount(req.user.organisationId, acc.fansly_account_id);
+    // its page in the tool stays (shifts and payroll history point at it), marked inactive
+    if (acc.creator_id) await supabaseAdmin.from('creators').update({ is_active: false }).eq('id', acc.creator_id).eq('organisation_id', req.user.organisationId);
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'disconnect the page'); }
+});
+
 module.exports = router;

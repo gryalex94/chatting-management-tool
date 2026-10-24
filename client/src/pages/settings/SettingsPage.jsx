@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import CreatorDetailModal from './CreatorDetailModal';
 import InflowwPanel from './InflowwPanel';
 import FanvuePanel from './FanvuePanel';
+import FanslyPagesPanel from './FanslyPagesPanel';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -106,7 +107,9 @@ function RoleSelect({ value, onChange, roles, id }) {
 
 export default function SettingsPage() {
   const { user, isAdmin } = useAuth();
-  const { platform, reloadPages } = usePlatform();
+  const { platform, setPlatform, reloadPages } = usePlatform();
+  // a link to the old Fanvue or Infloww tab shows that platform's Pages tab
+  useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'fanvue') setPlatform('fanvue'); if (t === 'infloww') setPlatform('onlyfans'); }, [setPlatform]);
   const [members, setMembers] = useState([]);
   const [creators, setCreators] = useState([]);
   const [chatters, setChatters] = useState([]);
@@ -127,7 +130,8 @@ export default function SettingsPage() {
   const [editingTemplateId, setEditingTemplateId] = useState(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   // ?tab=fanvue opens that tab (where Fanvue's approval comes back to).
-  const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'creators');
+  // (the old Infloww and Fanvue tabs now live under Pages)
+  const [tab, setTab] = useState(() => { const t = new URLSearchParams(window.location.search).get('tab'); return !t || ['infloww', 'fanvue'].includes(t) ? 'creators' : t; });
   const [creatorDetail, setCreatorDetail] = useState(null);
   const [tzOffset, setTzOffset] = useState(getInflowwOffset());
   const [savingTz, setSavingTz] = useState(false);
@@ -272,7 +276,8 @@ export default function SettingsPage() {
   const inviteLink = inviteToken ? `${window.location.origin}/invite/${inviteToken}` : '';
   const copyToken = () => { try { navigator.clipboard?.writeText(inviteLink); toast.success('Invite link copied'); } catch { /* ignore */ } };
 
-  const tabs = [['creators','Creators'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles'], ...(isAdmin ? [['infloww','Infloww'],['fanvue','Fanvue']] : [])];
+  // Pages: the platform picked in the menu — its connection (Infloww, Fanvue, the Fansly extension) and its pages
+  const tabs = [['creators','Pages'],['chatters','Chatters'],['team','Team'],['shifts','Shifts'],['templates','Templates'],['cycles','Cycles']];
 
   if(loading) return (
     <div className='flex flex-col gap-4 sm:gap-6'>
@@ -331,8 +336,23 @@ export default function SettingsPage() {
           </TabsList>
         </div>
 
-        {/* Creators */}
-        <TabsContent value='creators'>
+        {/* Pages: the platform's connection, then its pages */}
+        <TabsContent value='creators' className='grid gap-4'>
+          {platform === 'fansly' && (
+            <Section title='Fansly extension' sub='The Fansly accounts the browser extension has recorded: who is in them now, reading whole lists from Fansly, each page’s settings, pausing and disconnecting'>
+              <FanslyPagesPanel />
+            </Section>
+          )}
+          {platform === 'fanvue' && isAdmin && (
+            <Section title='Fanvue connection' sub='A creator’s Fanvue account, connected with her approval: chats, messages and earnings copied in'>
+              <FanvuePanel />
+            </Section>
+          )}
+          {platform === 'onlyfans' && isAdmin && (
+            <Section title='Infloww API' sub='Sales, refunds and employees pulled from Infloww, read-only'>
+              <InflowwPanel />
+            </Section>
+          )}
           <Section title={<span className='flex items-center gap-2'><PlatformBadge platform={platform}/>{platformInfo(platform).name} pages</span>}
             sub={`${platformCreators.length} page${platformCreators.length===1?'':'s'} — click one to edit its name, platform, AI context and removal. Switch platform in the menu to see the others.`}
             right={isAdmin&&<span className='text-xs text-muted-foreground'>Admin only</span>}>
@@ -672,20 +692,6 @@ export default function SettingsPage() {
             </div>
           </Section>
         </TabsContent>
-        {isAdmin && (
-          <TabsContent value='infloww'>
-            <Section title='Infloww API' sub='Sales, refunds and employees pulled from Infloww, read-only'>
-              <InflowwPanel />
-            </Section>
-          </TabsContent>
-        )}
-        {isAdmin && (
-          <TabsContent value='fanvue'>
-            <Section title='Fanvue' sub='A creator’s Fanvue account, connected with her approval: chats, messages and earnings copied in'>
-              <FanvuePanel />
-            </Section>
-          </TabsContent>
-        )}
       </Tabs>
 
       {creatorDetail && (

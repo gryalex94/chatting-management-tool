@@ -15,8 +15,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { yesterday } from '@/utils/dates';
 import { usePlatform } from '@/context/PlatformContext';
-import FanvueDashboard from './FanvueDashboard';
-import FanslyDashboard from './FanslyDashboard';
 import CreatorReports from './CreatorReports';
 import MessagesDashboard from './MessagesDashboard';
 import ScriptsLibrary from './ScriptsLibrary';
@@ -189,7 +187,11 @@ function SectionTitle({ title, hint }) {
   );
 }
 
-function OnlyFansDashboard() {
+// The day's team overview on every platform: OnlyFans from the Daily Check (the AI review builds its
+// tasks), Fansly and Fanvue from their own numbers (the same as their Creator reports).
+function DailyOverview({ platform = 'onlyfans' }) {
+  const isOF = platform === 'onlyfans';
+  const PLATFORM_NAME = { onlyfans: 'OnlyFans', fansly: 'Fansly', fanvue: 'Fanvue' }[platform];
   const { user } = useAuth();
   const navigate = useNavigate();
   const [date, setDate] = useState(yesterday());
@@ -199,9 +201,9 @@ function OnlyFansDashboard() {
 
   const load = useCallback(async (d) => {
     setLoading(true);
-    try { const res = await api.get('/api/daily-check/overview', { params: { date: d } }); setData(res.data); }
+    try { const res = await api.get(isOF ? '/api/daily-check/overview' : `/api/reports/${platform}/daily`, { params: { date: d } }); setData(res.data); }
     catch { /* ignore */ } finally { setLoading(false); }
-  }, []);
+  }, [isOF, platform]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(date); }, [load]);
 
@@ -315,7 +317,7 @@ function OnlyFansDashboard() {
         </div>
         <div className='flex flex-wrap items-center gap-2'>
           <Input type='date' aria-label='Report date' value={date} onChange={e => { setDate(e.target.value); load(e.target.value); }} className='w-auto tabular-nums' />
-          {buildButton()}
+          {isOF && buildButton()}
         </div>
       </div>
 
@@ -324,6 +326,14 @@ function OnlyFansDashboard() {
           <div className='grid gap-4 md:grid-cols-[auto_1fr]'><Skeleton className='h-26 md:w-64' /><Skeleton className='h-26' /></div>
           <Skeleton className='h-20' />
           <Skeleton className='h-72' />
+        </div>
+      ) : !hasData && !isOF ? (
+        <div className='flex flex-col items-center rounded-lg border border-dashed px-6 py-12 text-center'>
+          <div className='grid size-12 place-items-center rounded-full bg-muted'><BarChart3 className='size-6 text-muted-foreground' /></div>
+          <h3 className='mt-4 text-lg font-semibold'>Nothing on {PLATFORM_NAME} for {date}</h3>
+          <p className='mt-1 max-w-md text-sm text-muted-foreground'>
+            {platform === 'fansly' ? 'Fansly numbers come in through the extension while the team works.' : 'Fanvue numbers are copied from Fanvue every hour.'} Pick another day, or check the Creator reports for a longer range.
+          </p>
         </div>
       ) : !hasData ? (
         <div className='flex flex-col items-center rounded-lg border border-dashed px-6 py-12 text-center'>
@@ -364,7 +374,8 @@ function OnlyFansDashboard() {
               <p className='mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground'><Sparkles className='size-3.5' />Today's review · AI</p>
               {data.day_review
                 ? <p className='text-sm leading-relaxed'>{data.day_review}</p>
-                : <p className='text-sm text-muted-foreground'>Press <b className='text-foreground'>Build tasks</b> for the AI summary + task queue.</p>}
+                : isOF ? <p className='text-sm text-muted-foreground'>Press <b className='text-foreground'>Build tasks</b> for the AI summary + task queue.</p>
+                  : <p className='text-sm text-muted-foreground'>The AI review of {PLATFORM_NAME} chats (and the tasks it builds) comes with Daily Check for {PLATFORM_NAME}. The tasks shown here are the open ones on {PLATFORM_NAME} pages.</p>}
             </div>
           </div>
 
@@ -407,15 +418,16 @@ function OnlyFansDashboard() {
 // The dashboard of the platform picked in the menu.
 export default function DashboardPage() {
   const { platform } = usePlatform();
-  if (platform === 'fanvue') return <ReportTabs platform='fanvue' daily={<FanvueDashboard />} />;
-  if (platform === 'fansly') return <FanslyDashboard />;
-  return <ReportTabs platform='onlyfans' daily={<OnlyFansDashboard />} />;
+  if (platform === 'fanvue') return <ReportTabs platform='fanvue' />;
+  if (platform === 'fansly') return <ReportTabs platform='fansly' />;
+  return <ReportTabs platform='onlyfans' />;
 }
 
 // OnlyFans and Fanvue: the Creator reports (like Infloww's, as on Fansly) and the daily overview.
-function ReportTabs({ platform, daily }) {
+function ReportTabs({ platform }) {
   const key = `${platform === 'onlyfans' ? 'of' : platform}-tab`;
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem(key) || 'reports'; } catch { return 'reports'; } });
+  const TABS = ['reports', 'daily', 'messages', 'scripts'];
+  const [tab, setTab] = useState(() => { try { const v = localStorage.getItem(key); return TABS.includes(v) ? v : 'reports'; } catch { return 'reports'; } });
   const pick = (v) => { setTab(v); try { localStorage.setItem(key, v); } catch { /* ignore */ } };
   return (
     <Tabs value={tab} onValueChange={pick} className='gap-4'>
@@ -426,7 +438,7 @@ function ReportTabs({ platform, daily }) {
         <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
       <TabsContent value='reports'><CreatorReports platform={platform} /></TabsContent>
-      <TabsContent value='daily'>{daily}</TabsContent>
+      <TabsContent value='daily'><DailyOverview platform={platform} /></TabsContent>
       <TabsContent value='messages'><MessagesDashboard platform={platform} /></TabsContent>
       <TabsContent value='scripts'><ScriptsLibrary platform={platform} /></TabsContent>
     </Tabs>
