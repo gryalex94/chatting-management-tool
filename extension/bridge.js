@@ -294,12 +294,29 @@
   const onMedia = (t) => t && t.closest && t.closest('img, video, picture, canvas, [style*="background-image"]');
   document.addEventListener('contextmenu', (ev) => { if (chatOnly && onMedia(ev.target)) ev.preventDefault(); }, true);
   document.addEventListener('dragstart', (ev) => { if (chatOnly && onMedia(ev.target)) ev.preventDefault(); }, true);
-  function setSecure(on) {
+  // Nobody signed in to the extension: Fansly stays closed, our sign-in page instead. Fansly's own offline
+  // helper (a service worker) can serve its pages without asking the network, past the extension's
+  // address rules, so the page checks too, and shows nothing until the extension has answered.
+  document.documentElement.classList.add('cmt-wait');
+  secureStyle.textContent += 'html.cmt-wait app-root, html.cmt-wait body{visibility:hidden!important}';
+  function setSecure(on, signedOut) {
+    if (signedOut !== false) { location.replace(chrome.runtime.getURL('signin.html')); return; }
+    document.documentElement.classList.remove('cmt-wait');
     chatOnly = !!on;
     window.postMessage({ 'cmt-secure': 1, chatOnly }, '*');
     hideForChatters(); route();
   }
-  try { chrome.runtime.sendMessage({ type: 'cmt-secure-get' }, (r) => { void chrome.runtime.lastError; setSecure(r ? r.chatOnly : true); }); } catch { setSecure(true); }
+  const askSecure = (tries) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'cmt-secure-get' }, (r) => {
+        void chrome.runtime.lastError;
+        if (r) setSecure(r.chatOnly, r.signedOut);
+        else if (tries < 5) setTimeout(() => askSecure(tries + 1), 400);   // the extension is waking up
+        else setSecure(true, true);
+      });
+    } catch { setSecure(true, true); }                                     // the extension is gone: closed
+  };
+  askSecure(0);
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideForChatters, { once: true }); else hideForChatters();
 
   // ---- the request log (popup switch) also notes which controls are clicked: their label, never what is typed ----
@@ -372,7 +389,7 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     if (msg && msg.type === 'cmt-ping') { respond({ ok: true }); return false; }
-    if (msg && msg.type === 'cmt-secure') { setSecure(msg.chatOnly); respond({ ok: true }); return false; }
+    if (msg && msg.type === 'cmt-secure') { setSecure(msg.chatOnly, msg.signedOut); respond({ ok: true }); return false; }
     if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
     // a sequence's media step: the item's name into the search box of Fansly's open vault window
     if (msg && msg.type === 'cmt-search' && typeof msg.text === 'string') {

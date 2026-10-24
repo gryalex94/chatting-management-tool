@@ -35,7 +35,7 @@ async function validSession() {
   if (!session.expiresAt || session.expiresAt - Date.now() > 2 * 60_000) return session;
   try {
     const res = await fetch(apiUrl + '/api/fansly/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: session.refreshToken }) });
-    if (!res.ok) { if (res.status === 401 || res.status === 403) { await set({ session: null }); state.lastError = 'Signed out: please sign in again'; await saveState(); } return null; }
+    if (!res.ok) { if (res.status === 401 || res.status === 403) { await set({ session: null }); applyLock(); state.lastError = 'Signed out: please sign in again'; await saveState(); } return null; }
     const fresh = await res.json();
     await set({ session: fresh });
     return fresh;
@@ -49,7 +49,7 @@ async function api(path, body) {
   const res = await fetch(apiUrl + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.token },
     body: JSON.stringify({ deviceId, extensionVersion: VERSION, account: state.accountId ? { id: state.accountId, username: state.accountUsername } : null, ...body }) });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { await set({ session: null }); throw Object.assign(new Error('Signed out: please sign in again'), { noSession: true }); }
+  if (res.status === 401) { await set({ session: null }); applyLock(); throw Object.assign(new Error('Signed out: please sign in again'), { noSession: true }); }
   if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
   return data;
 }
@@ -64,7 +64,7 @@ async function panelApi(method, path, body) {
   const url = apiUrl + path + (method === 'GET' ? `${sep}deviceId=${encodeURIComponent(deviceId)}` : '');
   const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + session.token }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) { await set({ session: null }); throw Object.assign(new Error('Signed out: please sign in again'), { noSession: true }); }
+  if (res.status === 401) { await set({ session: null }); applyLock(); throw Object.assign(new Error('Signed out: please sign in again'), { noSession: true }); }
   if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
   return data;
 }
@@ -232,7 +232,7 @@ async function applyLock() {
   });
   chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => {
     void chrome.runtime.lastError;
-    for (const t of tabs || []) try { chrome.tabs.sendMessage(t.id, { type: 'cmt-secure', chatOnly: locked }, () => void chrome.runtime.lastError); } catch { /* ignore */ }
+    for (const t of tabs || []) try { chrome.tabs.sendMessage(t.id, { type: 'cmt-secure', chatOnly: locked, signedOut }, () => void chrome.runtime.lastError); } catch { /* ignore */ }
   });
   return locked;
 }

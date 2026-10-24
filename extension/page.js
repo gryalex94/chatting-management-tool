@@ -137,6 +137,11 @@
     history[k] = function (...a) { const r = real.apply(this, a); try { window.postMessage({ 'cmt-route': 1 }, '*'); } catch { /* ignore */ } return r; };
   }
   window.addEventListener('popstate', () => window.postMessage({ 'cmt-route': 1 }, '*'));
+  // Fansly's offline helper serves its pages past the extension's address rules: in a chatter's browser it goes
+  known.then(() => {
+    if (!chatOnly || !navigator.serviceWorker) return;
+    navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+  });
   const blockedBody = () => JSON.stringify({ success: false, error: { code: 403, details: 'Not available while chatting (Chatting Manager)' } });
 
   // ---- fetch ----
