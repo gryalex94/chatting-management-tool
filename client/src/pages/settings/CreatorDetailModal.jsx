@@ -17,6 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PLATFORMS, pagePlatform } from '@/utils/platforms';
+import CopyFromPage from './CopyFromPage';
 
 /**
  * Everything about one creator page in one place: identity, the AI context used
@@ -34,6 +35,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
   const [usage, setUsage] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [copying, setCopying] = useState(false);
 
   useEffect(() => {
     api.get(`/api/creators/${creator.id}/usage`).then(r => setUsage(r.data)).catch(() => setUsage(null));
@@ -157,6 +159,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
         </div>
 
         <DialogFooter className='border-t px-6 py-4'>
+          {isAdmin && <Button variant='outline' className='sm:me-auto' onClick={() => setCopying(true)}>Copy from another page…</Button>}
           <Button variant='ghost' onClick={onClose}>Close</Button>
           {isAdmin && (
             <Button disabled={!dirty || saving} onClick={save}>{saving ? 'Saving…' : 'Save changes'}</Button>
@@ -176,6 +179,7 @@ export default function CreatorDetailModal({ creator, isAdmin, onClose, onChange
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        {copying && <CopyFromPage creator={creator} platform={pagePlatform(creator)} onClose={() => setCopying(false)} onCopied={() => { setCopying(false); onChanged(); onClose(); }} />}
       </DialogContent>
     </Dialog>
   );

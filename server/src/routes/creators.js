@@ -301,4 +301,32 @@ router.post('/:id/split', requireMinRole('admin'), async (req, res) => {
   }
 });
 
+// ---------- copy settings from another page (the same creator on another platform) ----------
+const PageCopy = require('../utils/pageCopy');
+
+// GET /api/creators/:id/copy-sources → the other pages, with what each has to copy
+router.get('/:id/copy-sources', requireMinRole('admin'), async (req, res) => {
+  try {
+    const { data: pages } = await supabaseAdmin.from('creators').select('id').eq('organisation_id', req.user.organisationId).eq('is_active', true).is('merged_into', null).neq('id', req.params.id);
+    const out = (await Promise.all((pages || []).map(p => PageCopy.whatItHas(req.user.organisationId, p.id)))).filter(Boolean);
+    res.json({ sources: out.sort((a, b) => a.page.platform.localeCompare(b.page.platform) || a.page.name.localeCompare(b.page.name)) });
+  } catch (e) { console.error('[creators] copy sources:', e.message); res.status(500).json({ error: 'Could not load the pages' }); }
+});
+
+// POST /api/creators/:id/copy-from { source_id, parts: ['profile','facts','rules','content','scripts','credit'] }
+router.post('/:id/copy-from', requireMinRole('admin'), async (req, res) => {
+  try {
+    const out = await PageCopy.copyPage(req.user.organisationId, req.user.id, req.params.id, String(req.body?.source_id || ''), req.body?.parts);
+    // new credit rules apply to the sales already recorded on that Fansly page
+    if (out.copied.credit) {
+      const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id').eq('creator_id', req.params.id).limit(1).maybeSingle();
+      if (acc) require('../utils/fanslyStats').reapplyRules(acc.id).catch(e => console.error('[creators] reapply rules:', e.message));
+    }
+    res.json(out);
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    console.error('[creators] copy from:', e.message); res.status(500).json({ error: 'Could not copy' });
+  }
+});
+
 module.exports = router;
