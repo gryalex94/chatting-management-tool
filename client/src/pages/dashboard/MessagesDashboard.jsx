@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
@@ -41,7 +41,23 @@ function pageList(page, pages) {
  * Numbered pages; "Open" opens the chat in your own browser where the
  * extension runs (or on fansly.com). Mass messages have their own list.
  */
-export default function FanslyMessages() {
+// What differs per platform: where the messages come from and what the page can do with them.
+const PLATFORM = {
+  fansly: { base: '/api/fansly/messages', mass: true, open: true, replied: true, nobody: 'Not attributed',
+    note: 'A message shows who sent it only when it went out through the extension with a chatter signed in; older ones say Not attributed. Open goes to your own browser when your extension is on that page now; otherwise fansly.com opens in a new tab.' },
+  onlyfans: { base: '/api/reports/onlyfans/messages', mass: false, open: false, replied: false, nobody: '·',
+    note: 'From the uploaded chat exports (Infloww\'s Message dashboard files): the sender, the fan message each reply answered and its reply time are Infloww\'s own. Days after the last upload are not in them yet.' },
+  fanvue: { base: '/api/reports/fanvue/messages', mass: false, open: false, replied: true, nobody: 'Nobody on shift',
+    note: 'From the chats copied from Fanvue every hour. Fanvue does not say who sent a message, so the sender is whoever was on the page\'s Fanvue shift then. AI-written marks replies written with Fanvue\'s AI.' },
+};
+const PlatformCtx = createContext(PLATFORM.fansly);
+
+export default function MessagesDashboard({ platform = 'fansly' }) {
+  const cfg = PLATFORM[platform];
+  return <PlatformCtx.Provider value={cfg}><Messages cfg={cfg} /></PlatformCtx.Provider>;
+}
+
+function Messages({ cfg }) {
   const [opts, setOpts] = useState({ accounts: [], chatters: [] });
   const [f, setF] = useState(START);
   const [mass, setMass] = useState(null);       // { rows, totals, truncated } in the mass view
@@ -59,7 +75,7 @@ export default function FanslyMessages() {
   const [open, setOpen] = useState(null);       // { account_id, fan_account_id, focus }
   const reqId = useRef(0);
 
-  useEffect(() => { api.get('/api/fansly/messages/filters').then(r => setOpts(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get(`${cfg.base}/filters`).then(r => setOpts(r.data)).catch(() => {}); }, [cfg.base]);
   // typing waits a moment before asking the server
   useEffect(() => { const t = setTimeout(() => setF(x => (x.q === search ? x : { ...x, q: search })), 400); return () => clearTimeout(t); }, [search]);
   useEffect(() => { const t = setTimeout(() => setF(x => (x.price_min === price.min && x.price_max === price.max ? x : { ...x, price_min: price.min, price_max: price.max })), 500); return () => clearTimeout(t); }, [price]);
@@ -87,24 +103,24 @@ export default function FanslyMessages() {
     setError('');
     if (f.view === 'mass') {
       setMass(null);
-      api.get(`/api/fansly/messages/mass?${params}`)
+      api.get(`${cfg.base}/mass?${params}`)
         .then(r => { if (id === reqId.current) setMass(r.data); })
         .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the mass messages'); });
       return;
     }
     setData(d => (d ? { ...d, loading: true } : null));
     const p = new URLSearchParams(params); p.set('page', String(page)); p.set('size', String(size));
-    api.get(`/api/fansly/messages?${p}`)
+    api.get(`${cfg.base}?${p}`)
       .then(r => { if (id === reqId.current) setData(r.data); })
       .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the messages'); });
-  }, [params, f.view, page, size]);
+  }, [params, f.view, page, size, cfg.base]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
   const exportCsv = async () => {
     setExporting(true);
     try {
-      const { data: blob } = await api.get(`/api/fansly/messages.csv?${params}`, { responseType: 'blob' });
+      const { data: blob } = await api.get(`${cfg.base}.csv?${params}`, { responseType: 'blob' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `fansly-messages-${ymd(new Date())}.csv`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -136,7 +152,7 @@ export default function FanslyMessages() {
       <div className='flex flex-wrap items-center gap-2'>
         <div className='inline-flex rounded-md border p-0.5'>
           <Button size='sm' variant={f.view === 'chat' ? 'default' : 'ghost'} onClick={() => set('view')('chat')}>Chat messages</Button>
-          <Button size='sm' variant={f.view === 'mass' ? 'default' : 'ghost'} onClick={() => set('view')('mass')}>Mass messages</Button>
+          {cfg.mass && <Button size='sm' variant={f.view === 'mass' ? 'default' : 'ghost'} onClick={() => set('view')('mass')}>Mass messages</Button>}
         </div>
         <div className='relative min-w-48 flex-1'>
           <Search className='absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
@@ -157,14 +173,14 @@ export default function FanslyMessages() {
       </div>
 
       <div className='flex flex-wrap items-center gap-2'>
-        <Select value={f.chatter} onValueChange={set('chatter')}>
+        {!opts.no_sender_filter && <Select value={f.chatter} onValueChange={set('chatter')}>
           <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value='all'>Sender: everyone</SelectItem>
             {opts.chatters.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            <SelectItem value='none'>Not attributed</SelectItem>
+            {cfg.mass && <SelectItem value='none'>Not attributed</SelectItem>}
           </SelectContent>
-        </Select>
+        </Select>}
         {opts.accounts.length > 1 && (
           <Select value={f.account} onValueChange={set('account')}>
             <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
@@ -190,13 +206,13 @@ export default function FanslyMessages() {
               <SelectItem value='no'>PPV not bought</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={f.replied} onValueChange={set('replied')}>
+          {cfg.replied && <Select value={f.replied} onValueChange={set('replied')}>
             <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value='all'>Fan replied: any</SelectItem>
               <SelectItem value='no'>No reply yet</SelectItem>
             </SelectContent>
-          </Select>
+          </Select>}
         </>}
         <Select value={f.status} onValueChange={set('status')}>
           <SelectTrigger className='w-32'><SelectValue /></SelectTrigger>
@@ -234,7 +250,7 @@ export default function FanslyMessages() {
             <TableBody>
               {rows.map(r => (
                 <TableRow key={`${r.account_id}:${r.message_id}`}>
-                  <TableCell className='whitespace-nowrap text-xs'>{r.chatter || <span className='text-muted-foreground'>Not attributed</span>}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs'>{r.chatter || <span className='text-muted-foreground'>{cfg.nobody}</span>}{r.kind === 'ai' && <Badge variant='outline' className='ml-1 px-1 py-0 text-[10px]'>AI-written</Badge>}</TableCell>
                   <TableCell className='whitespace-nowrap text-xs'>{r.page}</TableCell>
                   <TableCell className='max-w-md'>
                     {r.prev_fan_text && <p className='line-clamp-2 text-xs text-muted-foreground'>{r.prev_fan_text}</p>}
@@ -254,10 +270,10 @@ export default function FanslyMessages() {
                   </TableCell>
                   <TableCell className='whitespace-nowrap text-right'>
                     <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={() => setOpen({ account_id: r.account_id, fan_account_id: r.fan_account_id, focus: r.message_id })}>Chat here</Button>
-                    <Button size='sm' variant='outline' className='h-7 px-2 text-xs' disabled={!r.group_id} onClick={() => openChat(r)}
+                    {cfg.open && <Button size='sm' variant='outline' className='h-7 px-2 text-xs' disabled={!r.group_id} onClick={() => openChat(r)}
                       title={(data.my_browsers || []).includes(r.account_id) ? 'Opens this chat in your browser where the extension is on this page' : 'Opens this chat on fansly.com in a new tab'}>
                       <ExternalLink className='size-3' /> Open
-                    </Button>
+                    </Button>}
                   </TableCell>
                 </TableRow>
               ))}
@@ -280,8 +296,7 @@ export default function FanslyMessages() {
         </div>
       )}
       <p className='text-xs text-muted-foreground'>
-        A message shows who sent it only when it went out through the extension with a chatter signed in; older ones say Not attributed. Reply time is how long after the fan&apos;s message the reply went out (more than 3 days counts as a new start, not a reply).
-        Open goes to your own browser when your extension is on that page now; otherwise fansly.com opens in a new tab.
+        {cfg.note} Reply time is how long after the fan&apos;s message the reply went out (more than 3 days counts as a new start, not a reply).
       </p>
       </>}
 
@@ -292,16 +307,17 @@ export default function FanslyMessages() {
 
 /** "Sent to": find a fan by name and show only the messages to him. */
 function FanPicker({ value, onChange }) {
+  const { base } = useContext(PlatformCtx);
   const [q, setQ] = useState('');
   const [list, setList] = useState([]);
   const [show, setShow] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => {
       if (q.trim().length < 2) setList([]);
-      else api.get(`/api/fansly/messages/recipients?q=${encodeURIComponent(q.trim())}`).then(r => setList(r.data.fans || [])).catch(() => {});
+      else api.get(`${base}/recipients?q=${encodeURIComponent(q.trim())}`).then(r => setList(r.data.fans || [])).catch(() => {});
     }, 300);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, base]);
   if (value) return (
     <Badge variant='secondary' className='h-8 gap-1 px-2 text-xs'>Sent to: {value.name}
       <button type='button' aria-label='Clear' onClick={() => onChange(null)}><X className='size-3' /></button>
@@ -387,17 +403,18 @@ function Total({ label, value }) {
 
 /** The whole chat with one fan, as the chatter saw it, the clicked message highlighted. */
 function Conversation({ open, onClose }) {
+  const { base } = useContext(PlatformCtx);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const focusRef = useRef(null);
 
   useEffect(() => {
     let live = true;
-    api.get(`/api/fansly/messages/conversation?account=${open.account_id}&fan=${encodeURIComponent(open.fan_account_id)}`)
+    api.get(`${base}/conversation?account=${open.account_id}&fan=${encodeURIComponent(open.fan_account_id)}`)
       .then(r => { if (live) setData(r.data); })
       .catch(e => { if (live) setError(e?.response?.data?.error || 'Could not load the conversation'); });
     return () => { live = false; };
-  }, [open.account_id, open.fan_account_id]);
+  }, [open.account_id, open.fan_account_id, base]);
   useEffect(() => { if (data) setTimeout(() => focusRef.current?.scrollIntoView({ block: 'center' }), 50); }, [data]);
 
   const fan = data?.fan || {};
@@ -421,7 +438,7 @@ function Conversation({ open, onClose }) {
                     m.message_id === open.focus && 'ring-2 ring-amber-500')}>
                   {m.message ? <p className='whitespace-pre-wrap break-words'>{m.message}</p> : <p className='text-muted-foreground'>(media only)</p>}
                   <p className='mt-1 text-[11px] text-muted-foreground'>
-                    {[when(m.sent_at), !m.from_fan && (m.chatter || (m.attribution === 'unattributed' ? 'not attributed' : null)), m.kind === 'mass' && 'mass',
+                    {[when(m.sent_at), !m.from_fan && (m.chatter || (m.attribution === 'unattributed' ? 'not attributed' : null)), m.kind === 'mass' && 'mass', m.kind === 'ai' && 'AI-written',
                       m.price != null && `PPV ${money(m.price)}${m.sold_at ? ` · sold${m.sold_net != null ? ` ${money(m.sold_net)}` : ''}` : ' · not sold'}`, m.tip_amount != null && `tip ${money(m.tip_amount)}`,
                       m.unsent_at && `unsent ${when(m.unsent_at)}`].filter(Boolean).join(' · ')}
                   </p>

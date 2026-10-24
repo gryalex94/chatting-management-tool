@@ -10,9 +10,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import PlatformNotice from '@/components/shared/PlatformNotice';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { num } from '@/utils/numbers';
-import FanslyMessages from './FanslyMessages';
-import FanslyScripts from './FanslyScripts';
-import FanslyRevenue from './FanslyRevenue';
+import MessagesDashboard from './MessagesDashboard';
+import ScriptsLibrary from './ScriptsLibrary';
 import CreatorReports from './CreatorReports';
 import FanslySettings from './FanslySettings';
 
@@ -32,22 +31,20 @@ const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.r
  * per chatter. Phase 1 of FANSLY_EXTENSION_PLAN.md: recording only.
  */
 export default function FanslyDashboard() {
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem('fansly-tab') || 'reports'; } catch { return 'overview'; } });
+  const [tab, setTab] = useState(() => { try { return (localStorage.getItem('fansly-tab') || 'reports').replace(/^revenue$/, 'reports'); } catch { return 'overview'; } });
   const pick = (v) => { setTab(v); try { localStorage.setItem('fansly-tab', v); } catch { /* ignore */ } };
   return (
     <Tabs value={tab} onValueChange={pick} className='gap-4'>
       <TabsList>
         <TabsTrigger value='reports'>Creator reports</TabsTrigger>
         <TabsTrigger value='overview'>Pages</TabsTrigger>
-        <TabsTrigger value='messages'>Messages</TabsTrigger>
-        <TabsTrigger value='revenue'>Revenue</TabsTrigger>
+        <TabsTrigger value='messages'>Messages dashboard</TabsTrigger>
         <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
       <TabsContent value='reports'><CreatorReports platform='fansly' /></TabsContent>
       <TabsContent value='overview'><FanslyOverview /></TabsContent>
-      <TabsContent value='messages'><FanslyMessages /></TabsContent>
-      <TabsContent value='revenue'><FanslyRevenue /></TabsContent>
-      <TabsContent value='scripts'><FanslyScripts /></TabsContent>
+      <TabsContent value='messages'><MessagesDashboard platform='fansly' /></TabsContent>
+      <TabsContent value='scripts'><ScriptsLibrary platform='fansly' /></TabsContent>
     </Tabs>
   );
 }

@@ -18,6 +18,8 @@ import { usePlatform } from '@/context/PlatformContext';
 import FanvueDashboard from './FanvueDashboard';
 import FanslyDashboard from './FanslyDashboard';
 import CreatorReports from './CreatorReports';
+import MessagesDashboard from './MessagesDashboard';
+import ScriptsLibrary from './ScriptsLibrary';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const money = (n) => n == null ? '-' : `$${Math.round(n).toLocaleString()}`;
@@ -420,9 +422,13 @@ function ReportTabs({ platform, daily }) {
       <TabsList>
         <TabsTrigger value='reports'>Creator reports</TabsTrigger>
         <TabsTrigger value='daily'>Daily overview</TabsTrigger>
+        <TabsTrigger value='messages'>Messages dashboard</TabsTrigger>
+        <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
       <TabsContent value='reports'><CreatorReports platform={platform} /></TabsContent>
       <TabsContent value='daily'>{daily}</TabsContent>
+      <TabsContent value='messages'><MessagesDashboard platform={platform} /></TabsContent>
+      <TabsContent value='scripts'><ScriptsLibrary platform={platform} /></TabsContent>
     </Tabs>
   );
 }

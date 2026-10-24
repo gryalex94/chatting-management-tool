@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, Pencil, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { Badge } from '@/components/ui/badge';
@@ -15,19 +15,24 @@ import { Textarea } from '@/components/ui/textarea';
 const STAGE_LABEL = { opener: 'Opener', warmup: 'Warm-up', sexting: 'Sexting', ppv_pitch: 'PPV pitch', after_no: 'After a no', reengage: 'Re-engage', custom: 'Custom request', aftercare: 'Aftercare', other: 'Other' };
 const EMPTY = { stage: 'opener', title: '', text: '', account_id: 'all', active: true, item_ids: '' };
 
+const NAME = { fansly: 'Fansly', onlyfans: 'OnlyFans', fanvue: 'Fanvue' };
+
 /**
- * The scripts library for the Fansly side panel. Managers write and order
- * scripts per stage (and optionally per page); chatters click them in the panel,
- * which types the text into Fansly's message box for them to send. Each script
- * shows how often it was used in the last 90 days and how the PPV after it did.
+ * The scripts library, one per platform. Managers write and order scripts per
+ * stage (and optionally per page). On Fansly chatters click them in the
+ * extension's side panel, which types the text into Fansly's message box for
+ * them to send; each script shows how often it was used in the last 90 days and
+ * how the PPV after it did. On OnlyFans and Fanvue the team copies them from here.
  */
-export default function FanslyScripts() {
+export default function ScriptsLibrary({ platform = 'fansly' }) {
+  const panel = platform === 'fansly';
   const [info, setInfo] = useState(null);
   const [edit, setEdit] = useState(null);       // the form, or null
   const [saving, setSaving] = useState(false);
 
-  const load = () => api.get('/api/fansly/scripts').then(r => setInfo(r.data)).catch(e => setInfo({ error: e?.response?.data?.error || 'Could not load the scripts.' }));
-  useEffect(() => { load(); }, []);
+  const load = () => api.get(`/api/fansly/scripts?platform=${platform}`).then(r => setInfo(r.data)).catch(e => setInfo({ error: e?.response?.data?.error || 'Could not load the scripts.' }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [platform]);
 
   if (!info) return <Skeleton className='h-64 w-full' />;
   if (info.error) return <p className='text-sm text-muted-foreground'>{info.error}</p>;
@@ -38,9 +43,9 @@ export default function FanslyScripts() {
   const save = async () => {
     setSaving(true);
     const body = {
-      stage: edit.stage, title: edit.title, text: edit.text, active: edit.active,
+      platform, stage: edit.stage, title: edit.title, text: edit.text, active: edit.active,
       account_id: edit.account_id === 'all' ? null : edit.account_id,
-      item_ids: String(edit.item_ids || '').split(/[\s,]+/).filter(Boolean),
+      ...(panel ? { item_ids: String(edit.item_ids || '').split(/[\s,]+/).filter(Boolean) } : {}),
     };
     try {
       if (edit.id) await api.patch(`/api/fansly/scripts/${edit.id}`, body); else await api.post('/api/fansly/scripts', body);
@@ -66,8 +71,10 @@ export default function FanslyScripts() {
     <div className='grid gap-4'>
       <div className='flex flex-wrap items-center justify-between gap-3'>
         <p className='max-w-2xl text-sm text-muted-foreground'>
-          Chatters see these in the extension&apos;s side panel and click one to put it in Fansly&apos;s message box; they edit and send it themselves.
-          Placeholders: <code>{'{name}'}</code> the fan&apos;s name, <code>{'{last_bought}'}</code> his last purchase, <code>{'{page}'}</code> the page.
+          {panel ? <>
+            Chatters see these in the extension&apos;s side panel and click one to put it in Fansly&apos;s message box; they edit and send it themselves.
+            Placeholders: <code>{'{name}'}</code> the fan&apos;s name, <code>{'{last_bought}'}</code> his last purchase, <code>{'{page}'}</code> the page.
+          </> : <>The {NAME[platform]} scripts library: the team copies a script from here and pastes it into the chat, then edits and sends it. Hidden scripts stay here but are marked hidden.</>}
         </p>
         <Button size='sm' onClick={() => setEdit({ ...EMPTY })}><Plus className='size-3.5' /> New script</Button>
       </div>
@@ -92,13 +99,15 @@ export default function FanslyScripts() {
                     {s.item_ids?.length > 0 && <Badge variant='outline' className='ml-2'>{s.item_ids.length} vault item{s.item_ids.length === 1 ? '' : 's'}</Badge>}
                   </p>
                   <p className='mt-1 whitespace-pre-wrap text-sm text-muted-foreground'>{s.text}</p>
-                  <p className='mt-1 text-xs text-muted-foreground'>
+                  {panel && <p className='mt-1 text-xs text-muted-foreground'>
                     Used {s.uses} time{s.uses === 1 ? '' : 's'} in 90 days
                     {s.uses > 0 && ` · PPV sent after it ${s.ppv_after} time${s.ppv_after === 1 ? '' : 's'}, sold ${s.sold_after}${s.ppv_after ? ` (${Math.round((s.sold_after / s.ppv_after) * 100)}%)` : ''}`}
-                  </p>
+                  </p>}
                 </div>
                 <div className='flex items-start gap-2'>
-                  <Switch checked={s.active} onCheckedChange={() => toggle(s)} aria-label='Shown in the panel' />
+                  {!panel && <Button size='icon' variant='ghost' className='size-7' aria-label='Copy'
+                    onClick={() => navigator.clipboard.writeText(s.text).then(() => toast.success('Copied'), () => toast.error('Could not copy'))}><Copy className='size-3.5' /></Button>}
+                  <Switch checked={s.active} onCheckedChange={() => toggle(s)} aria-label={panel ? 'Shown in the panel' : 'Shown'} />
                   <Button size='icon' variant='ghost' className='size-7' onClick={() => setEdit({ ...s, account_id: s.account_id || 'all', item_ids: (s.item_ids || []).join(', ') })} aria-label='Edit'><Pencil className='size-3.5' /></Button>
                   <Button size='icon' variant='ghost' className='size-7' onClick={() => remove(s)} aria-label='Delete'><Trash2 className='size-3.5' /></Button>
                 </div>
@@ -126,7 +135,7 @@ export default function FanslyScripts() {
                   <Select value={edit.account_id} onValueChange={v => setEdit(x => ({ ...x, account_id: v }))}>
                     <SelectTrigger className='w-full'><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value='all'>All Fansly pages</SelectItem>
+                      <SelectItem value='all'>All {NAME[platform]} pages</SelectItem>
                       {(info.accounts || []).map(a => <SelectItem key={a.id} value={a.id}>{a.page}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -138,14 +147,14 @@ export default function FanslyScripts() {
               </div>
               <div className='grid gap-1.5'>
                 <Label>Text</Label>
-                <Textarea value={edit.text} rows={6} maxLength={4000} onChange={e => setEdit(x => ({ ...x, text: e.target.value }))} placeholder='hey {name}, just got out of the shower…' />
+                <Textarea value={edit.text} rows={6} maxLength={4000} onChange={e => setEdit(x => ({ ...x, text: e.target.value }))} placeholder={panel ? 'hey {name}, just got out of the shower…' : 'hey babe, just got out of the shower…'} />
               </div>
-              <div className='grid gap-1.5'>
+              {panel && <div className='grid gap-1.5'>
                 <Label>Vault items (optional)</Label>
                 <Input value={edit.item_ids} onChange={e => setEdit(x => ({ ...x, item_ids: e.target.value }))} placeholder='Fansly media ids, separated by commas' />
                 <p className='text-xs text-muted-foreground'>The panel warns when the fan already bought one of these.</p>
-              </div>
-              <label className='flex items-center gap-2 text-sm'><Switch checked={edit.active} onCheckedChange={v => setEdit(x => ({ ...x, active: v }))} /> Shown in the panel</label>
+              </div>}
+              <label className='flex items-center gap-2 text-sm'><Switch checked={edit.active} onCheckedChange={v => setEdit(x => ({ ...x, active: v }))} /> {panel ? 'Shown in the panel' : 'Shown (not hidden)'}</label>
             </div>
           )}
           <DialogFooter>

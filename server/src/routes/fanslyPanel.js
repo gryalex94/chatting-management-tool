@@ -361,7 +361,7 @@ panel.get('/scripts', async (req, res) => {
   try {
     const account = await accountOf(req, req.query.account);
     if (account && !account.assigned) return res.json({ stages: STAGES, scripts: [], not_assigned: true });
-    let q = supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, item_ids').eq('organisation_id', req.user.organisationId).eq('active', true);
+    let q = supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, item_ids').eq('organisation_id', req.user.organisationId).eq('platform', 'fansly').eq('active', true);
     q = account ? q.or(`account_id.is.null,account_id.eq.${account.id}`) : q.is('account_id', null);
     const { data, error } = await q.order('position').order('created_at');
     if (error) throw error;
@@ -522,13 +522,33 @@ scripts.use(authMiddleware, requireMinRole('manager'));
 
 const PPV_WINDOW_MS = 2 * 3600 * 1000;      // a PPV sent to the same fan within 2 h after the script counts as "after it"
 
-// GET /api/fansly/scripts → every script, with how often it was used and how the PPV after it did (last 90 days)
+// The scripts library is per platform (?platform= or body.platform; Fansly when left out). On Fansly a
+// script can belong to one Fansly account (account_id) and is clicked in the extension's panel; on
+// OnlyFans and Fanvue it can belong to one page (creator_id) and is copied from the library.
+const SCRIPT_PLATFORMS = ['fansly', 'onlyfans', 'fanvue'];
+const platformOf = (v) => (SCRIPT_PLATFORMS.includes(v) ? v : 'fansly');
+async function scriptPages(orgId, platform) {
+  if (platform === 'fansly') {
+    const { data } = await supabaseAdmin.from('fansly_accounts').select('id, username, creators(name)').eq('organisation_id', orgId).order('first_seen_at');
+    return (data || []).map(a => ({ id: a.id, page: a.creators?.name || a.username }));
+  }
+  const { data } = await supabaseAdmin.from('creators').select('id, name').eq('organisation_id', orgId).eq('platform', platform).eq('is_active', true).is('merged_into', null).order('name');
+  return (data || []).map(c => ({ id: c.id, page: c.name }));
+}
+
+// GET /api/fansly/scripts?platform= → every script, with how often it was used and how the PPV after it did (last 90 days, Fansly)
 scripts.get('/', async (req, res) => {
   const orgId = req.user.organisationId;
+  const platform = platformOf(req.query.platform);
   try {
-    const { data: list, error } = await supabaseAdmin.from('fansly_scripts').select('id, account_id, stage, title, text, position, active, item_ids, created_at, updated_at')
-      .eq('organisation_id', orgId).order('position').order('created_at');
+    const { data: rows, error } = await supabaseAdmin.from('fansly_scripts').select('id, account_id, creator_id, stage, title, text, position, active, item_ids, created_at, updated_at')
+      .eq('organisation_id', orgId).eq('platform', platform).order('position').order('created_at');
     if (error) throw error;
+    // the page a script belongs to goes out as account_id on every platform
+    const list = (rows || []).map(({ creator_id, ...x }) => (platform === 'fansly' ? x : { ...x, account_id: creator_id }));
+    if (platform !== 'fansly') {
+      return res.json({ platform, stages: STAGES, accounts: await scriptPages(orgId, platform), scripts: list.map(x => ({ ...x, uses: 0, ppv_after: 0, sold_after: 0, last_used_at: null })) });
+    }
     const since = new Date(Date.now() - 90 * 86400000).toISOString();
     const { data: uses } = await supabaseAdmin.from('fansly_script_uses').select('script_id, account_id, fan_account_id, used_at').eq('organisation_id', orgId).gte('used_at', since).limit(20000);
     // the PPVs sent to the fans the scripts were used on, per page
@@ -553,10 +573,9 @@ scripts.get('/', async (req, res) => {
       if (next) { st.ppv_after += 1; if (next.sold) st.sold_after += 1; }
       stats.set(u.script_id, st);
     }
-    const { data: accs } = await supabaseAdmin.from('fansly_accounts').select('id, username, creators(name)').eq('organisation_id', orgId).order('first_seen_at');
     res.json({
-      stages: STAGES,
-      accounts: (accs || []).map(a => ({ id: a.id, page: a.creators?.name || a.username })),
+      platform, stages: STAGES,
+      accounts: await scriptPages(orgId, 'fansly'),
       scripts: (list || []).map(s => ({ ...s, ...(stats.get(s.id) || { uses: 0, ppv_after: 0, sold_after: 0, last_used_at: null }) })),
     });
   } catch (e) { fail(res, e, 'load the scripts'); }
@@ -572,19 +591,27 @@ function scriptFields(body, partial) {
   if (body.item_ids !== undefined) out.item_ids = Array.isArray(body.item_ids) ? body.item_ids.map(String).filter(x => /^\d{5,25}$/.test(x)).slice(0, 50) : null;
   return out;
 }
-async function accountInOrg(orgId, accountId) {
+async function accountInOrg(orgId, accountId, platform = 'fansly') {
   if (!accountId) return true;
+  if (platform !== 'fansly') return (await scriptPages(orgId, platform)).some(p => p.id === accountId);
   const { data } = await supabaseAdmin.from('fansly_accounts').select('id').eq('id', accountId).eq('organisation_id', orgId).maybeSingle();
   return !!data;
 }
+/** A script's page: account_id on Fansly, creator_id on the other platforms. */
+const placeOf = (row, platform) => {
+  if (platform === 'fansly' || row.account_id === undefined) return row;
+  const { account_id, ...rest } = row;
+  return { ...rest, creator_id: account_id };
+};
 
 // POST /api/fansly/scripts { stage, title, text, account_id? }
 scripts.post('/', async (req, res) => {
   try {
+    const platform = platformOf(req.body?.platform);
     const row = scriptFields(req.body || {}, false);
-    if (!(await accountInOrg(req.user.organisationId, row.account_id))) return res.status(404).json({ error: 'No such Fansly page' });
-    const { data: last } = await supabaseAdmin.from('fansly_scripts').select('position').eq('organisation_id', req.user.organisationId).eq('stage', row.stage).order('position', { ascending: false }).limit(1);
-    const { data, error } = await supabaseAdmin.from('fansly_scripts').insert({ ...row, organisation_id: req.user.organisationId, created_by: req.user.id, position: (last?.[0]?.position ?? -1) + 1 }).select('id').single();
+    if (!(await accountInOrg(req.user.organisationId, row.account_id, platform))) return res.status(404).json({ error: 'No such page' });
+    const { data: last } = await supabaseAdmin.from('fansly_scripts').select('position').eq('organisation_id', req.user.organisationId).eq('platform', platform).eq('stage', row.stage).order('position', { ascending: false }).limit(1);
+    const { data, error } = await supabaseAdmin.from('fansly_scripts').insert({ ...placeOf(row, platform), platform, organisation_id: req.user.organisationId, created_by: req.user.id, position: (last?.[0]?.position ?? -1) + 1 }).select('id').single();
     if (error) throw error;
     res.json({ ok: true, id: data.id });
   } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); fail(res, e, 'save the script'); }
@@ -594,8 +621,10 @@ scripts.post('/', async (req, res) => {
 scripts.patch('/:id', async (req, res) => {
   try {
     const patch = scriptFields(req.body || {}, true);
-    if (!(await accountInOrg(req.user.organisationId, patch.account_id))) return res.status(404).json({ error: 'No such Fansly page' });
-    const { data, error } = await supabaseAdmin.from('fansly_scripts').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', req.params.id).eq('organisation_id', req.user.organisationId).select('id');
+    const { data: cur } = await supabaseAdmin.from('fansly_scripts').select('platform').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!cur) return res.status(404).json({ error: 'No such script' });
+    if (!(await accountInOrg(req.user.organisationId, patch.account_id, cur.platform))) return res.status(404).json({ error: 'No such page' });
+    const { data, error } = await supabaseAdmin.from('fansly_scripts').update({ ...placeOf(patch, cur.platform), updated_at: new Date().toISOString() }).eq('id', req.params.id).eq('organisation_id', req.user.organisationId).select('id');
     if (error) throw error;
     if (!data?.length) return res.status(404).json({ error: 'No such script' });
     res.json({ ok: true });

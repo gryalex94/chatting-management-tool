@@ -501,8 +501,14 @@ router.get('/messages/conversation', async (req, res) => {
 router.get('/messages.csv', async (req, res) => {
   if (req.get('X-Demo-Mode') === '1') return res.status(409).json({ error: 'Turn demo mode off to export real messages.' });
   try {
-    const { data, error } = await supabaseAdmin.rpc('fansly_sent_messages_v2', { ...messageFiltersV2(req), p_limit: 20000, p_offset: 0 });
-    if (error) throw error;
+    // a thousand at a time (the database hands out at most that many per call), up to 20,000
+    const data = [];
+    for (let off = 0; off < 20000; off += 1000) {
+      const { data: part, error } = await supabaseAdmin.rpc('fansly_sent_messages_v2', { ...messageFiltersV2(req), p_limit: 1000, p_offset: off });
+      if (error) throw error;
+      data.push(...(part || []));
+      if (!part || part.length < 1000) break;
+    }
     const rows = await decorate(req.user.organisationId, data || []);
     const cell = (v) => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
     const cols = ['sent_at', 'page', 'chatter', 'fan_username', 'fan_nickname', 'prev_fan_text', 'message', 'reply_s', 'price', 'sold_at', 'sold_net', 'read_at', 'unsent_at', 'chat_url'];
@@ -567,78 +573,6 @@ router.get('/reports', async (req, res) => {
     const accounts = String(req.query.accounts || '').split(',').filter(x => /^[0-9a-f-]{36}$/i.test(x));
     res.json(await require('../utils/fanslyReports').report(req.user.organisationId, { from, to, accounts, gross: req.query.gross === '1' }));
   } catch (e) { fail(res, e, 'load the report'); }
-});
-// GET /api/fansly/revenue?account=<id>&days=30
-router.get('/revenue', async (req, res) => {
-  const orgId = req.user.organisationId;
-  const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
-  try {
-    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id, username, creators(name)').eq('id', String(req.query.account || '')).eq('organisation_id', orgId).maybeSingle();
-    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
-    const since = new Date(Date.now() - days * 86400000).toISOString();
-    const page = 1000;
-    const tx = [];
-    for (let from = 0; ; from += page) {
-      const { data, error } = await supabaseAdmin.from('fansly_transactions').select('transaction_id, category, type_label, fan_account_id, net, gross, created_at_fansly, credited_rule, credited_chatter_id')
-        .eq('account_id', acc.id).gte('created_at_fansly', since).order('transaction_id').range(from, from + page - 1);
-      if (error) throw error;
-      tx.push(...(data || []));
-      if (!data || data.length < page) break;
-    }
-    // sums of exact amounts (tenths of a cent), cut to the cent the way Fansly shows them
-    const r2 = (n) => Math.trunc(Math.round(n * 1000) / 10) / 100;
-    const byType = {}, byDay = {}, perFan = new Map();
-    for (const t of tx) {
-      const net = Math.abs(Number(t.net) || 0) * (t.category === 'refund' ? -1 : 1);
-      const mass = (t.category === 'chat_ppv' && t.credited_rule === 'sender_of_mass_message') || t.credited_rule === 'mass_message_not_credited';
-      const k = mass ? 'mass_ppv' : (t.category || 'unsorted');
-      byType[k] = r2((byType[k] || 0) + net);
-      const day = Stats.amsDay(t.created_at_fansly);
-      const d = byDay[day] || (byDay[day] = { day, net: 0 }); d.net = r2(d.net + net); d[k] = r2((d[k] || 0) + net);
-      if (t.fan_account_id) { const f = perFan.get(t.fan_account_id) || { fan: t.fan_account_id, net: 0, purchases: 0 }; f.net += net; if (t.category !== 'refund') f.purchases += 1; perFan.set(t.fan_account_id, f); }
-    }
-    // a paying fan is new when his first purchase ever (not just in the window) falls in the window
-    const fanIds = [...perFan.keys()];
-    const firstEver = new Map();
-    for (let i = 0; i < fanIds.length; i += 200) {
-      const { data } = await supabaseAdmin.from('fansly_transactions').select('fan_account_id, created_at_fansly').eq('account_id', acc.id).in('fan_account_id', fanIds.slice(i, i + 200)).neq('category', 'refund').order('created_at_fansly').limit(5000);
-      for (const t of data || []) if (!firstEver.has(t.fan_account_id)) firstEver.set(t.fan_account_id, t.created_at_fansly);
-    }
-    const names = new Map();
-    const want = [...new Set([...perFan.keys()])];
-    for (let i = 0; i < want.length; i += 200) {
-      const { data } = await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, display_name, nickname').eq('account_id', acc.id).in('fansly_account_id', want.slice(i, i + 200));
-      for (const f of data || []) names.set(f.fansly_account_id, f.nickname || f.display_name || (f.username ? `@${f.username}` : null));
-    }
-    const label = (id) => names.get(id) || `#${String(id).slice(-6)}`;
-    const top = [...perFan.values()].sort((a, b) => b.net - a.net).slice(0, 15).map(f => ({ fan_account_id: f.fan, name: label(f.fan), net: r2(f.net), purchases: f.purchases, first_purchase: firstEver.get(f.fan) || null }));
-    const newPaying = [...perFan.values()].filter(f => firstEver.get(f.fan) >= since).sort((a, b) => b.net - a.net).map(f => ({ fan_account_id: f.fan, name: label(f.fan), net: r2(f.net), first_purchase: firstEver.get(f.fan) }));
-    // subscriptions that ended in the window (from the Subscribers page, else the fan rows)
-    const now = new Date().toISOString();
-    const { data: endedSubs } = await supabaseAdmin.from('fansly_subscriptions').select('fan_account_id, tier_name, ends_at, auto_renew').eq('account_id', acc.id).gte('ends_at', since).lt('ends_at', now).order('ends_at', { ascending: false }).limit(200);
-    let expired = (endedSubs || []).map(x => ({ fan_account_id: x.fan_account_id, tier: x.tier_name, ended: x.ends_at }));
-    if (!expired.length) {
-      const { data: fans } = await supabaseAdmin.from('fansly_fans').select('fansly_account_id, username, display_name, nickname, subscription_tier_name, subscribed_until').eq('account_id', acc.id).gte('subscribed_until', since).lt('subscribed_until', now).order('subscribed_until', { ascending: false }).limit(200);
-      expired = (fans || []).map(f => ({ fan_account_id: f.fansly_account_id, tier: f.subscription_tier_name, ended: f.subscribed_until, name: f.nickname || f.display_name || (f.username ? `@${f.username}` : null) }));
-    }
-    for (const e of expired) if (!e.name) e.name = label(e.fan_account_id);
-    // the AI's suggestions in the window, per chatter
-    const { data: drafts } = await supabaseAdmin.from('fansly_ai_drafts').select('status, chatter_id, cost_usd, chatters(name)').eq('account_id', acc.id).gte('created_at', since).limit(10000);
-    const ai = new Map();
-    for (const d of drafts || []) {
-      const k = d.chatters?.name || 'Not credited';
-      const a = ai.get(k) || { name: k, shown: 0, inserted: 0, sent_as_is: 0, edited: 0, discarded: 0, failed: 0, cost: 0 };
-      a.shown += 1; if (a[d.status] != null && d.status !== 'shown') a[d.status] += 1; a.cost += Number(d.cost_usd) || 0;
-      ai.set(k, a);
-    }
-    res.json({
-      page: acc.creators?.name || acc.username, days, since,
-      totals: { net: r2(Object.values(byType).reduce((n, v) => n + v, 0)), by_type: byType, transactions: tx.length, paying_fans: perFan.size, new_paying_fans: newPaying.length },
-      by_day: Object.values(byDay).sort((a, b) => a.day.localeCompare(b.day)),
-      top_fans: top, new_paying: newPaying.slice(0, 30), expired: expired.slice(0, 50),
-      ai: [...ai.values()].map(a => ({ ...a, cost: r2(a.cost) })),
-    });
-  } catch (e) { fail(res, e, 'load the revenue'); }
 });
 
 // POST /api/fansly/accounts/:id { status: 'active' | 'paused' } — stop or resume recording an account
