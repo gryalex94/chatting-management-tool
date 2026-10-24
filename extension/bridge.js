@@ -256,6 +256,17 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
+    // a sequence's media step: the item's name into the search box of Fansly's open vault window
+    if (msg && msg.type === 'cmt-search' && typeof msg.text === 'string') {
+      const looks = (el) => /search/i.test(`${el.getAttribute('placeholder') || ''} ${el.getAttribute('aria-label') || ''} ${el.type || ''}`);
+      const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 40 && r.height > 10; };
+      const inWindow = (el) => !!el.closest('[role="dialog"], .modal, [class*="modal"], [class*="overlay"], [class*="dialog"], [class*="vault"]');
+      const box = [...document.querySelectorAll('input')].filter(el => looks(el) && shown(el) && inWindow(el)).pop();
+      if (!box) { respond({ ok: false }); return false; }
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      box.focus(); setter.call(box, msg.text); box.dispatchEvent(new Event('input', { bubbles: true })); box.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+      respond({ ok: true }); return false;
+    }
     // a sequence's PPV step: its price into Fansly's own price box ("Amount"), once the chatter added the media
     if (msg && msg.type === 'cmt-price') {
       const box = [...document.querySelectorAll('input[aria-label="Amount"]')].find(el => el.getBoundingClientRect().width > 0);

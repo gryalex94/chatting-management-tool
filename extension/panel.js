@@ -74,6 +74,7 @@
     .tmsg { background: #1e1e24; border: 1px solid #2c2c33; border-radius: 6px; padding: 5px 8px; margin: 4px 0; }
     .tr-out { margin-top: 6px; border-color: #4f46e5; }
     .seqbox { cursor: default; }
+    button.mini { padding: 0 6px; font-size: 11px; }
     .seq { margin: 4px 0 6px 16px; padding: 0; font-size: 12px; color: #a1a1aa; }
     .seq li.done { text-decoration: line-through; opacity: .6; }
     .seq li.now { color: #e7e7ea; font-weight: 600; }
@@ -633,6 +634,29 @@
       : { ok: setPriceBox(msg.price) };
     flash(r && r.ok ? `Price ${msg.price} filled in: check it and press send yourself` : 'Fansly\'s price box is not open: add the media from the Vault first, then press this again');
   }
+  // the item's name into the search box of Fansly's open vault window, else onto the clipboard to paste there
+  async function searchVault(name) {
+    const msg = { type: 'cmt-search', text: name };
+    const r = SIDE ? (st.tabId != null ? await new Promise((res) => { try { chrome.tabs.sendMessage(st.tabId, msg, (x) => { void chrome.runtime.lastError; res(x || null); }); } catch { res(null); } }) : null)
+      : { ok: fillVaultSearch(name) };
+    if (r && r.ok) { flash(`Searching the vault for "${name}"`); return; }
+    try { await navigator.clipboard.writeText(name); flash(`"${name}" copied: open the Vault in the message box and paste it into its search`); }
+    catch { flash(`Search the vault for: ${name}`); }
+  }
+  function fillVaultSearch(name) {
+    const box = vaultSearchBox();
+    if (!box) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    box.focus(); setter.call(box, name); box.dispatchEvent(new Event('input', { bubbles: true })); box.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', bubbles: true }));
+    return true;
+  }
+  // a visible search box inside an open window (the vault picker), not the chat list's own search
+  function vaultSearchBox() {
+    const looks = (el) => /search/i.test(`${el.getAttribute('placeholder') || ''} ${el.getAttribute('aria-label') || ''} ${el.type || ''}`);
+    const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 40 && r.height > 10; };
+    const inWindow = (el) => !!el.closest('[role="dialog"], .modal, [class*="modal"], [class*="overlay"], [class*="dialog"], [class*="vault"]');
+    return [...document.querySelectorAll('input')].filter(el => looks(el) && shown(el) && inWindow(el)).pop() || null;
+  }
   function setPriceBox(price) {
     const box = [...document.querySelectorAll('input[aria-label="Amount"]')].find(el => el.getBoundingClientRect().width > 0);
     if (!box) return false;
@@ -656,7 +680,8 @@
         const has = cur.media_ids.filter(id => owned.has(id)), had = cur.media_ids.filter(id => sent.has(id) && !owned.has(id));
         body.push(h('div', { class: 'small' }, h('b', null, cur.media_ids.length > 1 ? `Bundle of ${cur.media_ids.length}: ` : ''), cur.media_ids.map(id => {
           const m = (st.scriptMedia || {})[id], al = m && (m.album_ids || []).map(albumName).filter(Boolean)[0];
-          return h('div', null, `• ${mediaName(id)}${al ? ` (${al})` : ''}`);
+          return h('div', { class: 'row', style: 'gap:6px' }, h('span', null, `• ${mediaName(id)}${al ? ` (${al})` : ''}`),
+            m && m.filename ? h('button', { class: 'mini', title: 'Puts its name in the vault\'s search box (or copies it): the item comes up at once', onclick: () => searchVault(m.filename) }, 'Find in vault') : h('span', { class: 'muted small' }, '(no name in the vault)'));
         })));
         if (has.length) body.push(h('div', { class: 'small', style: 'color:#fca5a5' }, `He already bought: ${has.map(mediaName).join(', ')}`));
         if (had.length) body.push(h('div', { class: 'small', style: 'color:#fcd34d' }, `Already sent to him: ${had.map(mediaName).join(', ')}`));
