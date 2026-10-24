@@ -4,7 +4,8 @@ import toast from 'react-hot-toast';
 import { Plus, X } from 'lucide-react';
 import api from '@/services/api';
 import { STAGE_META, stageOf } from '@/utils/helpers';
-import { platformInfo } from '@/utils/platforms';
+import { PLATFORMS, platformInfo } from '@/utils/platforms';
+import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,9 +21,17 @@ const day = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00Z`).toLocale
  */
 export default function ChattersPanel({ chatters, platform, canEdit, onChanged, onDeactivate }) {
   const navigate = useNavigate();
-  const [scope, setScope] = useState('platform');
+  // a tab per platform, the chatters on no platform yet, and everyone
+  const [scope, setScope] = useState(platform);
   const [form, setForm] = useState({ name: '', started_on: '' });
-  const shown = scope === 'all' ? chatters : chatters.filter(c => (c.platforms || []).includes(platform) || !(c.platforms || []).length);
+  const onP = (c, p) => (c.platforms || []).includes(p);
+  const count = (k) => (k === 'all' ? chatters.length : k === 'unassigned' ? chatters.filter(c => !(c.platforms || []).length).length : chatters.filter(c => onP(c, k)).length);
+  const shown = scope === 'all' ? chatters : scope === 'unassigned' ? chatters.filter(c => !(c.platforms || []).length) : chatters.filter(c => onP(c, scope));
+  const tabs = [...PLATFORMS.map(p => [p.id, p.name]), ['unassigned', 'Unassigned'], ['all', 'All']];
+  const togglePlatform = (c, p) => {
+    const next = onP(c, p) ? c.platforms.filter(x => x !== p) : [...(c.platforms || []), p];
+    put(c, { platforms: next }, onP(c, p) ? `${c.name} is off ${platformInfo(p).name}` : `${c.name} works on ${platformInfo(p).name}`);
+  };
   const put = async (c, body, done) => {
     try { await api.put(`/api/chatters/${c.id}`, body); toast.success(done); onChanged(); }
     catch (e) { toast.error(e?.response?.data?.error || 'Could not save'); }
@@ -30,25 +39,25 @@ export default function ChattersPanel({ chatters, platform, canEdit, onChanged, 
   const add = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) return;
-    try { await api.post('/api/chatters', { name: form.name.trim(), started_on: form.started_on || undefined }); toast.success(`${form.name.trim()} added`); setForm({ name: '', started_on: '' }); onChanged(); }
+    const platforms = PLATFORMS.map(p => p.id).includes(scope) ? [scope] : [];
+    try { await api.post('/api/chatters', { name: form.name.trim(), started_on: form.started_on || undefined, platforms }); toast.success(`${form.name.trim()} added${platforms.length ? ` to ${platformInfo(platforms[0]).name}` : ''}`); setForm({ name: '', started_on: '' }); onChanged(); }
     catch (err) { toast.error(err?.response?.data?.error || 'Could not add'); }
   };
 
   return (
     <div className='grid gap-3'>
       <div className='flex flex-wrap items-center justify-between gap-2'>
-        <div className='inline-flex rounded-md border p-0.5'>
-          <Button size='sm' variant={scope === 'platform' ? 'default' : 'ghost'} onClick={() => setScope('platform')}>{platformInfo(platform).name}</Button>
-          <Button size='sm' variant={scope === 'all' ? 'default' : 'ghost'} onClick={() => setScope('all')}>All platforms</Button>
+        <div className='inline-flex flex-wrap rounded-md border p-0.5'>
+          {tabs.map(([k, l]) => <Button key={k} size='sm' variant={scope === k ? 'default' : 'ghost'} onClick={() => setScope(k)}>{l} <span className='ml-1 text-xs opacity-60'>{count(k)}</span></Button>)}
         </div>
-        <p className='text-xs text-muted-foreground'>{shown.length} of {chatters.length} chatters{scope === 'platform' ? ` on ${platformInfo(platform).name} (or not on any rota yet)` : ''}</p>
+        <p className='text-xs text-muted-foreground'>{scope === 'unassigned' ? 'Chatters on no platform yet: switch a platform on for them.' : `${shown.length} chatter${shown.length === 1 ? '' : 's'}`}</p>
       </div>
 
       <div className='overflow-hidden rounded-md border'>
         <Table>
           <TableHeader><TableRow className='bg-muted/40 hover:bg-muted/40'>
             <TableHead className='ps-3'>Chatter</TableHead><TableHead>Stage</TableHead><TableHead>Started</TableHead>
-            <TableHead>On the rota</TableHead><TableHead>Last worked</TableHead><TableHead className='w-10' />
+            <TableHead>Platforms</TableHead><TableHead>On the rota</TableHead><TableHead>Last worked</TableHead><TableHead className='w-10' />
           </TableRow></TableHeader>
           <TableBody>
             {shown.map(c => {
@@ -67,7 +76,7 @@ export default function ChattersPanel({ chatters, platform, canEdit, onChanged, 
                           {STAGE_META[st.stage]?.label}{st.override ? ' · set by hand' : ''}
                         </span>
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent position='popper'>
                         <SelectItem value='auto'>Follow the start date</SelectItem>
                         {Object.entries(STAGE_META).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
                       </SelectContent>
@@ -78,11 +87,22 @@ export default function ChattersPanel({ chatters, platform, canEdit, onChanged, 
                     <Input type='date' className='h-8 w-36 text-xs' defaultValue={st.started_on || ''} disabled={!canEdit} aria-label={`${c.name} started on`}
                       onBlur={e => e.target.value && e.target.value !== st.started_on && put(c, { started_on: e.target.value }, 'Start date saved')} />
                   </TableCell>
+                  <TableCell>
+                    <div className='flex gap-1'>
+                      {PLATFORMS.map(p => (
+                        <button key={p.id} type='button' disabled={!canEdit} onClick={() => togglePlatform(c, p.id)} aria-pressed={onP(c, p.id)}
+                          title={onP(c, p.id) ? `Works on ${p.name}. Click to take them off.` : `Click: works on ${p.name}`}
+                          className={cn('rounded-md border px-1.5 py-0.5 text-[11px] transition-colors', onP(c, p.id) ? 'border-transparent bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-muted')}>
+                          {p.short || p.name}
+                        </button>
+                      ))}
+                    </div>
+                  </TableCell>
                   <TableCell className='max-w-72'>
                     {(c.rota_pages || []).length ? (
                       <div className='flex flex-wrap gap-1'>
-                        {c.rota_pages.filter(p => scope === 'all' || p.platform === platform).map(p => (
-                          <Badge key={p.id} variant='secondary' className='font-normal'>{p.name}{scope === 'all' ? ` · ${platformInfo(p.platform).name}` : ''}</Badge>
+                        {c.rota_pages.filter(p => !PLATFORMS.some(x => x.id === scope) || p.platform === scope).map(p => (
+                          <Badge key={p.id} variant='secondary' className='font-normal'>{p.name}{!PLATFORMS.some(x => x.id === scope) ? ` · ${platformInfo(p.platform).name}` : ''}</Badge>
                         ))}
                       </div>
                     ) : <span className='text-xs text-muted-foreground'>Not on the rota</span>}
@@ -101,7 +121,8 @@ export default function ChattersPanel({ chatters, platform, canEdit, onChanged, 
       <p className='text-xs text-muted-foreground'>
         The stage decides which of the daily review&apos;s findings become tasks: New, every finding; Learning, medium and serious ones; Experienced, the serious ones.
         Safety and rules findings, new-subscriber steps, gifts, dry replies to spenders, medium quality problems and missed sales on spenders become tasks for everyone.
-        By default the stage follows the start date (New for 7 days, Learning to day 21); set it by hand to keep someone on a stage longer. Pay rates are on the Payroll page.
+        By default the stage follows the start date (New for 7 days, Learning to day 21); set it by hand to keep someone on a stage longer.
+        Platforms: where they work (a new chatter joins the platform of the tab you add them in). Which pages and shifts: the Shifts page. Pay rates: the Payroll page.
       </p>
 
       {canEdit && (

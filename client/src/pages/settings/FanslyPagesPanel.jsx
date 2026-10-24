@@ -19,10 +19,12 @@ const since = (iso) => {
 
 /**
  * Settings → Pages on Fansly: every Fansly account the browser extension has
- * recorded, who is in it now, reading whole lists from Fansly, the page's own
- * settings (credit rules, creator profile), pausing and removing it.
+ * recorded (a Fansly page joins the tool when the extension first opens it, so
+ * there is no "add page"), who is in it now, reading whole lists from Fansly,
+ * the page itself (name, AI context: onEditPage), its settings (credit rules,
+ * creator profile), pausing and disconnecting it.
  */
-export default function FanslyPagesPanel() {
+export default function FanslyPagesPanel({ onEditPage }) {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
   const [settingsFor, setSettingsFor] = useState(null);
@@ -69,6 +71,7 @@ export default function FanslyPagesPanel() {
               {a.status === 'paused' ? <Badge variant='outline'>Recording paused</Badge> : a.online.length
                 ? <Badge className='gap-1 bg-emerald-600 text-white hover:bg-emerald-600'><Radio className='size-3' /> {a.online.length} online</Badge>
                 : <Badge variant='secondary'>Nobody in it now</Badge>}
+              {onEditPage && a.creator_id && <Button size='sm' variant='outline' onClick={() => onEditPage(a.creator_id)}>Page</Button>}
               <Button size='sm' variant='outline' onClick={() => setSettingsFor(a)}>Settings</Button>
               {isAdmin && <Button size='sm' variant='outline' onClick={() => pause(a)}>{a.status === 'paused' ? 'Resume' : 'Pause'}</Button>}
               {isAdmin && <Button size='sm' variant='outline' className='text-red-600' onClick={() => remove(a)}>Disconnect</Button>}

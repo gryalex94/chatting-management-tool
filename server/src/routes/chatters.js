@@ -1,4 +1,5 @@
 const { STAGES, stageOf } = require('../utils/chatterStage');
+const PLATFORMS = ['onlyfans', 'fanvue', 'fansly'];
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
@@ -83,9 +84,9 @@ async function withStage(orgId, chatters) {
   }
   return chatters.map(c => {
     const mine = (rota || []).filter(a => a.chatter_id === c.id);
-    const platforms = [...new Set(mine.map(a => slotPlatform.get(a.shift_id)).filter(Boolean))];
+    const rotaPlatforms = [...new Set(mine.map(a => slotPlatform.get(a.shift_id)).filter(Boolean))];
     const onPages = [...new Map(mine.flatMap(a => a.creator_ids || []).map(id => page.get(id)).filter(Boolean).map(p => [p.id, { id: p.id, name: p.name, platform: p.platform || 'onlyfans' }])).values()];
-    return { ...c, ...{ stage: stageOf(c, today) }, platforms, rota_pages: onPages, last_worked: last.get(c.id) || null };
+    return { ...c, stage: stageOf(c, today), platforms: c.platforms || [], rota_platforms: rotaPlatforms, rota_pages: onPages, last_worked: last.get(c.id) || null };
   });
 }
 
@@ -218,6 +219,7 @@ router.post('/', requireMinRole('manager'), async (req, res) => {
         name,
         email,
         status: status || 'new',
+        platforms: Array.isArray(req.body.platforms) ? [...new Set(req.body.platforms)].filter(p => PLATFORMS.includes(p)) : [],
         started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.started_on || '')) ? req.body.started_on : new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' }),
         organisation_id: req.user.organisationId,
       })
@@ -244,6 +246,12 @@ router.put('/:id', requireMinRole('manager'), async (req, res) => {
     if (req.body.hourly_rate !== undefined) update.hourly_rate = req.body.hourly_rate;
     if (req.body.commission_pct !== undefined) update.commission_pct = req.body.commission_pct;
     if (req.body.overtime_rate !== undefined) update.overtime_rate = req.body.overtime_rate;
+    // the platforms they work on (none: unassigned)
+    if (req.body.platforms !== undefined) {
+      const list = Array.isArray(req.body.platforms) ? [...new Set(req.body.platforms)] : null;
+      if (!list || list.some(p => !PLATFORMS.includes(p))) return res.status(400).json({ error: 'Pick OnlyFans, Fanvue or Fansly' });
+      update.platforms = list;
+    }
     // the experience stage: a start date, and a stage set by hand (null: follow the start date)
     if (req.body.started_on !== undefined) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(req.body.started_on || ''))) return res.status(400).json({ error: 'Pick the day they started' });

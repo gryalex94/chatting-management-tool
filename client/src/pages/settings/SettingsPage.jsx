@@ -304,8 +304,9 @@ export default function SettingsPage() {
         {/* Pages: the platform's connection, then its pages */}
         <TabsContent value='creators' className='grid gap-4'>
           {platform === 'fansly' && (
-            <Section title='Fansly extension' sub='The Fansly accounts the browser extension has recorded: who is in them now, reading whole lists from Fansly, each page’s settings, pausing and disconnecting'>
-              <FanslyPagesPanel />
+            <Section title={<span className='flex items-center gap-2'><PlatformBadge platform='fansly'/>Fansly pages</span>}
+              sub='A Fansly page joins the tool by itself the first time the browser extension opens it. Per page: who is in it now, reading whole lists from Fansly, the page (name, AI context), its settings, pausing and disconnecting.'>
+              <FanslyPagesPanel onEditPage={(id) => { const c = creators.find(x => x.id === id); if (c) setCreatorDetail(c); }} />
             </Section>
           )}
           {platform === 'fanvue' && isAdmin && (
@@ -318,7 +319,7 @@ export default function SettingsPage() {
               <InflowwPanel />
             </Section>
           )}
-          <Section title={<span className='flex items-center gap-2'><PlatformBadge platform={platform}/>{platformInfo(platform).name} pages</span>}
+          {platform !== 'fansly' && <Section title={<span className='flex items-center gap-2'><PlatformBadge platform={platform}/>{platformInfo(platform).name} pages</span>}
             sub={`${platformCreators.length} page${platformCreators.length===1?'':'s'} — click one to edit its name, platform, AI context and removal. Switch platform in the menu to see the others.`}
             right={isAdmin&&<span className='text-xs text-muted-foreground'>Admin only</span>}>
             {platformCreators.length === 0 ? <Empty>No {platformInfo(platform).name} pages yet.</Empty> : (
@@ -339,11 +340,12 @@ export default function SettingsPage() {
                 })}
               </div>
             )}
-            {isAdmin&&<form onSubmit={addCreator} className='flex gap-2'>
+            {platform === 'fanvue' && <p className='text-xs text-muted-foreground'>A Fanvue page is added by connecting its Fanvue account above.</p>}
+            {isAdmin&&platform==='onlyfans'&&<form onSubmit={addCreator} className='flex gap-2'>
               <Input value={creatorName} onChange={e=>setCreatorName(e.target.value)} placeholder='Page name' aria-label='Page name' className='flex-1'/>
               <Button type='submit'><Plus/>Add {platformInfo(platform).name} page</Button>
             </form>}
-          </Section>
+          </Section>}
         </TabsContent>
 
         {/* Chatters */}
