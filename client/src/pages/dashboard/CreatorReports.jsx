@@ -38,7 +38,7 @@ const PLATFORMS = {
     media: 'Posts and other media', massSplit: true,
     notes: (data) => [
       'Fansly does not say whether media was bought in a chat or on a post. Messages counts media bought from a chat message the extension has seen; the rest is under Posts and other media, and moves to Messages as more chats are opened with the extension on.',
-      'Chatting numbers count the chats the extension recorded; mass messages are left out.',
+      'Chatting numbers count the chats the extension recorded; mass messages are left out. Active subscribers: as of the last time the Subscribers list was read.',
       ...data.ledger.filter(l => l.total && l.read < l.total).map(l => ({ warn: true, text: `${l.page}: ${num(l.read)} of ${num(l.total)} sales read so far. Press Earnings, everything on the Pages tab to read the rest.` })),
     ],
     chatterNote: 'Credited sales follow the page\'s credit rules (PPVs to whoever sent them through the extension, tips to the last chatter within the hour or the chatters on shift). "No chatter signed in" are messages sent without the extension signed in, so nobody is credited for them.',
@@ -52,6 +52,16 @@ const PLATFORMS = {
     ],
     chatterNote: 'Credited sales follow Infloww\'s own sales rules (the message sender for PPVs, the last chatter for tips). PPV sales are the chat PPVs bought, from the chat exports.',
   },
+};
+PLATFORMS.fanvue = {
+  pages: '/api/reports/fanvue/pages', report: '/api/reports/fanvue', file: 'fanvue', none: 'No Fanvue account connected yet (Settings → Fanvue).',
+  media: 'Posts', massSplit: true, massHint: 'mass messages besides',
+  notes: (data) => [
+    'Earnings are Fanvue\'s own earnings list (subscriptions and renewals, message PPVs, tips); a refund comes off the total and shows as Refunded. Active subscribers: Fanvue\'s count now.',
+    'Chatting numbers count the chats copied from Fanvue, Fanvue\'s AI-written replies included; mass messages and Fanvue\'s automated messages are left out.',
+    ...(data.chatters?.length && data.chatters.every(c => !c.chatter_id) ? [{ warn: true, text: 'Nobody is on the Fanvue rota for these days, so no chatter is credited. Put chatters on the Fanvue shifts (Shifts page) and the By chatter table fills in.' }] : []),
+  ],
+  chatterNote: 'Fanvue does not say who sent a message, so a message, its PPV and a tip go to whoever was on the page\'s Fanvue shift at the time (shared equally if several were), as payroll counts them.',
 };
 const PlatformCtx = createContext(PLATFORMS.fansly);
 /** The kinds of earning, named for this platform. */
@@ -268,7 +278,7 @@ function Overview({ data, from, to, gross }) {
             <p className='mt-0.5 text-xl font-semibold tabular-nums'>{money(t[x.k])}</p>
             <div className='flex items-center gap-2'>
               <Delta now={t[x.k]} before={p[x.k]} />
-              {x.k === 'messages' && cfg.massSplit && <span className='text-xs text-muted-foreground'>chat {money(t.messages_chat)} · mass {money(t.messages_mass)}</span>}
+              {x.k === 'messages' && cfg.massSplit && t.messages_chat != null && <span className='text-xs text-muted-foreground'>chat {money(t.messages_chat)} · mass {money(t.messages_mass)}</span>}
             </div>
           </div>
         ))}
@@ -322,7 +332,7 @@ function Overview({ data, from, to, gross }) {
       </section>
 
       <div className='grid gap-1 text-xs text-muted-foreground'>
-        <p>Changes compare with the same number of days just before. Ratio: messages and tips for every dollar of subscriptions (target 5). LTV: earnings for every subscription bought or renewed. Unlock: chat PPVs bought out of those sent. Golden: chat PPVs out of all chat messages sent. Reply time: typical wait from a fan&apos;s message to the reply. Active subscribers: as of the last time the Subscribers list was read.</p>
+        <p>Changes compare with the same number of days just before. Ratio: messages and tips for every dollar of subscriptions (target 5). LTV: earnings for every subscription bought or renewed. Unlock: chat PPVs bought out of those sent. Golden: chat PPVs out of all chat messages sent. Reply time: typical wait from a fan&apos;s message to the reply.</p>
         {cfg.notes(data).map((n, k) => <p key={k} className={cn(n.warn && 'text-amber-600')}>{n.text || n}</p>)}
       </div>
     </div>

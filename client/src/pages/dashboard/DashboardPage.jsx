@@ -405,23 +405,24 @@ function OnlyFansDashboard() {
 // The dashboard of the platform picked in the menu.
 export default function DashboardPage() {
   const { platform } = usePlatform();
-  if (platform === 'fanvue') return <FanvueDashboard />;
+  if (platform === 'fanvue') return <ReportTabs platform='fanvue' daily={<FanvueDashboard />} />;
   if (platform === 'fansly') return <FanslyDashboard />;
-  return <OnlyFansTabs />;
+  return <ReportTabs platform='onlyfans' daily={<OnlyFansDashboard />} />;
 }
 
-// OnlyFans: the Creator reports (like Infloww's, as on Fansly) and the daily overview.
-function OnlyFansTabs() {
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem('of-tab') || 'reports'; } catch { return 'reports'; } });
-  const pick = (v) => { setTab(v); try { localStorage.setItem('of-tab', v); } catch { /* ignore */ } };
+// OnlyFans and Fanvue: the Creator reports (like Infloww's, as on Fansly) and the daily overview.
+function ReportTabs({ platform, daily }) {
+  const key = `${platform === 'onlyfans' ? 'of' : platform}-tab`;
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem(key) || 'reports'; } catch { return 'reports'; } });
+  const pick = (v) => { setTab(v); try { localStorage.setItem(key, v); } catch { /* ignore */ } };
   return (
     <Tabs value={tab} onValueChange={pick} className='gap-4'>
       <TabsList>
         <TabsTrigger value='reports'>Creator reports</TabsTrigger>
         <TabsTrigger value='daily'>Daily overview</TabsTrigger>
       </TabsList>
-      <TabsContent value='reports'><CreatorReports platform='onlyfans' /></TabsContent>
-      <TabsContent value='daily'><OnlyFansDashboard /></TabsContent>
+      <TabsContent value='reports'><CreatorReports platform={platform} /></TabsContent>
+      <TabsContent value='daily'>{daily}</TabsContent>
     </Tabs>
   );
 }

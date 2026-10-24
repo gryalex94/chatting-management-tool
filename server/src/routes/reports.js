@@ -2,6 +2,7 @@ const router = require('express').Router();
 const { requireMinRole } = require('../middleware/auth');
 const Stats = require('../utils/fanslyStats');
 const OF = require('../utils/ofReports');
+const FV = require('../utils/fanvueReports');
 
 // Creator reports per platform (the Fansly one lives at /api/fansly/reports). Money: managers and up.
 router.use(requireMinRole('manager'));
@@ -23,6 +24,14 @@ router.get('/onlyfans/pages', async (req, res) => {
 // GET /api/reports/onlyfans?from&to&accounts=<id,id>&gross=1 → the OnlyFans Creator reports
 router.get('/onlyfans', async (req, res) => {
   try { res.json(await OF.report(req.user.organisationId, range(req.query))); } catch (e) { fail(res, e, 'load the report'); }
+});
+
+// GET /api/reports/fanvue/pages, GET /api/reports/fanvue?from&to&accounts&gross → the Fanvue Creator reports
+router.get('/fanvue/pages', async (req, res) => {
+  try { res.json({ accounts: (await FV.fanvuePages(req.user.organisationId)).map(p => ({ id: p.id, page: p.page })) }); } catch (e) { fail(res, e, 'load the pages'); }
+});
+router.get('/fanvue', async (req, res) => {
+  try { res.json(await FV.report(req.user.organisationId, range(req.query))); } catch (e) { fail(res, e, 'load the report'); }
 });
 
 module.exports = router;
