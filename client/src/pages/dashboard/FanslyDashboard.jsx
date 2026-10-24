@@ -52,7 +52,6 @@ export default function FanslyDashboard() {
 function FanslyOverview() {
   const { isAdmin } = useAuth();
   const [info, setInfo] = useState(null);
-  const [recounting, setRecounting] = useState(false);
   const [settingsFor, setSettingsFor] = useState(null);
   const load = () => api.get('/api/fansly').then(r => setInfo(r.data)).catch(e => setInfo({ error: e?.response?.data?.error || 'Could not load the Fansly pages.' }));
   useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
@@ -74,7 +73,6 @@ function FanslyOverview() {
   }
 
   const pause = (a) => api.post(`/api/fansly/accounts/${a.id}`, { status: a.status === 'paused' ? 'active' : 'paused' }).then(load);
-  const recount = () => { setRecounting(true); api.post('/api/fansly/recount').then(load).finally(() => setRecounting(false)); };
 
   return (
     <div className='grid gap-6'>
@@ -160,10 +158,6 @@ function FanslyOverview() {
       ))}
 
       {settingsFor && <FanslySettings account={settingsFor} canEdit={isAdmin} onClose={(saved) => { setSettingsFor(null); if (saved) load(); }} />}
-
-      <div className='flex justify-end'>
-        <Button size='sm' variant='outline' disabled={recounting} onClick={recount}>{recounting ? 'Recounting…' : 'Match sales and recount 14 days'}</Button>
-      </div>
 
       {info.recent?.length > 0 && (
         <section className='rounded-lg border bg-card px-4 py-3'>

@@ -513,12 +513,6 @@ router.get('/messages.csv', async (req, res) => {
   } catch (e) { fail(res, e, 'export the messages'); }
 });
 
-// POST /api/fansly/recount — match sales and recount the last 14 days now
-router.post('/recount', async (req, res) => {
-  try { const n = await Stats.refreshAll(req.user.organisationId, 13); res.json({ ok: true, accounts: n }); }
-  catch (e) { fail(res, e, 'recount the Fansly numbers'); }
-});
-
 // ---------- per page: the owner's credit rules and the AI profile that writes the suggestions ----------
 
 // GET /api/fansly/accounts/:id/settings

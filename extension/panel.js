@@ -644,9 +644,9 @@
       const r = await call('GET', `/api/fansly/panel/commands?account=${encodeURIComponent(st.accountId)}`);
       const g = (r.open || []).map(o => String(o.group_id)).filter(x => /^\d{5,25}$/.test(x)).pop();
       if (!g) return;
-      const url = `https://fansly.com/messages/${g}`;
-      if (SIDE) chrome.tabs.update(st.tabId, { url, active: true }, () => void chrome.runtime.lastError);
-      else location.href = url;
+      // its own tab (or the tab it is open in already), never this one: the background script decides
+      if (SIDE) chrome.tabs.get(st.tabId, (t) => { void chrome.runtime.lastError; chrome.runtime.sendMessage({ type: 'open-chat', group: g, windowId: t?.windowId }); });
+      else chrome.runtime.sendMessage({ type: 'open-chat', group: g });
     } catch { /* try again next time */ }
   }
   function mount() {

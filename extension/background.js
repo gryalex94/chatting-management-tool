@@ -188,6 +188,17 @@ chrome.tabs.onRemoved.addListener((tabId) => { if (activeJob && activeJob.tabId 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'fansly-event') { enqueue(msg); return false; }
   if (msg && msg.type === 'fansly-tab') { heartbeat(); return false; }
+  // "Open" on the Messages dashboard: the chat's own tab if it is open already, otherwise a new tab beside this one
+  if (msg && msg.type === 'open-chat' && /^\d{5,25}$/.test(String(msg.group || ''))) {
+    const url = `https://fansly.com/messages/${msg.group}`;
+    chrome.tabs.query({ url: `https://fansly.com/messages/${msg.group}*` }, (tabs) => {
+      void chrome.runtime.lastError;
+      const t = (tabs || []).find(x => new URL(x.url || x.pendingUrl || url).pathname.replace(/\/+$/, '') === `/messages/${msg.group}`);
+      if (t) { chrome.tabs.update(t.id, { active: true }, () => void chrome.runtime.lastError); chrome.windows.update(t.windowId, { focused: true }, () => void chrome.runtime.lastError); }
+      else chrome.tabs.create({ url, active: true, ...(msg.windowId ? { windowId: msg.windowId } : sender.tab ? { windowId: sender.tab.windowId, index: sender.tab.index + 1 } : {}) }, () => void chrome.runtime.lastError);
+    });
+    return false;
+  }
   if (msg && msg.type === 'popup-status') {
     settings().then(async (s) => {
       respond({ version: VERSION, apiUrl: s.apiUrl, deviceId: s.deviceId, session: s.session ? { user: s.session.user, expiresAt: s.session.expiresAt } : null, queue: queue.length, state });
