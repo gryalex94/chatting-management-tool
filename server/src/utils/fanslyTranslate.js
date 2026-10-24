@@ -20,8 +20,11 @@ const NAMES = {
 };
 const nameOf = (code) => NAMES[code] || code;
 
-const SYSTEM = 'You translate chat messages between a fan and a creator on Fansly, a subscription site for verified adults. Flirting and explicit sexual talk between adults is normal here: '
-  + 'translate it faithfully, never soften, censor or refuse. Keep the tone, slang, typos-level casualness, emojis, names, nicknames, prices and line breaks. Do not add or explain anything.';
+const SYSTEM = 'You translate private chat messages between a fan and a creator on Fansly, a subscription site for verified adults. Flirting, dirty talk and explicit sex talk between consenting adults are normal here: '
+  + 'translate them faithfully and just as explicit and horny as the original, never soften, censor, tone down, refuse or add warnings. '
+  + 'Write the way people really text: casual, warm and informal, never formal or stiff. Use everyday words, contractions and the slang a native speaker would use in a sexy chat; '
+  + 'informal "you" (tú, du, tu…, never usted / Sie / vous for one person). Keep the energy: lowercase, stretched words ("holaaa" → "heyyy"), emojis, names, nicknames, prices and line breaks stay. '
+  + 'Never add, explain or comment: answer with the translation only.'
 
 async function spend(orgId, creatorId, fanId, kind, r) {
   const inTok = r.usage?.input_tokens || 0, outTok = r.usage?.output_tokens || 0;
@@ -49,7 +52,7 @@ async function incoming(orgId, account, fanId, { limit = 20 } = {}) {
     const r = await client.messages.create({
       model: MODEL, max_tokens: 4000, system: SYSTEM,
       messages: [{ role: 'user', content: 'For each message: lang = its language as an ISO 639-1 code ("und" when it has no words that show a language: only emojis, "ok", "lol", a number); '
-        + 'english = the English translation, or "" when it is already English or "und".\n\n'
+        + 'english = how a guy would text it in casual American English (not word for word, never formal), or "" when it is already English or "und".\n\n'
         + todo.map(m => `<m id="${m.message_id}">${String(m.text).slice(0, 2000)}</m>`).join('\n') }],
       output_config: { effort: 'low', format: { type: 'json_schema', schema: INCOMING_SCHEMA } },
     });
@@ -96,7 +99,8 @@ async function outgoing(orgId, account, fanId, text, lang) {
   if (!lang || lang === 'en') return { text: t, cost_usd: 0 };
   const r = await client.messages.create({
     model: MODEL, max_tokens: 2000, system: SYSTEM,
-    messages: [{ role: 'user', content: `Translate this message from the creator to the fan into ${nameOf(lang)}. Write it the way a native speaker would text, not word for word. `
+    messages: [{ role: 'user', content: `Translate this message from the creator (a young woman) to the fan into ${nameOf(lang)}: the way a flirty young woman from there would text it, `
+      + `casual and natural, with the slang and short forms people really use in that language, never formal and never word for word. Just as explicit as the original. Use the emojis it has and no others. `
       + `Keep anything in curly braces (like {name}) exactly as it is. Answer with the translation only.\n\n${t}` }],
     output_config: { effort: 'low' },
   });

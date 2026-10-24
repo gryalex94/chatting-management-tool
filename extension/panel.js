@@ -584,11 +584,8 @@
         Object.entries(names).map(([k, v]) => h('option', { value: k, selected: lang.set_by_chatter && lang.lang === k }, v)));
       content.push(h('div', { class: 'row small' }, h('span', { class: 'muted' }, 'Answer in'), pick));
     }
-    if (theirs.length) {
-      content.push(h('div', { class: 'lbl' }, 'His messages in English'));
-      for (const m of theirs) content.push(h('div', { class: 'tmsg' }, h('div', null, m.text), h('div', { class: 'muted small' }, `EN: ${m.text_en}`)));
-    } else if (!t.busy) content.push(h('div', { class: 'muted small' }, (t.messages || []).length ? 'He writes in English: nothing to translate.' : 'His messages appear here once they are recorded.'));
-    if (t.busy) content.push(h('div', { class: 'muted small' }, 'Reading his messages…'));
+    // his messages' English shows under each of them in Fansly's chat (showInChat), not here
+    if (!theirs.length && !t.busy && (t.messages || []).length) content.push(h('div', { class: 'muted small' }, 'He writes in English: nothing to translate.'));
     content.push(h('div', { class: 'lbl' }, `Your reply in English${foreign() ? `, into ${lang.name}` : ''}`),
       h('textarea', { class: 'tr-draft', rows: 3, placeholder: 'Write it in English…', value: t.draft, oninput: (e) => { t.draft = e.target.value; t.out = ''; } }),
       h('div', { class: 'row' },
