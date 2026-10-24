@@ -13,6 +13,7 @@ import { num } from '@/utils/numbers';
 import FanslyMessages from './FanslyMessages';
 import FanslyScripts from './FanslyScripts';
 import FanslyRevenue from './FanslyRevenue';
+import FanslyReports from './FanslyReports';
 import FanslySettings from './FanslySettings';
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }) : 'never');
@@ -31,16 +32,18 @@ const secs = (s) => (s == null ? '·' : s < 60 ? `${s} s` : s < 3600 ? `${Math.r
  * per chatter. Phase 1 of FANSLY_EXTENSION_PLAN.md: recording only.
  */
 export default function FanslyDashboard() {
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem('fansly-tab') || 'overview'; } catch { return 'overview'; } });
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('fansly-tab') || 'reports'; } catch { return 'overview'; } });
   const pick = (v) => { setTab(v); try { localStorage.setItem('fansly-tab', v); } catch { /* ignore */ } };
   return (
     <Tabs value={tab} onValueChange={pick} className='gap-4'>
       <TabsList>
+        <TabsTrigger value='reports'>Creator reports</TabsTrigger>
         <TabsTrigger value='overview'>Pages</TabsTrigger>
         <TabsTrigger value='messages'>Messages</TabsTrigger>
         <TabsTrigger value='revenue'>Revenue</TabsTrigger>
         <TabsTrigger value='scripts'>Scripts</TabsTrigger>
       </TabsList>
+      <TabsContent value='reports'><FanslyReports /></TabsContent>
       <TabsContent value='overview'><FanslyOverview /></TabsContent>
       <TabsContent value='messages'><FanslyMessages /></TabsContent>
       <TabsContent value='revenue'><FanslyRevenue /></TabsContent>

@@ -555,6 +555,19 @@ router.post('/accounts/:id/settings', requireMinRole('admin'), async (req, res) 
 
 // ---------- the page view: revenue by type, top fans, new paying fans, expired subscriptions, AI suggestions ----------
 
+// GET /api/fansly/reports?from&to&accounts=<id,id>&gross=1 — Creator reports: earnings by type for any days,
+// the same number of days before for the change, per page, per hour, top fans, new and ended subscribers
+router.get('/reports', async (req, res) => {
+  try {
+    const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+    const today = Stats.amsDay(new Date());
+    let to = day(req.query.to) || today, from = day(req.query.from) || Stats.addDays(to, -6);
+    if (from > to) [from, to] = [to, from];
+    if (Date.parse(to) - Date.parse(from) > 800 * 86400000) from = Stats.addDays(to, -800);
+    const accounts = String(req.query.accounts || '').split(',').filter(x => /^[0-9a-f-]{36}$/i.test(x));
+    res.json(await require('../utils/fanslyReports').report(req.user.organisationId, { from, to, accounts, gross: req.query.gross === '1' }));
+  } catch (e) { fail(res, e, 'load the report'); }
+});
 // GET /api/fansly/revenue?account=<id>&days=30
 router.get('/revenue', async (req, res) => {
   const orgId = req.user.organisationId;
