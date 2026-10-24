@@ -374,6 +374,11 @@
     return null;
   }
   function mediaOfTile(tile, pic) {
+    // Fansly puts the item's own number on the picture's box (data-media-id); a video's preview may carry
+    // one of its versions' numbers, which the vault answer leads back to the video
+    const box = (pic.closest && pic.closest('[data-media-id]')) || tile.querySelector('[data-media-id]');
+    const dm = box && box.getAttribute('data-media-id');
+    if (dm && /^\d{5,25}$/.test(dm)) return vaultKey.get(dm) || dm;
     const byPic = mediaOfPic(picOf(pic));
     if (byPic) return byPic;
     // its name on the tile ("IMG_6883.jpeg")
@@ -397,7 +402,7 @@
   // the tile: the biggest box around the picture that is still about its size
   function tileOf(pic, root) {
     const r = pic.getBoundingClientRect(); let tile = pic;
-    for (let el = pic.parentElement, i = 0; el && el !== root && i < 6; el = el.parentElement, i++) {
+    for (let el = pic.parentElement, i = 0; el && el !== root && i < 10; el = el.parentElement, i++) {
       const b = el.getBoundingClientRect();
       if (b.width > r.width + 24 || b.height > r.height + 60) break;
       tile = el;
