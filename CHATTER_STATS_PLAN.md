@@ -49,9 +49,9 @@ credits sales), so a chatter sees a sale land within a minute. Only their own; a
 4. Fansly panel "My shift" card (extension + `GET /api/fansly/panel/my-shift`).
 5. Later: goals, ranking.
 
-## Open decisions
+## Decisions (24 Oct 2026, the user)
 
-- Show the pay estimate to chatters? (recommended: yes, marked as an estimate)
-- Team ranking: none / anonymous rank / full leaderboard? (recommended: anonymous rank, later)
-- AI feedback: show the AI review text, or only the coaching tasks made from it? (recommended: both, plain words)
-- Penalties and bonuses: show them to the chatter? (recommended: yes, with the manager's note)
+- Pay: **shown as an estimate** for the current period ("final after your manager checks it").
+- Ranking: **anonymous rank** ("#3 of 9 by sales this week", no names), built after the first version.
+- AI feedback: **the latest AI review in plain words, and the coaching tasks** made from it.
+- Penalties and bonuses: **shown, with the amount and the manager's note.**
