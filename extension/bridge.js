@@ -427,6 +427,13 @@
       missed.push(`${label} · ${pic.tagName.toLowerCase()} · ${kind}`);
     }
     note.title = missed.length ? `Not recognised:\n${[...new Set(missed)].slice(0, 15).join('\n')}` : '';
+    // for the request log (kept only while it is on): one recognised and one unrecognised tile, once per window
+    if (!root.dataset.cmtDiag && pics.length && marksFor === groupNow()) {
+      root.dataset.cmtDiag = '1';
+      const pick = (want) => pics.find(p => { const t = tileOf(p, root); return t && !!mediaOfTile(t, p) === want; });
+      const sample = { hit: pick(true) ? vaultDiag(pick(true), root) : null, miss: pick(false) ? vaultDiag(pick(false), root) : null, videos: root.querySelectorAll('video').length, canvases: root.querySelectorAll('canvas').length, imgs: root.querySelectorAll('img').length };
+      try { chrome.runtime.sendMessage({ type: 'fansly-event', kind: 'net', url: location.href, data: { method: 'UI', path: 'vault-tiles', query: {}, status: null, page: location.pathname, rows: {}, ui: { vault: sample } }, at: Date.now() }); } catch { /* ignore */ }
+    }
     shown = [...marks.keys()].length;
     const nb = [...marks.values()];
     const text = marksFor !== groupNow() ? 'Chatting Manager: reading what he was sent…'
@@ -487,7 +494,9 @@
   // (the worker keeps these only while logging is on, like the requests)
   document.addEventListener('click', (ev) => {
     const host = document.getElementById('cmt-panel-host');
-    const el = ev.target && ev.target.closest && ev.target.closest('button, a, input, label, select, [role="button"], [role="menuitem"], [role="tab"], [tabindex]');
+    let el = ev.target && ev.target.closest && ev.target.closest('button, a, input, label, select, [role="button"], [role="menuitem"], [role="tab"], [tabindex]');
+    // a tile in the vault window is a plain box: it counts too
+    if (!el) { try { const vw = vaultWindow(); if (vw && ev.target && vw.contains(ev.target)) el = ev.target; } catch { /* ignore */ } }
     if (!el || (host && host.contains(el))) return;
     const label = (x) => String(x || '').replace(/\s+/g, ' ').trim().slice(0, 40);
     const ui = {
