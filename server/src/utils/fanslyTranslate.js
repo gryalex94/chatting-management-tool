@@ -54,6 +54,12 @@ function tidy(text, lang, original = '') {
   const EMOJI = /\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*/gu;
   const allowed = new Set(String(original).match(EMOJI) || []);
   t = t.replace(EMOJI, (e) => (allowed.has(e) ? e : '')).replace(/[ \t]{2,}/g, ' ').replace(/ +([?!.,)])/g, '$1');
+  // a laugh only where the original laughs (haha, lol, lmao, 😂 🤣)
+  if (!/(ha){2,}|\blo+l\b|\blmao\b|😂|🤣|😆|😅/i.test(String(original))) {
+    t = t.replace(/(?<![\p{L}])(?:j[aeiou]){2,}j?(?![\p{L}])/giu, '')                       // jaja, jajaja, jeje
+      .replace(/(?<![\p{L}])(?:а?ха(?:ха)+х?|ахах\p{L}*|хах\p{L}*|ого)(?![\p{L}])/giu, '');  // ахах, хаха, ого
+    t = t.replace(/^[\s,]+/, '').replace(/[ \t]{2,}/g, ' ').replace(/ +([?!.,)])/g, '$1');
+  }
   if (lang === 'es') t = t.replace(/[¿¡]/g, '');
   if (lang === 'ru') t = t.replace(/ё/g, 'е').replace(/Ё/g, 'Е').replace(/(^|[^.])\.(\s*)$/, '$1$2');
   return t.trim();
