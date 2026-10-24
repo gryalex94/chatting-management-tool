@@ -40,6 +40,7 @@ async function render() {
 
 $('signin').addEventListener('click', async () => {
   $('loginError').textContent = '';
+  openSideNow();
   $('signin').disabled = true;
   const out = await send({ type: 'popup-login', email: $('email').value.trim(), password: $('password').value });
   $('signin').disabled = false;
@@ -51,6 +52,13 @@ $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sig
 $('signout').addEventListener('click', async () => { await send({ type: 'popup-logout' }); render(); });
 // Chrome's side panel narrows the page instead of covering it (Chrome 116+; AdsPower's browser too when it is that new)
 const hasSide = !!(chrome.sidePanel && chrome.sidePanel.open);
+// on the Sign in click itself (Chrome opens the side panel only in answer to one); it shows the sign-in until it is done
+let sideMode = 'side';
+chrome.storage.local.get(['panelMode', 'panelOff'], (s) => { sideMode = s.panelMode || (s.panelOff ? 'off' : 'side'); });
+function openSideNow() {
+  if (!hasSide || sideMode !== 'side') return;
+  try { chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT }).catch(() => {}); } catch { /* ignore */ }
+}
 let windowId = null;
 chrome.windows.getCurrent((w) => { windowId = w && w.id; });
 $('panelMode').addEventListener('change', (e) => { chrome.storage.local.set({ panelMode: e.target.value, panelOff: e.target.value === 'off' }); render(); });

@@ -519,6 +519,24 @@
   new MutationObserver(() => markSoon()).observe(document.documentElement, { childList: true, subtree: true });
   document.addEventListener('scroll', markSoon, true);
 
+  // ---- the side panel opens by itself once signed in: on the first click in this tab ----
+  // (what it needs is read ahead, so the request goes out within the click itself)
+  let sideAsked = false, sideWanted = false;
+  const readSide = () => { try { chrome.storage.local.get(['session', 'panelMode', 'panelOff'], (s) => {
+    void chrome.runtime.lastError;
+    const mode = s.panelMode || (s.panelOff ? 'off' : 'side');
+    sideWanted = !!(s.session && s.session.token) && mode === 'side';
+  }); } catch { /* the extension was updated */ } };
+  readSide();
+  try { chrome.storage.onChanged.addListener((ch) => { if (ch.session || ch.panelMode || ch.panelOff) { if (ch.session) sideAsked = false; readSide(); } }); } catch { /* ignore */ }
+  const openSide = () => {
+    if (sideAsked || !sideWanted) return;
+    sideAsked = true;
+    try { chrome.runtime.sendMessage({ type: 'cmt-open-side' }, () => void chrome.runtime.lastError); } catch { /* ignore */ }
+  };
+  document.addEventListener('pointerdown', openSide, true);
+  document.addEventListener('keydown', openSide, true);
+
   // ---- the request log (popup switch) also notes which controls are clicked: their label, never what is typed ----
   // (the worker keeps these only while logging is on, like the requests)
   document.addEventListener('click', (ev) => {

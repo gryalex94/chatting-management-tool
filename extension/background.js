@@ -255,6 +255,12 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'fansly-event') { enqueue(msg); return false; }
   if (msg && msg.type === 'fansly-tab') { heartbeat(); return false; }
   if (msg && msg.type === 'cmt-secure-get') { Promise.all([lockedNow(), signedOutNow()]).then(([locked, signedOut]) => respond({ chatOnly: locked, signedOut })); return true; }
+  // the side panel opens by itself for a signed-in browser: on the first click in a Fansly tab (Chrome
+  // opens it only in answer to a click, so it is called straight away, before anything is awaited)
+  if (msg && msg.type === 'cmt-open-side' && chrome.sidePanel && chrome.sidePanel.open) {
+    chrome.sidePanel.open(sender.tab && sender.tab.id != null ? { tabId: sender.tab.id } : { windowId: chrome.windows.WINDOW_ID_CURRENT }).then(() => respond({ ok: true })).catch((e) => respond({ ok: false, error: e.message }));
+    return true;
+  }
   if (msg && msg.type === 'cmt-ensure-bridge' && msg.tabId != null) { ensureBridge(msg.tabId).then(ok => respond({ ok })); return true; }
   // "Open" on the Messages dashboard: the chat's own tab if it is open already, otherwise a new tab beside this one
   if (msg && msg.type === 'open-chat' && /^\d{5,25}$/.test(String(msg.group || ''))) {

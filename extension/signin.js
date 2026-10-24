@@ -8,6 +8,8 @@ send({ type: 'popup-status' }).then((st) => {
 });
 $('form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  // the side panel, on this click (Chrome opens it only in answer to one)
+  try { if (chrome.sidePanel && chrome.sidePanel.open) chrome.sidePanel.open({ windowId: chrome.windows.WINDOW_ID_CURRENT }).catch(() => {}); } catch { /* ignore */ }
   $('err').textContent = '';
   $('signin').disabled = true;
   const out = await send({ type: 'popup-login', email: $('email').value.trim(), password: $('password').value });
