@@ -347,10 +347,10 @@
     } catch { marksBusy = false; }
   }
   const vaultStyle = document.createElement('style');
-  vaultStyle.textContent = '.cmt-vm-rel{position:relative}.cmt-vm::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;z-index:2}'
-    + '.cmt-vm-bought::after,.cmt-vm-free::after{box-shadow:inset 0 0 0 4px #22c55e}.cmt-vm-not_bought::after{box-shadow:inset 0 0 0 4px #ef4444}'
-    + '.cmt-vm::after{z-index:20!important}.cmt-vm-tag{position:absolute;left:6px;bottom:6px;z-index:21;pointer-events:none;padding:2px 7px;border-radius:5px;font:600 12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#fff}'
-    + '.cmt-vm-bought .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}.cmt-vm-free .cmt-vm-tag{background:#16a34a}';
+  vaultStyle.textContent = '.cmt-vm-ov{position:absolute;inset:0;pointer-events:none;z-index:20;border-radius:inherit}'
+    + '.cmt-vm-ov.cmt-vm-bought,.cmt-vm-ov.cmt-vm-free{box-shadow:inset 0 0 0 4px #22c55e}.cmt-vm-ov.cmt-vm-not_bought{box-shadow:inset 0 0 0 4px #ef4444}'
+    + '.cmt-vm-tag{position:absolute;left:6px;bottom:6px;padding:2px 7px;border-radius:5px;font:600 12px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;color:#fff}'
+    + '.cmt-vm-bought .cmt-vm-tag,.cmt-vm-free .cmt-vm-tag{background:#16a34a}.cmt-vm-not_bought .cmt-vm-tag{background:#dc2626}';
   // the vault window: Fansly's picker with its "Upload to Vault" and "Add … Media" buttons
   function vaultWindow() {
     const mv = document.querySelector('app-media-vault');
@@ -472,22 +472,22 @@
       paint(tile, mid);
     }
   }
+  // the frame is a layer of our own on top of the tile: Fansly redraws its tiles' own looks all the time
+  // (while scrolling most), which wiped a frame put on the tile itself and made it blink
   function paint(tile, mid) {
-    {
-      const m = mid && marksFor === groupNow() ? marks.get(mid) : null;
-      const want = m ? m.status : '';
-      if ((tile.dataset.cmtVm || '') === want + (m ? m.price : '')) return;
-      tile.classList.remove('cmt-vm', 'cmt-vm-rel', 'cmt-vm-bought', 'cmt-vm-not_bought', 'cmt-vm-free');
-      tile.querySelectorAll(':scope > .cmt-vm-tag').forEach(x => x.remove());
-      tile.dataset.cmtVm = want + (m ? m.price : '');
-      if (!m) return;
-      tile.classList.add('cmt-vm', `cmt-vm-${m.status}`);
-      if (getComputedStyle(tile).position === 'static') tile.classList.add('cmt-vm-rel');
-      const tag = document.createElement('div'); tag.className = 'cmt-vm-tag';
-      tag.textContent = m.status === 'bought' ? `Bought${m.wall ? ' on wall' : ''}${m.price ? ` ${money(m.price)}` : ''}` : m.status === 'not_bought' ? `Not bought · ${money(m.price)}` : 'Sent free';
-      tag.title = m.wall ? `Bought in a post on the wall, ${new Date(m.at).toLocaleDateString()}` : `${m.times > 1 ? `Sent ${m.times} times` : 'Sent'}${m.bundle ? ' in a bundle' : ''}, last ${new Date(m.at).toLocaleDateString()}`;
-      tile.append(tag);
-    }
+    const m = mid && marksFor === groupNow() ? marks.get(mid) : null;
+    let ov = tile.querySelector(':scope > .cmt-vm-ov');
+    const key = m ? `${m.status}|${m.price}|${m.wall ? 1 : 0}` : '';
+    if ((ov ? ov.dataset.k : '') === key) return;
+    if (!m) { if (ov) ov.remove(); return; }
+    if (!ov) { ov = document.createElement('div'); tile.append(ov); }
+    if (getComputedStyle(tile).position === 'static') tile.style.position = 'relative';
+    ov.dataset.k = key;
+    ov.className = `cmt-vm-ov cmt-vm-${m.status}`;
+    const tag = document.createElement('div'); tag.className = 'cmt-vm-tag';
+    tag.textContent = m.status === 'bought' ? `Bought${m.wall ? ' on wall' : ''}${m.price ? ` ${money(m.price)}` : ''}` : m.status === 'not_bought' ? `Not bought · ${money(m.price)}` : 'Sent free';
+    ov.title = m.wall ? `Bought in a post on the wall, ${new Date(m.at).toLocaleDateString()}` : `${m.times > 1 ? `Sent ${m.times} times` : 'Sent'}${m.bundle ? ' in a bundle' : ''}, last ${new Date(m.at).toLocaleDateString()}`;
+    ov.replaceChildren(tag);
   }
   function vaultDiag(target, root) {
     // the tile: go up from the click until a box holds a picture, a video or a canvas
