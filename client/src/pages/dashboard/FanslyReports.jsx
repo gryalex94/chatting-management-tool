@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import DateRangePicker from '@/components/shared/DateRangePicker';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -31,21 +31,6 @@ const TYPES = [
   { k: 'other', label: 'Other', color: '#888780' },
 ];
 
-const RANGES = [
-  ['today', 'Today'], ['yesterday', 'Yesterday'], ['7', 'Last 7 days'], ['30', 'Last 30 days'],
-  ['month', 'This month'], ['last_month', 'Last month'], ['year', 'This year'], ['custom', 'Pick dates'],
-];
-function rangeDays(v, custom) {
-  const t = amsToday();
-  if (v === 'today') return [t, t];
-  if (v === 'yesterday') return [addDays(t, -1), addDays(t, -1)];
-  if (v === '7') return [addDays(t, -6), t];
-  if (v === '30') return [addDays(t, -29), t];
-  if (v === 'month') return [`${t.slice(0, 8)}01`, t];
-  if (v === 'last_month') { const first = `${t.slice(0, 8)}01`; const end = addDays(first, -1); return [`${end.slice(0, 8)}01`, end]; }
-  if (v === 'year') return [`${t.slice(0, 4)}-01-01`, t];
-  return [custom.from || addDays(t, -6), custom.to || t];
-}
 /** The change against the days just before, as a percentage (null when there was nothing before). */
 const change = (now, before) => (before ? ((now - before) / Math.abs(before)) * 100 : null);
 
@@ -66,8 +51,7 @@ export default function FanslyReports() {
   const [pages, setPages] = useState(null);
   const [picked, setPicked] = useState([]);           // the pages in the overview (empty: all)
   const [one, setOne] = useState('');                 // the page in Creator performance
-  const [range, setRange] = useState('7');
-  const [custom, setCustom] = useState({ from: '', to: '' });
+  const [range, setRange] = useState(() => ({ from: addDays(amsToday(), -6), to: amsToday() }));
   const [gross, setGross] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -76,7 +60,7 @@ export default function FanslyReports() {
     api.get('/api/fansly/messages/filters').then(r => { setPages(r.data.accounts || []); setOne(r.data.accounts?.[0]?.id || ''); })
       .catch(e => setError(e?.response?.data?.error || 'Could not load the pages'));
   }, []);
-  const [from, to] = rangeDays(range, custom);
+  const { from, to } = range;
   const accounts = view === 'performance' ? (one ? [one] : []) : picked;
   const query = `from=${from}&to=${to}&accounts=${accounts.join(',')}${gross ? '&gross=1' : ''}`;
   useEffect(() => {
@@ -91,7 +75,7 @@ export default function FanslyReports() {
   if (error) return <p className='text-sm text-muted-foreground'>{error}</p>;
   if (!pages) return <Skeleton className='h-64 w-full' />;
   if (!pages.length) return <p className='text-sm text-muted-foreground'>No Fansly page recorded yet.</p>;
-  const reset = () => { setRange('7'); setCustom({ from: '', to: '' }); setPicked([]); setGross(false); };
+  const reset = () => { setRange({ from: addDays(amsToday(), -6), to: amsToday() }); setPicked([]); setGross(false); };
 
   return (
     <div className='grid grid-cols-[minmax(0,1fr)] gap-4'>
@@ -100,15 +84,7 @@ export default function FanslyReports() {
           <Button size='sm' variant={view === 'overview' ? 'default' : 'ghost'} onClick={() => setView('overview')}>Overview</Button>
           <Button size='sm' variant={view === 'performance' ? 'default' : 'ghost'} onClick={() => setView('performance')}>Creator performance</Button>
         </div>
-        <Select value={range} onValueChange={setRange}>
-          <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
-          <SelectContent>{RANGES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent>
-        </Select>
-        {range === 'custom' ? <>
-          <Input type='date' value={custom.from} max={custom.to || undefined} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))} className='w-36' aria-label='From' />
-          <span className='text-xs text-muted-foreground'>to</span>
-          <Input type='date' value={custom.to} min={custom.from || undefined} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} className='w-36' aria-label='To' />
-        </> : <span className='text-xs text-muted-foreground'>{dayLabel(from)}{from !== to ? ` → ${dayLabel(to)}` : ''}</span>}
+        <DateRangePicker value={range} onChange={setRange} />
         {view === 'overview' && pages.length > 1 && <PagePicker pages={pages} picked={picked} onChange={setPicked} />}
         <div className='flex items-center gap-2'>
           <Switch id='net' checked={!gross} onCheckedChange={(v) => setGross(!v)} />
