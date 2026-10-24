@@ -129,7 +129,7 @@ router.post('/presence', async (req, res) => {
 });
 
 // ---------- "Read from Fansly" requests, as the extension sees them ----------
-const FETCH_KINDS = ['ledger', 'subscribers', 'statistics'];
+const FETCH_KINDS = ['ledger', 'ledger_all', 'subscribers', 'statistics'];
 const isStaff = (u) => ['manager', 'head_manager', 'admin', 'owner'].includes(u?.role);
 
 /** Requests waiting for (or running in) a browser on this Fansly account. */

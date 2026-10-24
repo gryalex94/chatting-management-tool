@@ -308,8 +308,8 @@
   }
 
   // ---------- "Read from Fansly" (owners and managers ask; the browser on the page does it) ----------
-  const FETCH_LABEL = { ledger: 'the Earnings list (every sale)', subscribers: 'the subscriber list', statistics: 'the statistics' };
-  const FETCH_SHORT = { ledger: 'Earnings', subscribers: 'Subscribers', statistics: 'Statistics' };
+  const FETCH_LABEL = { ledger: 'the recent sales (45 days)', ledger_all: 'every sale ever', subscribers: 'the subscriber list', statistics: 'the statistics' };
+  const FETCH_SHORT = { ledger: 'Earnings', ledger_all: 'Earnings, everything', subscribers: 'Subscribers', statistics: 'Statistics' };
   async function startFetch(arg) {
     const r = await send({ type: 'fetch-start', ...arg });
     if (!r || r.error) flash((r && r.error) || 'Could not start'); else refreshStatus();
@@ -327,7 +327,7 @@
     for (const j of jobs) if (!run) parts.push(h('div', { class: 'warn mid' }, `${j.by || 'A manager'} asked to read ${FETCH_LABEL[j.kind]} from Fansly. It opens a Fansly tab for a minute or two, then comes back here. `,
       h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => startFetch({ jobId: j.id }) }, 'Start')));
     if (st.staff && !run) parts.push(h('div', { class: 'row small', style: 'flex-wrap:wrap' }, h('span', { class: 'muted' }, 'Read from Fansly:'),
-      ...['ledger', 'subscribers', 'statistics'].map(k => h('button', { onclick: () => startFetch({ kind: k }) }, FETCH_SHORT[k]))));
+      ...['ledger', 'ledger_all', 'subscribers', 'statistics'].map(k => h('button', { onclick: () => startFetch({ kind: k }) }, FETCH_SHORT[k]))));
     if (last && !run && Date.now() - last.at < 30 * 60_000) parts.push(h('div', { class: `small ${last.status === 'done' ? 'muted' : 'err'}` },
       `Last read (${FETCH_SHORT[last.kind]}): ${last.status === 'done' ? 'done' : last.status}, ${last.progress?.rows || 0}${last.progress?.total ? ` of ${last.progress.total}` : ''} rows${last.error ? `. ${last.error}` : ''}`));
     return h('div', { style: 'padding:6px 10px;border-bottom:1px solid #2c2c33' }, parts);

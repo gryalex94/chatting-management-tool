@@ -179,7 +179,7 @@ function FanslyOverview() {
   );
 }
 
-const FETCH_NAME = { ledger: 'Earnings (every sale)', subscribers: 'Subscribers', statistics: 'Statistics' };
+const FETCH_NAME = { ledger: 'Earnings (last 45 days)', ledger_all: 'Earnings, everything', subscribers: 'Subscribers', statistics: 'Statistics' };
 const JOB_STATUS = { pending: 'waiting for a browser on this page', running: 'reading now', done: 'done', failed: 'failed', cancelled: 'stopped' };
 
 /**
@@ -208,12 +208,12 @@ function ReadFromFansly({ a, onChanged }) {
     <div className='mx-4 mb-3 grid gap-2 rounded-md border px-3 py-2 text-sm'>
       <div className='flex flex-wrap items-center gap-2'>
         <span className='font-medium'>Read from Fansly:</span>
-        {['ledger', 'subscribers', 'statistics'].map(k => (
+        {['ledger', 'ledger_all', 'subscribers', 'statistics'].map(k => (
           <Button key={k} size='sm' variant='outline' disabled={!!busy || ['pending', 'running'].includes(latest[k]?.status)} onClick={() => ask(k)}>{busy === k ? 'Asking…' : FETCH_NAME[k]}</Button>
         ))}
       </div>
       <p className={`text-xs ${complete ? 'text-muted-foreground' : 'text-amber-600'}`}>
-        Sales list: {num(led.read || 0)}{led.total ? ` of ${num(led.total)}` : ''} sales read{complete ? ', complete.' : led.total ? `. ${num(led.total - (led.read || 0))} still to read: use "Earnings".` : '. Fansly says how many there are the first time its Earnings page is opened.'}
+        Sales list: {num(led.read || 0)}{led.total ? ` of ${num(led.total)}` : ''} sales read{complete ? ', complete.' : led.total ? `. ${num(led.total - (led.read || 0))} still to read: use "Earnings, everything" once.` : '. Fansly says how many there are the first time its Earnings page is opened.'}
       </p>
       {Object.values(latest).map(j => (
         <p key={j.id} className='flex flex-wrap items-center gap-1 text-xs text-muted-foreground'>

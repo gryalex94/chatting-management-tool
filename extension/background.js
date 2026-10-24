@@ -144,7 +144,7 @@ async function heartbeat() {
 // as always. Started by a click (a manager's button, or the chatter's Start on a manager's request).
 // Fansly's own addresses (its app's routes, 24 Oct 2026): the old /earnings and /subscribers lead to "page does not exist"
 // the sales list is the wallet history, 10 per page ("1–10 of 756")
-const FETCH_URL = { ledger: 'https://fansly.com/creator/wallet/history', subscribers: 'https://fansly.com/creator/subscribers', statistics: 'https://fansly.com/creator/stats/overview' };   // statistics: then the Earnings tab too
+const FETCH_URL = { ledger: 'https://fansly.com/creator/wallet/history', ledger_all: 'https://fansly.com/creator/wallet/history', subscribers: 'https://fansly.com/creator/subscribers', statistics: 'https://fansly.com/creator/stats/overview' };   // statistics: then the Earnings tab too
 let activeJob = null;                       // { id, kind, tabId, originTabId, progress }
 let lastProgressPost = 0;
 async function startFetch({ jobId, kind }) {
