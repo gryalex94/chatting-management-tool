@@ -453,6 +453,31 @@
       tile.append(tag);
     }
   }
+  function vaultDiag(target, root) {
+    // the tile: go up from the click until a box holds a picture, a video or a canvas
+    let tile = target;
+    for (let i = 0; i < 8 && tile && tile !== root && !tile.querySelector('img, video, canvas, [style*="background-image"]'); i++) tile = tile.parentElement;
+    const outline = (el, d) => {
+      if (!el || d > 5) return null;
+      const o = { tag: el.tagName.toLowerCase(), cls: String(el.className && el.className.baseVal != null ? el.className.baseVal : el.className || '').slice(0, 80) };
+      const attrs = [...el.attributes].map(a => a.name).filter(n => !/^_ng|^class$/.test(n)); if (attrs.length) o.attrs = attrs.slice(0, 10);
+      const w = el.getBoundingClientRect(); o.size = `${Math.round(w.width)}x${Math.round(w.height)}`;
+      const own = [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent.trim()).join(' ').trim(); if (own) o.text = own.slice(0, 80);
+      for (const k of ['src', 'poster', 'href', 'title']) { const v = el.getAttribute && el.getAttribute(k); if (v) o[k] = v.slice(0, 200).replace(/[?].*$/, '?…'); }
+      if (el.style && el.style.backgroundImage) o.bg = el.style.backgroundImage.slice(0, 200).replace(/[?].*$/, '?…');
+      if (el.tagName === 'VIDEO') o.currentSrc = String(el.currentSrc || '').slice(0, 200).replace(/[?].*$/, '?…');
+      const kids = [...el.children].slice(0, 8).map(c => outline(c, d + 1)).filter(Boolean); if (kids.length) o.kids = kids;
+      return o;
+    };
+    const pics = tile ? [...tile.querySelectorAll('img, video, canvas, [style*="background-image"]')] : [];
+    return {
+      outline: outline(tile, 0),
+      matched: pics.map(p => ({ tag: p.tagName.toLowerCase(), id: mediaOfTile(tileOf(p, root) || tile, p) || null, byPic: mediaOfPic(picOf(p)) || null, src: String(picOf(p)).slice(0, 120).replace(/[?].*$/, '?…') })),
+      keys: vaultKey.size, names: vaultName.size, marks: marks.size, marksFor, group: groupNow(),
+      pathSample: [...vaultKey.keys()].filter(k => k.startsWith('/')).slice(0, 6),
+      nameSample: [...vaultName.keys()].filter(k => /\.(mp4|mov|m4v|webm)$/.test(k)).slice(0, 4),
+    };
+  }
   let markTimer = null;
   const markSoon = () => { if (markTimer) return; markTimer = setTimeout(() => { markTimer = null; markVault(); }, 150); };
   new MutationObserver(() => markSoon()).observe(document.documentElement, { childList: true, subtree: true });
@@ -473,6 +498,8 @@
       text: el.matches('input, select') ? null : (label(el.innerText).length <= 30 ? label(el.innerText) : null),
       icon: (el.querySelector('i[class], svg use, mat-icon') && label(el.querySelector('i[class], svg use, mat-icon').getAttribute('class') || el.querySelector('svg use')?.getAttribute('href') || el.querySelector('mat-icon')?.textContent)) || null,
     };
+    // a click in the vault window: how that tile is built and why it was or wasn't recognised (to fix the frames)
+    try { const vw = vaultWindow(); if (vw && vw.contains(el)) ui.vault = vaultDiag(ev.target, vw); } catch (e) { ui.vault = { error: String(e && e.message) }; }
     try { chrome.runtime.sendMessage({ type: 'fansly-event', kind: 'net', url: location.href, data: { method: 'UI', path: 'click', query: {}, status: null, page: location.pathname, rows: {}, ui }, at: Date.now() }); } catch { /* ignore */ }
   }, true);
 
