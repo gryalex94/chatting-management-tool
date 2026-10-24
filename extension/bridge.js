@@ -198,7 +198,20 @@
   const HIDE = new Set(['profile', 'subscriptions', 'media vault', 'media collection', 'lists', 'bookmarks', 'notifications', 'creator',
     'creator dashboard', 'co-performers', 'earning statistics', 'earnings', 'profile statistics', 'statistics', 'tracking links', 'scheduled post queue',
     'tax documentation', 'payments', 'payouts', 'wallet', 'settings', 'creator hub (fansly guide)', 'creator hub', 'contact support', 'help center',
-    'merch store', 'logout', 'log out', 'sign out', 'switch account', 'add account', 'switch accounts', 'management sessions']);
+    'merch store', 'logout', 'log out', 'sign out', 'switch account', 'add account', 'switch accounts', 'management sessions',
+    // the same menu when Fansly runs in German
+    'profil', 'abonnements', 'abos', 'medientresor', 'mediensammlung', 'listen', 'lesezeichen', 'benachrichtigungen', 'ersteller',
+    'creator-dashboard', 'statistiken', 'einnahmen', 'einnahmestatistiken', 'profilstatistiken', 'tracking-links', 'geplante beiträge',
+    'steuerunterlagen', 'steuerdokumente', 'zahlungen', 'auszahlungen', 'geldbörse', 'einstellungen', 'support kontaktieren',
+    'hilfe-center', 'hilfecenter', 'hilfe', 'abmelden', 'ausloggen', 'konto wechseln', 'konto hinzufügen', 'verwaltungssitzungen',
+    // Spanish and Russian, in case a chatter's Fansly runs in theirs
+    'perfil', 'suscripciones', 'listas', 'marcadores', 'notificaciones', 'estadísticas', 'ganancias', 'pagos', 'billetera', 'cartera',
+    'configuración', 'ajustes', 'cerrar sesión', 'cambiar de cuenta', 'профиль', 'подписки', 'списки', 'закладки', 'уведомления',
+    'статистика', 'доходы', 'заработок', 'платежи', 'выплаты', 'кошелёк', 'кошелек', 'настройки', 'выйти', 'выход', 'сменить аккаунт']);
+  // and by where a link goes, whatever the language: everything in Fansly's menus but the chats
+  const HIDE_PATHS = /^\/(settings|creator|wallet|payments?|payouts?|statistics|earnings|notifications|lists|bookmarks|subscriptions|vault|mediavault|collection|tracking|tax|support|help|referrals?|explore|home|search|management)(\/|$)/i;
+  // logout and account-switch buttons by their icon
+  const HIDE_ICONS = '[class*="sign-out"], [class*="right-from-bracket"], [class*="arrow-right-from"], [class*="fa-wallet"]';  // (not the dollar icon: the PPV price button uses it)
   const secureStyle = document.createElement('style');
   secureStyle.textContent = '.cmt-hidden{display:none!important}.cmt-masked{visibility:hidden!important}';
   let lastOpen = OPEN_PATHS.test(location.pathname) ? location.pathname : '/messages';
@@ -221,10 +234,20 @@
       const item = el.closest('a, button, [role="menuitem"], [role="button"], li') || el;
       item.classList.add('cmt-hidden');
     }
-    // the wallet balance at the top of the page ("$49.84")
+    for (const a of document.querySelectorAll('a[href]')) {
+      if (host && host.contains(a)) continue;
+      let u; try { u = new URL(a.getAttribute('href'), location.href); } catch { continue; }
+      if (u.origin === location.origin && HIDE_PATHS.test(u.pathname)) a.classList.add('cmt-hidden');
+    }
+    for (const i of document.querySelectorAll(HIDE_ICONS)) {
+      if (host && host.contains(i)) continue;
+      const item = i.closest('a, button, [role="menuitem"], [role="button"], li');
+      if (item && !(host && host.contains(item)) && !item.closest('form, [contenteditable]')) item.classList.add('cmt-hidden');
+    }
+    // the wallet balance at the top of the page ("$49.84", "49,84 $", "49,84 €")
     for (const el of document.querySelectorAll('div, span, a')) {
       if (el.children.length || (host && host.contains(el))) continue;
-      if (!/^\$\s?[\d,]+(\.\d{1,2})?$/.test(String(el.textContent || '').trim())) continue;
+      if (!/^(\$\s?[\d.,]+|[\d.,]+\s?[$€])$/.test(String(el.textContent || '').trim())) continue;
       if (el.getBoundingClientRect().top < 90) (el.closest('a, button, [role="button"]') || el).classList.add('cmt-masked');
     }
     for (const v of document.querySelectorAll('video:not([controlslist~="nodownload"])')) v.setAttribute('controlslist', 'nodownload noplaybackrate');
