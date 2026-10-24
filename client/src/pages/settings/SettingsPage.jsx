@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  ChevronRight, Clock, Copy, MoreHorizontal, Pencil, Plus, Trash2, UserCheck, UserX, X,
+  ChevronRight, Clock, Copy, MoreHorizontal, Pencil, Plus, Trash2, UserCheck, UserX,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -8,8 +8,7 @@ import { usePlatform } from '@/context/PlatformContext';
 import { platformInfo, pagePlatform } from '@/utils/platforms';
 import PlatformBadge from '@/components/shared/PlatformBadge';
 import api from '@/services/api';
-import { Avatar, Chip, StatusDot } from '@/components/shared';
-import { STATUS_META } from '@/utils/helpers';
+import { Avatar, Chip } from '@/components/shared';
 import { setInflowwOffset, getInflowwOffset } from '@/utils/displaySettings';
 import { fmtSentAt } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
@@ -17,6 +16,7 @@ import CreatorDetailModal from './CreatorDetailModal';
 import InflowwPanel from './InflowwPanel';
 import FanvuePanel from './FanvuePanel';
 import FanslyPagesPanel from './FanslyPagesPanel';
+import ChattersPanel from './ChattersPanel';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -35,7 +35,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 /* ─── Role rules (mirror server/src/utils/roles.js — the server enforces them) ── */
 
@@ -106,7 +105,7 @@ function RoleSelect({ value, onChange, roles, id }) {
 /* ─── Page ────────────────────────────────────────────────────────────────── */
 
 export default function SettingsPage() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, isManager } = useAuth();
   const { platform, setPlatform, reloadPages } = usePlatform();
   // a link to the old Fanvue or Infloww tab shows that platform's Pages tab
   useEffect(() => { const t = new URLSearchParams(window.location.search).get('tab'); if (t === 'fanvue') setPlatform('fanvue'); if (t === 'infloww') setPlatform('onlyfans'); }, [setPlatform]);
@@ -118,9 +117,8 @@ export default function SettingsPage() {
   // Forms
   const [creatorName, setCreatorName] = useState('');
   const platformCreators = creators.filter(c => pagePlatform(c) === platform);   // the platform picked in the menu
-  const [chatterForm, setChatterForm] = useState({ name:'', email:'' });
-  const [inviteForm, setInviteForm] = useState({ email:'', role:'chatter' });
   const [memberForm, setMemberForm] = useState({ name:'', email:'', password:'', role:'chatter' });
+  const [inviteForm, setInviteForm] = useState({ email:'', role:'chatter' });
   const [inviteToken, setInviteToken] = useState(null);
   const [invitations, setInvitations] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -181,12 +179,6 @@ export default function SettingsPage() {
     catch (err) { toast.error(err?.response?.data?.error || 'Failed'); }
   }
 
-  async function addChatter(e) {
-    e.preventDefault(); if(!chatterForm.name.trim()) return;
-    try { await api.post('/api/chatters',chatterForm); toast.success('Chatter added'); setChatterForm({name:'',email:''}); load(); }
-    catch { toast.error('Failed'); }
-  }
-
   async function sendInvite(e) {
     e.preventDefault();
     try { const {data}=await api.post('/api/auth/invite',inviteForm); setInviteToken(data.invitation.token); toast.success('Invite created'); setInviteForm({email:'',role:'chatter'}); loadInvitations(); }
@@ -201,11 +193,6 @@ export default function SettingsPage() {
       setMemberForm({name:'',email:'',password:'',role:'chatter'});
       load();
     } catch(err) { toast.error(err.response?.data?.error||'Failed'); }
-  }
-
-  async function updateChatterStatus(id, status) {
-    try { await api.put(`/api/chatters/${id}`,{status}); toast.success('Updated'); load(); }
-    catch { toast.error('Failed'); }
   }
 
   async function deactivateChatter(ch) {
@@ -361,49 +348,9 @@ export default function SettingsPage() {
 
         {/* Chatters */}
         <TabsContent value='chatters'>
-          <Section title='Chatters' sub={`${chatters.length} chatters in your org`}>
-            {chatters.length === 0 ? <Empty>No chatters yet.</Empty> : (
-              <div className='grid gap-1.5'>
-                {chatters.map(ch=>(
-                  <div key={ch.id} className='flex items-center gap-3 rounded-md border bg-background px-3 py-2'>
-                    <Avatar name={ch.name} size={28}/>
-                    <div className='min-w-0 flex-1'>
-                      <p className='truncate text-sm font-medium'>{ch.name}</p>
-                      <p className='truncate text-xs text-muted-foreground'>{ch.email||'No email'}</p>
-                    </div>
-                    <div className='flex items-center gap-0.5' role='group' aria-label='Experience stage'>
-                      {Object.entries(STATUS_META).map(([k,v])=>(
-                        <Tooltip key={k}>
-                          <TooltipTrigger asChild>
-                            <button type='button' onClick={()=>updateChatterStatus(ch.id,k)} aria-label={v.label} aria-pressed={ch.status===k}
-                              className='grid size-6 place-items-center rounded-md transition-colors hover:bg-accent'>
-                              <StatusDot status={k} className={cn('transition-all', ch.status===k ? 'scale-125' : 'opacity-30 ring-0')} />
-                            </button>
-                          </TooltipTrigger>
-                          <TooltipContent>{v.label}</TooltipContent>
-                        </Tooltip>
-                      ))}
-                    </div>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button size='icon-sm' variant='ghost' className='text-muted-foreground hover:text-bad' aria-label={`Deactivate ${ch.name}`}
-                          onClick={()=>setConfirm({
-                            title:`Deactivate ${ch.name}?`,
-                            description:`${ch.name} will be marked as inactive.`,
-                            action:'Deactivate', run:()=>deactivateChatter(ch),
-                          })}><X/></Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Deactivate</TooltipContent>
-                    </Tooltip>
-                  </div>
-                ))}
-              </div>
-            )}
-            <form onSubmit={addChatter} className='flex flex-wrap gap-2'>
-              <Input value={chatterForm.name} onChange={e=>setChatterForm(p=>({...p,name:e.target.value}))} placeholder='Name' aria-label='Name' required className='min-w-40 flex-1'/>
-              <Input value={chatterForm.email} onChange={e=>setChatterForm(p=>({...p,email:e.target.value}))} placeholder='Email (optional)' aria-label='Email' className='min-w-40 flex-1'/>
-              <Button type='submit'><Plus/>Add</Button>
-            </form>
+          <Section title='Chatters' sub='Experience stage, start date, rota and last day worked'>
+            <ChattersPanel chatters={chatters} platform={platform} canEdit={isManager} onChanged={load}
+              onDeactivate={(ch)=>setConfirm({ title:`Deactivate ${ch.name}?`, description:`${ch.name} will be marked as inactive.`, action:'Deactivate', run:()=>deactivateChatter(ch) })} />
           </Section>
         </TabsContent>
 

@@ -25,6 +25,16 @@ export const STATUS_META = {
   experienced:    { label: 'Experienced', color: 'var(--st-experienced)', nameColor: '#4ade80' },
 };
 
+// A chatter's experience stage (server/src/utils/chatterStage.js): it decides how strict the daily
+// review's tasks are. New: every finding; Learning: medium and up; Experienced: the serious ones.
+export const STAGE_META = {
+  new:         { label: 'New',         color: 'var(--st-new)',         nameColor: '#f87171', hint: 'Every finding of the daily review becomes a task' },
+  learning:    { label: 'Learning',    color: 'var(--st-developing)',  nameColor: '#facc15', hint: 'Medium and serious findings become tasks' },
+  experienced: { label: 'Experienced', color: 'var(--st-experienced)', nameColor: '#4ade80', hint: 'Serious findings become tasks (and the kinds that always do)' },
+};
+/** The stage of a chatter row from the server ({ stage: { stage } }); experienced when unknown. */
+export const stageOf = (chatter) => chatter?.stage?.stage || 'experienced';
+
 export const PRIORITY_COLORS = {
   1: 'var(--p1)', 2: 'var(--p2)', 3: 'var(--p3)', 4: 'var(--p4)',
   5: 'var(--p5)', 6: 'var(--p6)', 7: 'var(--p7)',

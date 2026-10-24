@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/services/api';
-import { STATUS_META, avatarColor, initials } from '@/utils/helpers';
+import { STAGE_META, stageOf, avatarColor, initials } from '@/utils/helpers';
 import {
   Plus, ArrowRight, ArrowDown, AlertTriangle, Users, Pencil, Scissors, XCircle, MoreHorizontal,
   Clock, Trash2, Calendar, Check, X,
@@ -81,9 +81,9 @@ function PersonAvatar({ name, className }) {
   );
 }
 
-// Coloured dot for a chatter's experience status, label on hover.
+// Coloured dot for a chatter's experience stage, label on hover.
 function StatusDot({ status, withTooltip = true }) {
-  const meta = STATUS_META[status] || STATUS_META.new;
+  const meta = STAGE_META[status] || STAGE_META.experienced;
   const dot = <span className='inline-block size-2 shrink-0 rounded-full' style={{ background: meta.color }} aria-label={meta.label} />;
   if (!withTooltip) return dot;
   return (
@@ -181,7 +181,7 @@ function ChatterRow({ chatter, onClick, onRemove, isDayOff, isOvertime, coverHou
         </div>
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-1.5'>
-            {!isCover && !isDayOff && <StatusDot status={chatter.status}/>}
+            {!isCover && !isDayOff && <StatusDot status={stageOf(chatter)}/>}
             <span className={cn(
               'truncate text-[13px]',
               isCover ? 'font-semibold text-link'
@@ -391,7 +391,7 @@ function CreatorCard({ creator, chatters, shifts, onAssign, onAddCover, onClickC
 
 // A selectable chatter row used in the assign / cover dialogs.
 function PickRow({ chatter, selected, onClick, trailing }) {
-  const meta = STATUS_META[chatter.status];
+  const meta = STAGE_META[stageOf(chatter)];
   return (
     <button type='button' onClick={onClick} aria-pressed={selected}
       className={cn(
@@ -402,7 +402,7 @@ function PickRow({ chatter, selected, onClick, trailing }) {
       <div className='min-w-0 flex-1'>
         <div className='truncate text-sm font-medium'>{chatter.name}</div>
         <div className='mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground'>
-          <StatusDot status={chatter.status} withTooltip={false}/>{meta?.label}
+          <StatusDot status={stageOf(chatter)} withTooltip={false}/>{meta?.label}
         </div>
       </div>
       {trailing}

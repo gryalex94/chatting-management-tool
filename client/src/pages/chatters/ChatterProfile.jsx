@@ -7,7 +7,7 @@ import {
 import toast from 'react-hot-toast';
 import { useAuth } from '@/context/AuthContext';
 import api from '@/services/api';
-import { STATUS_META, initials } from '@/utils/helpers';
+import { STAGE_META, initials } from '@/utils/helpers';
 import { TIER, fmtSentAt, areaLabel } from '@/utils/taskMeta';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -39,7 +39,6 @@ const CATEGORY_COLORS = {
 };
 
 // Status dot colours (same values the old --st-* variables held).
-const STATUS_DOT = { new: '#ef4444', new_monitoring: '#f97316', developing: '#eab308', experienced: '#22c55e' };
 
 // Golden ratio / unlock rate bands → text colour class.
 function goldenColor(val) {
@@ -927,9 +926,15 @@ export default function ChatterProfile() {
 
   useEffect(() => { load(); }, [load]);
 
-  async function changeStatus(newStatus) {
-    try { await api.put(`/api/chatters/${id}`, { status:newStatus }); toast.success('Status updated'); setStatusOpen(false); load(); }
-    catch { toast.error('Failed'); }
+  // the experience stage: set by hand, or (null) follow the start date
+  async function changeStage(stage) {
+    try { await api.put(`/api/chatters/${id}`, { stage_override: stage }); toast.success(stage ? `Set to ${STAGE_META[stage].label}` : 'Follows the start date'); setStatusOpen(false); load(); }
+    catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
+  }
+  async function changeStart(day) {
+    if (!day) return;
+    try { await api.put(`/api/chatters/${id}`, { started_on: day }); toast.success('Start date saved'); load(); }
+    catch (e) { toast.error(e?.response?.data?.error || 'Failed'); }
   }
 
   if (loading) return <ProfileSkeleton />;
@@ -940,7 +945,8 @@ export default function ChatterProfile() {
     </div>
   );
 
-  const meta = STATUS_META[chatter.status] || STATUS_META.new;
+  const st = chatter.stage || { stage: 'experienced' };
+  const meta = STAGE_META[st.stage] || STAGE_META.experienced;
   const assignments = chatter.chatter_creator_assignments?.filter(a=>a.is_active) || [];
   const regularAssignments = assignments.filter(a => a.day_of_week == null);   // not covers
   // The Shifts roster, once it's in use, says which shift and pages; else the old assignments.
@@ -1048,15 +1054,20 @@ export default function ChatterProfile() {
               <DropdownMenu open={statusOpen} onOpenChange={setStatusOpen}>
                 <DropdownMenuTrigger asChild>
                   <Button variant='outline' size='sm' className='h-7 gap-1.5 rounded-full px-2.5 text-xs'>
-                    <span className='size-2 rounded-full' style={{ background: STATUS_DOT[chatter.status] || STATUS_DOT.new }} />
-                    {meta.label}<ChevronDown className='size-3 opacity-60' />
+                    <span className='size-2 rounded-full' style={{ background: meta.color }} />
+                    {meta.label}{st.override ? ' (set by hand)' : ''}<ChevronDown className='size-3 opacity-60' />
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align='start' className='min-w-40'>
-                  {Object.entries(STATUS_META).map(([k,v]) => (
-                    <DropdownMenuItem key={k} onClick={()=>changeStatus(k)} className={cn(chatter.status===k && 'bg-accent')}>
-                      <span className='size-2 rounded-full' style={{ background: STATUS_DOT[k] }} />{v.label}
-                      {chatter.status===k && <Check className='ms-auto' />}
+                <DropdownMenuContent align='start' className='min-w-64'>
+                  <DropdownMenuItem onClick={()=>changeStage(null)} className={cn(!st.override && 'bg-accent')}>
+                    <span className='flex flex-col'><span>Follow the start date</span><span className='text-xs text-muted-foreground'>New 7 days, Learning to day 21, then Experienced</span></span>
+                    {!st.override && <Check className='ms-auto' />}
+                  </DropdownMenuItem>
+                  {Object.entries(STAGE_META).map(([k,v]) => (
+                    <DropdownMenuItem key={k} onClick={()=>changeStage(k)} className={cn(st.override===k && 'bg-accent')}>
+                      <span className='size-2 rounded-full' style={{ background: v.color }} />
+                      <span className='flex flex-col'><span>{v.label}</span><span className='text-xs text-muted-foreground'>{v.hint}</span></span>
+                      {st.override===k && <Check className='ms-auto' />}
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuContent>
@@ -1065,7 +1076,11 @@ export default function ChatterProfile() {
             <div className='mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground'>
               {creatorNames.map(n => <Badge key={n} variant='secondary' className='font-normal'>{n}</Badge>)}
               <span className='inline-flex items-center gap-1'><Clock className='size-3.5' />{shiftName} {shiftHours}</span>
-              <span>Joined {new Date(chatter.created_at).toLocaleDateString()}</span>
+              <span className='inline-flex items-center gap-1'>Started
+                <input type='date' aria-label='Start date' defaultValue={st.started_on || ''} onBlur={e => e.target.value !== st.started_on && changeStart(e.target.value)}
+                  className='rounded border bg-transparent px-1 text-xs' />
+              </span>
+              {st.next && <span>{STAGE_META[st.next.stage].label} from {new Date(`${st.next.on}T12:00:00Z`).toLocaleDateString([], { day: 'numeric', month: 'short', timeZone: 'UTC' })}</span>}
             </div>
           </div>
           {canCreate && <Button onClick={()=>setShowTaskModal(true)}><Plus />Custom task</Button>}

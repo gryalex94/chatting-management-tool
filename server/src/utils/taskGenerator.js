@@ -1,3 +1,4 @@
+const { stageOf } = require('./chatterStage');
 const { supabaseAdmin } = require('./supabase');
 const { WRONG_FINDING } = require('./dismissReasons');
 const { fanNameInfo } = require('./fanNames');
@@ -82,13 +83,8 @@ function setPageByName(map, c) {
   }
 }
 
-function tenureTier(createdAt, onDate) {
-  if (!createdAt) return 'experienced';                    // unknown join date → treat as light
-  const days = Math.round((new Date(onDate + 'T00:00:00Z') - new Date(createdAt)) / 86400000);
-  if (days <= 7) return 'new';
-  if (days <= 21) return 'learning';
-  return 'experienced';
-}
+// The chatter's stage (utils/chatterStage.js): from their start date, or as a manager set it.
+const tenureTier = (c, onDate) => stageOf(c, onDate).stage;
 function keepByTenure(c, tier) {
   if (c.source_type === 'flag' || c.source_type === 'creator') return true;   // apply to everyone
   const area = (c.area || '').toLowerCase();
@@ -100,6 +96,9 @@ function keepByTenure(c, tier) {
   // replies are kept but merged into one coaching task per chatter (bundleCoaching).
   // Laughing emojis and swearing stay out for experienced chatters.
   if (area === 'gift' || area === 'communication') return true;
+  // Medium quality findings are real handling problems (arguing with a whale, the wrong name mid-sext,
+  // a line meant for another page, a lie, a badly handled "is this an agency?"): for everyone (24 Oct).
+  if (area === 'quality' && c.severity === 'medium') return true;
   if (area === 'sales' && c.severity === 'medium' && Number(c.context?.spend) >= SPENDER_MIN) return true;
   const rank = SEV_RANK[c.severity];
   if (rank === undefined) return true;                                        // unrecognised severity → keep, a human looks
@@ -282,12 +281,12 @@ async function buildTasksForDate(orgId, reportDate) {
   // name lookups
   const [{ data: creators }, { data: chatters }] = await Promise.all([
     supabaseAdmin.from('creators').select('id, name, is_active, platform').eq('organisation_id', orgId),
-    supabaseAdmin.from('chatters').select('id, name, created_at').eq('organisation_id', orgId),
+    supabaseAdmin.from('chatters').select('id, name, created_at, started_on, stage_override').eq('organisation_id', orgId),
   ]);
   const creatorNameById = {}; const creatorIdByName = {};
   (creators || []).forEach(c => { creatorNameById[c.id] = c.name; setPageByName(creatorIdByName, c); });
   const chatterNameById = {}; const tenureById = {};
-  (chatters || []).forEach(c => { chatterNameById[c.id] = c.name; tenureById[c.id] = tenureTier(c.created_at, reportDate); });
+  (chatters || []).forEach(c => { chatterNameById[c.id] = c.name; tenureById[c.id] = tenureTier(c, reportDate); });
 
   // findings: AI report issues + engine flags. Also load the ignore-list of
   // accounts/chatters that must never appear in reports (e.g. "Paul B").

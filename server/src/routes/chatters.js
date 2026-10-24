@@ -1,3 +1,4 @@
+const { STAGES, stageOf } = require('../utils/chatterStage');
 const router = require('express').Router();
 const { supabaseAdmin } = require('../utils/supabase');
 const { requireMinRole } = require('../middleware/auth');
@@ -53,11 +54,40 @@ router.get('/', async (req, res) => {
       .order('name');
 
     if (error) return res.status(500).json({ error: error.message });
-    res.json(data);
+    res.json(await withStage(req.user.organisationId, data || []));
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch chatters' });
   }
 });
+
+/**
+ * Each chatter with their experience stage (utils/chatterStage.js), the platforms and pages they are on
+ * in the usual rota (the Shifts page), and the last day they worked (OnlyFans chat exports, Fansly).
+ */
+async function withStage(orgId, chatters) {
+  const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' });
+  const ids = chatters.map(c => c.id);
+  if (!ids.length) return chatters;
+  const [{ data: rota }, { data: slots }, { data: pages }, { data: ofDays }, { data: fsDays }] = await Promise.all([
+    supabaseAdmin.from('roster_assignments').select('chatter_id, shift_id, creator_ids').eq('organisation_id', orgId).eq('is_active', true).in('chatter_id', ids),
+    supabaseAdmin.from('shifts').select('id, platform').eq('organisation_id', orgId).is('creator_id', null),
+    supabaseAdmin.from('creators').select('id, name, platform').eq('organisation_id', orgId),
+    supabaseAdmin.from('chatter_daily_metrics').select('chatter_id, report_date').eq('organisation_id', orgId).in('chatter_id', ids).order('report_date', { ascending: false }).limit(2000),
+    supabaseAdmin.from('fansly_daily').select('chatter_id, day').in('chatter_id', ids).order('day', { ascending: false }).limit(2000),
+  ]);
+  const slotPlatform = new Map((slots || []).map(x => [x.id, x.platform || 'onlyfans']));
+  const page = new Map((pages || []).map(x => [x.id, x]));
+  const last = new Map();
+  for (const r of [...(ofDays || []).map(x => [x.chatter_id, x.report_date]), ...(fsDays || []).map(x => [x.chatter_id, x.day])]) {
+    if (!last.has(r[0]) || r[1] > last.get(r[0])) last.set(r[0], r[1]);
+  }
+  return chatters.map(c => {
+    const mine = (rota || []).filter(a => a.chatter_id === c.id);
+    const platforms = [...new Set(mine.map(a => slotPlatform.get(a.shift_id)).filter(Boolean))];
+    const onPages = [...new Map(mine.flatMap(a => a.creator_ids || []).map(id => page.get(id)).filter(Boolean).map(p => [p.id, { id: p.id, name: p.name, platform: p.platform || 'onlyfans' }])).values()];
+    return { ...c, ...{ stage: stageOf(c, today) }, platforms, rota_pages: onPages, last_worked: last.get(c.id) || null };
+  });
+}
 
 // ──────────────────────────────────────────────────
 // Static routes MUST come before /:id
@@ -162,6 +192,7 @@ router.get('/:id', async (req, res) => {
 
     res.json({
       ...chatter,
+      stage: stageOf(chatter, new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' })),
       mistakes: mistakes || [],
       penalties: penalties || [],
       reviews: reviews || [],
@@ -187,6 +218,7 @@ router.post('/', requireMinRole('manager'), async (req, res) => {
         name,
         email,
         status: status || 'new',
+        started_on: /^\d{4}-\d{2}-\d{2}$/.test(String(req.body.started_on || '')) ? req.body.started_on : new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Amsterdam' }),
         organisation_id: req.user.organisationId,
       })
       .select()
@@ -211,6 +243,16 @@ router.put('/:id', requireMinRole('manager'), async (req, res) => {
     if (req.body.work_days !== undefined) update.work_days = req.body.work_days;
     if (req.body.hourly_rate !== undefined) update.hourly_rate = req.body.hourly_rate;
     if (req.body.commission_pct !== undefined) update.commission_pct = req.body.commission_pct;
+    if (req.body.overtime_rate !== undefined) update.overtime_rate = req.body.overtime_rate;
+    // the experience stage: a start date, and a stage set by hand (null: follow the start date)
+    if (req.body.started_on !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(req.body.started_on || ''))) return res.status(400).json({ error: 'Pick the day they started' });
+      update.started_on = req.body.started_on;
+    }
+    if (req.body.stage_override !== undefined) {
+      if (req.body.stage_override !== null && !STAGES.includes(req.body.stage_override)) return res.status(400).json({ error: 'Pick New, Learning or Experienced' });
+      update.stage_override = req.body.stage_override;
+    }
 
     const { data, error } = await supabaseAdmin
       .from('chatters')
