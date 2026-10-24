@@ -140,7 +140,8 @@ async function heartbeat() {
 // ---- "Read from Fansly": open Fansly's own page in a tab and let it scroll its list to the end ----
 // Fansly's app makes every request itself, as when a person scrolls; the extension only records,
 // as always. Started by a click (a manager's button, or the chatter's Start on a manager's request).
-const FETCH_URL = { ledger: 'https://fansly.com/earnings', subscribers: 'https://fansly.com/subscribers', statistics: 'https://fansly.com/statistics' };
+// Fansly's own addresses (its app's routes, 24 Oct 2026): the old /earnings and /subscribers lead to "page does not exist"
+const FETCH_URL = { ledger: 'https://fansly.com/creator/stats/earnings', subscribers: 'https://fansly.com/creator/subscribers', statistics: 'https://fansly.com/creator/stats/earnings' };
 let activeJob = null;                       // { id, kind, tabId, originTabId, progress }
 let lastProgressPost = 0;
 async function startFetch({ jobId, kind }) {
