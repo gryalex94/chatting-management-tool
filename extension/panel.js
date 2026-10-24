@@ -299,7 +299,38 @@
     if (!s) return;
     const was = st.signedIn + '|' + st.accountId;
     st.signedIn = !!s.signedIn; st.user = s.user; st.accountId = s.accountId; st.accountUsername = s.accountUsername;
+    // "Read from Fansly": requests waiting, the read running in this browser, the last result
+    const fetchKey = JSON.stringify([s.jobs, s.staff, s.activeJob, s.lastFetch]);
+    const fetchChanged = fetchKey !== st.fetchKey;
+    Object.assign(st, { jobs: s.jobs || [], staff: !!s.staff, activeJob: s.activeJob || null, lastFetch: s.lastFetch || null, fetchKey });
     if (was !== st.signedIn + '|' + st.accountId) { applyLayout(); render(); loadScripts(); loadFan(false); }
+    else if (fetchChanged) render();
+  }
+
+  // ---------- "Read from Fansly" (owners and managers ask; the browser on the page does it) ----------
+  const FETCH_LABEL = { ledger: 'the Earnings list (every sale)', subscribers: 'the subscriber list', statistics: 'the statistics' };
+  const FETCH_SHORT = { ledger: 'Earnings', subscribers: 'Subscribers', statistics: 'Statistics' };
+  async function startFetch(arg) {
+    const r = await send({ type: 'fetch-start', ...arg });
+    if (!r || r.error) flash((r && r.error) || 'Could not start'); else refreshStatus();
+  }
+  function fetchBox() {
+    const run = st.activeJob, jobs = (st.jobs || []).filter(j => j.status === 'pending'), last = st.lastFetch;
+    if (!st.signedIn || !st.accountId || (!st.staff && !jobs.length && !run)) return null;
+    const parts = [];
+    if (run) {
+      const p = run.progress || {};
+      parts.push(h('div', { class: 'warn info' }, h('b', null, `Reading ${FETCH_LABEL[run.kind]}: `),
+        `${p.rows || 0}${p.total ? ` of ${p.total}` : ''} read${p.note ? ` · ${p.note}` : ''}. A Fansly tab does it and closes by itself. `,
+        h('button', { class: 'link', onclick: () => send({ type: 'fetch-stop' }) }, 'stop')));
+    }
+    for (const j of jobs) if (!run) parts.push(h('div', { class: 'warn mid' }, `${j.by || 'A manager'} asked to read ${FETCH_LABEL[j.kind]} from Fansly. It opens a Fansly tab for a minute or two, then comes back here. `,
+      h('button', { class: 'primary', style: 'margin-top:4px', onclick: () => startFetch({ jobId: j.id }) }, 'Start')));
+    if (st.staff && !run) parts.push(h('div', { class: 'row small', style: 'flex-wrap:wrap' }, h('span', { class: 'muted' }, 'Read from Fansly:'),
+      ...['ledger', 'subscribers', 'statistics'].map(k => h('button', { onclick: () => startFetch({ kind: k }) }, FETCH_SHORT[k]))));
+    if (last && !run && Date.now() - last.at < 30 * 60_000) parts.push(h('div', { class: `small ${last.status === 'done' ? 'muted' : 'err'}` },
+      `Last read (${FETCH_SHORT[last.kind]}): ${last.status === 'done' ? 'done' : last.status}, ${last.progress?.rows || 0}${last.progress?.total ? ` of ${last.progress.total}` : ''} rows${last.error ? `. ${last.error}` : ''}`));
+    return h('div', { style: 'padding:6px 10px;border-bottom:1px solid #2c2c33' }, parts);
   }
 
   // ---------- actions ----------
@@ -566,6 +597,7 @@
         st.groupId && st.signedIn ? h('button', { class: 'icon', title: 'Reload', onclick: () => loadFan(false) }, '↻') : null,
         SIDE ? null : h('button', { class: 'icon', title: 'Collapse', onclick: () => { st.collapsed = true; save(); applyLayout(); render(); } }, '›')),
       st.signedIn && st.accountId ? shiftStrip() : null,
+      fetchBox(),
       body(),
       st.toast ? h('div', { class: 'toast' }, st.toast) : null);
     root.append(h('div', { class: 'wrap', style: SIDE ? '' : `width:${st.width}px` }, grip, panel));
@@ -618,7 +650,7 @@
       if (!off) mount();
       if (!SIDE) st.groupId = groupFromUrl();
       refreshStatus();
-      setInterval(refreshStatus, 5000);
+      setInterval(refreshStatus, 3000);
       setInterval(() => { if (!document.hidden && host.isConnected) loadFan(true); }, REFRESH_MS);
       setInterval(() => { if (host.isConnected && st.data) render(); }, 60000);    // the timers on the shift strip
     };

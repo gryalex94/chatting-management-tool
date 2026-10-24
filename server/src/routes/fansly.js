@@ -123,12 +123,82 @@ router.post('/presence', async (req, res) => {
     const account = await accountFor(req, []);
     const id = await F.heartbeat({ user: req.user, chatterId, deviceId, account, extensionVersion: req.body?.extensionVersion });
     const assigned = account ? await F.mayWork(req.user, account) : true;
-    res.json({ ok: true, presenceId: id, assigned, account: account ? { id: account.id, username: account.username, status: account.status } : null });
+    const jobs = account && assigned ? await jobsFor(req.user.organisationId, account.id).catch(() => []) : [];
+    res.json({ ok: true, presenceId: id, assigned, jobs, staff: isStaff(req.user), account: account ? { id: account.id, username: account.username, status: account.status } : null });
   } catch (e) { fail(res, e, 'record who is online'); }
+});
+
+// ---------- "Read from Fansly" requests, as the extension sees them ----------
+const FETCH_KINDS = ['ledger', 'subscribers', 'statistics'];
+const isStaff = (u) => ['manager', 'head_manager', 'admin', 'owner'].includes(u?.role);
+
+/** Requests waiting for (or running in) a browser on this Fansly account. */
+async function jobsFor(orgId, accountId) {
+  if (!accountId) return [];
+  const { data } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, kind, status, requested_at, progress, device_id, users:requested_by(name)')
+    .eq('organisation_id', orgId).eq('account_id', accountId).in('status', ['pending', 'running']).order('requested_at').limit(5);
+  return (data || []).map(j => ({ id: j.id, kind: j.kind, status: j.status, requested_at: j.requested_at, progress: j.progress, device_id: j.device_id, by: j.users?.name || null }));
+}
+
+// POST /api/fansly/fetch { account: <fansly id>, kind } — a manager in the browser starts one right away
+router.post('/fetch', async (req, res) => {
+  try {
+    if (!isStaff(req.user)) return res.status(403).json({ error: 'Only owners and managers can read whole lists from Fansly' });
+    const kind = String(req.body?.kind || '');
+    if (!FETCH_KINDS.includes(kind)) return res.status(400).json({ error: 'Pick what to read' });
+    const account = await accountFor(req, []);
+    if (!account) return res.status(404).json({ error: 'This Fansly page is not known yet' });
+    const deviceId = String(req.body?.deviceId || '').slice(0, 80);
+    const { data, error } = await supabaseAdmin.from('fansly_fetch_jobs').insert({ organisation_id: req.user.organisationId, account_id: account.id, kind, status: 'running',
+      requested_by: req.user.id, started_by: req.user.id, device_id: deviceId || null, started_at: new Date().toISOString() }).select('id, kind, status').single();
+    if (error) throw error;
+    res.json({ job: data });
+  } catch (e) { fail(res, e, 'start reading from Fansly'); }
+});
+
+// POST /api/fansly/fetch/:id { status: 'running' | 'done' | 'failed' | 'cancelled', progress, error } — the browser reports
+router.post('/fetch/:id', async (req, res) => {
+  try {
+    const { data: job } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, status, organisation_id').eq('id', req.params.id).maybeSingle();
+    if (!job || job.organisation_id !== req.user.organisationId) return res.status(404).json({ error: 'No such request' });
+    const status = ['running', 'done', 'failed', 'cancelled'].includes(req.body?.status) ? req.body.status : 'running';
+    const patch = { status, progress: req.body?.progress && typeof req.body.progress === 'object' ? req.body.progress : undefined, error: req.body?.error ? String(req.body.error).slice(0, 500) : null };
+    if (status === 'running' && job.status === 'pending') Object.assign(patch, { started_by: req.user.id, started_at: new Date().toISOString(), device_id: String(req.body?.deviceId || '').slice(0, 80) || null });
+    if (['done', 'failed', 'cancelled'].includes(status)) patch.finished_at = new Date().toISOString();
+    Object.keys(patch).forEach(k => patch[k] === undefined && delete patch[k]);
+    const { error } = await supabaseAdmin.from('fansly_fetch_jobs').update(patch).eq('id', job.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'record the progress'); }
 });
 
 // ---------- managers: the dashboard ----------
 router.use(requireMinRole('manager'), demoMask);
+
+// POST /api/fansly/accounts/:id/fetch { kind } — ask a browser on this page to read a whole list from Fansly
+router.post('/accounts/:id/fetch', async (req, res) => {
+  try {
+    const kind = String(req.body?.kind || '');
+    if (!FETCH_KINDS.includes(kind)) return res.status(400).json({ error: 'Pick what to read' });
+    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id').eq('id', req.params.id).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
+    const { data: open } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, status').eq('account_id', acc.id).eq('kind', kind).in('status', ['pending', 'running']).limit(1);
+    if (open?.length) return res.json({ job: open[0], already: true });
+    const { data, error } = await supabaseAdmin.from('fansly_fetch_jobs').insert({ organisation_id: req.user.organisationId, account_id: acc.id, kind, requested_by: req.user.id }).select('id, kind, status').single();
+    if (error) throw error;
+    res.json({ job: data });
+  } catch (e) { fail(res, e, 'ask for the read'); }
+});
+
+// POST /api/fansly/fetch/:id/cancel — withdraw a request
+router.post('/fetch/:id/cancel', async (req, res) => {
+  try {
+    const { error } = await supabaseAdmin.from('fansly_fetch_jobs').update({ status: 'cancelled', finished_at: new Date().toISOString() })
+      .eq('id', req.params.id).eq('organisation_id', req.user.organisationId).in('status', ['pending', 'running']);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { fail(res, e, 'cancel the request'); }
+});
 
 const dayStart = (tz = 'Europe/Amsterdam') => {
   // midnight today in the organisation's usual timezone, as an ISO instant
@@ -144,7 +214,7 @@ router.get('/', async (req, res) => {
   const orgId = req.user.organisationId;
   try {
     await F.sweepPresence(orgId).catch(() => {});
-    const { data: accounts, error } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, display_name, followers_count, subscribers_count, status, first_seen_at, last_seen_at, creator_id, creators(name)')
+    const { data: accounts, error } = await supabaseAdmin.from('fansly_accounts').select('id, fansly_account_id, username, display_name, followers_count, subscribers_count, status, first_seen_at, last_seen_at, creator_id, ledger_total, creators(name)')
       .eq('organisation_id', orgId).order('first_seen_at');
     if (error) throw error;
     const since = dayStart();
@@ -198,11 +268,14 @@ router.get('/', async (req, res) => {
       // when the sales ledger was last read (someone opened Fansly's Earnings page with the extension on)
       const { data: lastLedger } = await supabaseAdmin.from('fansly_transactions').select('updated_at').eq('account_id', a.id).eq('source', 'ledger').order('updated_at', { ascending: false }).limit(1);
       const ledger_read_at = lastLedger?.[0]?.updated_at || null;
+      const { count: ledgerRows } = await supabaseAdmin.from('fansly_transactions').select('*', { count: 'exact', head: true }).eq('account_id', a.id).eq('source', 'ledger');
+      const { data: lastJobs } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, kind, status, requested_at, finished_at, progress, error').eq('account_id', a.id).order('requested_at', { ascending: false }).limit(6);
       const { count: msgTotal } = await supabaseAdmin.from('fansly_messages').select('*', { count: 'exact', head: true }).eq('account_id', a.id);
       out.push({
         id: a.id, fansly_account_id: a.fansly_account_id, username: a.username, display_name: a.display_name, page: a.creators?.name || null, creator_id: a.creator_id,
         followers_count: a.followers_count, subscribers_count: a.subscribers_count, status: a.status, first_seen_at: a.first_seen_at, last_seen_at: a.last_seen_at,
-        online: onlineBy.get(a.id) || [], totals: { fans: fansTotal || 0, messages: msgTotal || 0 }, ledger_read_at, ledger_stale: !ledger_read_at || Date.now() - Date.parse(ledger_read_at) > 36 * 3600 * 1000, last14,
+        online: onlineBy.get(a.id) || [], totals: { fans: fansTotal || 0, messages: msgTotal || 0 }, ledger_read_at,
+        ledger: { read: ledgerRows || 0, total: a.ledger_total || null }, jobs: lastJobs || [], ledger_stale: !ledger_read_at || Date.now() - Date.parse(ledger_read_at) > 36 * 3600 * 1000, last14,
         today: {
           sent: rows.filter(r => !r.from_fan && r.type !== 2).length, mass: rows.filter(r => !r.from_fan && r.type === 2).length, received: rows.filter(r => r.from_fan).length,
           fans: new Set(rows.map(r => r.fan_account_id).filter(Boolean)).size,
@@ -437,7 +510,8 @@ router.get('/revenue', async (req, res) => {
       tx.push(...(data || []));
       if (!data || data.length < page) break;
     }
-    const r2 = (n) => Math.round(n * 100) / 100;
+    // sums of exact amounts (tenths of a cent), cut to the cent the way Fansly shows them
+    const r2 = (n) => Math.trunc(Math.round(n * 1000) / 10) / 100;
     const byType = {}, byDay = {}, perFan = new Map();
     for (const t of tx) {
       const net = Math.abs(Number(t.net) || 0) * (t.category === 'refund' ? -1 : 1);

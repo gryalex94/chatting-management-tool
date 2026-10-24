@@ -453,11 +453,13 @@ async function applyEvents(ctx, events) {
             const net = dollars(t.amount);
             transactions.set(str(t.transactionId), { account_id: ctx.account.id, transaction_id: str(t.transactionId), type: t.type, type_label: LABEL[t.type] || String(t.type),
               fan_account_id: str(t.correlationAccountId), item_id: [2110, 2116, 2010, 2016, 7101, 7001].includes(t.type) ? str(t.correlationId) : null,
-              gross: net != null && t.destinationTax ? Math.round(net / (1 - t.destinationTax / 10000) * 100) / 100 : net, net, status: t.status ?? null,
+              gross: net != null && t.destinationTax ? Math.round(net / (1 - t.destinationTax / 10000) * 1000) / 1000 : net, net, status: t.status ?? null,
               created_at_fansly: tsMs(t.createdAt), category: t.type === 15001 ? 'subscription' : t.type === 6101 ? 'refund' : [2110, 2116, 2010, 2016, 7101, 7001].includes(t.type) ? null : 'other',
               source: 'ledger', updated_at: new Date().toISOString(), raw: t });
           }
           for (const a of d.aggregationData?.accounts || []) putFan(fanRowFromAccount(ctx, a));
+          // the list's first page says how many sales Fansly has in all ("121 of 755 read")
+          if (Number(d.total) > 0) Object.assign(accountPatch, { ledger_total: Number(d.total), ledger_total_at: new Date().toISOString() });
           bump('ledger', (d.data || []).length); break;
         }
         default: bump('ignored');

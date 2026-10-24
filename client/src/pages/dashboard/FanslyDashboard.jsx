@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CircleAlert, MonitorSmartphone, Radio } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
+import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -120,9 +121,7 @@ function FanslyOverview() {
             </div>
           </div>
 
-          {a.ledger_stale ? (
-            <p className='mx-4 mb-3 flex items-center gap-1 text-xs text-amber-600'><CircleAlert className='size-3.5' /> Sales come from Fansly&apos;s Earnings page: someone with the extension should open it once a day and scroll its list.</p>
-          ) : null}
+          <ReadFromFansly a={a} onChanged={load} />
 
           {a.last14?.length > 0 && (
             <div className='border-t'>
@@ -176,6 +175,56 @@ function FanslyOverview() {
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+const FETCH_NAME = { ledger: 'Earnings (every sale)', subscribers: 'Subscribers', statistics: 'Statistics' };
+const JOB_STATUS = { pending: 'waiting for a browser on this page', running: 'reading now', done: 'done', failed: 'failed', cancelled: 'stopped' };
+
+/**
+ * "Read from Fansly": ask the browser that is on this page to open Fansly's Earnings,
+ * Subscribers or Statistics page and scroll its list to the end (Fansly's own app loads it,
+ * the extension records it). The chatter there presses Start; a manager's own browser can
+ * start it from the side panel. Also shows how much of the sales list has been read.
+ */
+function ReadFromFansly({ a, onChanged }) {
+  const [busy, setBusy] = useState('');
+  const ask = async (kind) => {
+    setBusy(kind);
+    try {
+      const { data } = await api.post(`/api/fansly/accounts/${a.id}/fetch`, { kind });
+      toast.success(data.already ? 'Already asked: waiting for the browser on this page' : a.online.length ? 'Asked: the chatter on this page gets a Start button in the side panel' : 'Asked: it starts when someone opens this page with the extension');
+      onChanged();
+    } catch (e) { toast.error(e?.response?.data?.error || 'Could not ask'); }
+    finally { setBusy(''); }
+  };
+  const cancel = async (id) => { try { await api.post(`/api/fansly/fetch/${id}/cancel`); onChanged(); } catch (e) { toast.error(e?.response?.data?.error || 'Could not cancel'); } };
+  const led = a.ledger || {};
+  const complete = led.total && led.read >= led.total;
+  const latest = {};
+  for (const j of a.jobs || []) if (!latest[j.kind]) latest[j.kind] = j;
+  return (
+    <div className='mx-4 mb-3 grid gap-2 rounded-md border px-3 py-2 text-sm'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <span className='font-medium'>Read from Fansly:</span>
+        {['ledger', 'subscribers', 'statistics'].map(k => (
+          <Button key={k} size='sm' variant='outline' disabled={!!busy || ['pending', 'running'].includes(latest[k]?.status)} onClick={() => ask(k)}>{busy === k ? 'Asking…' : FETCH_NAME[k]}</Button>
+        ))}
+      </div>
+      <p className={`text-xs ${complete ? 'text-muted-foreground' : 'text-amber-600'}`}>
+        Sales list: {num(led.read || 0)}{led.total ? ` of ${num(led.total)}` : ''} sales read{complete ? ', complete.' : led.total ? `. ${num(led.total - (led.read || 0))} still to read: use "Earnings".` : '. Fansly says how many there are the first time its Earnings page is opened.'}
+      </p>
+      {Object.values(latest).map(j => (
+        <p key={j.id} className='flex flex-wrap items-center gap-1 text-xs text-muted-foreground'>
+          {FETCH_NAME[j.kind]}: {JOB_STATUS[j.status] || j.status}
+          {j.progress?.rows != null && ` · ${num(j.progress.rows)}${j.progress.total ? ` of ${num(j.progress.total)}` : ''} rows`}
+          {j.progress?.note && ` · ${j.progress.note}`}{j.error && <span className='text-red-600'> · {j.error}</span>}
+          {' · '}{fmt(j.finished_at || j.requested_at)}
+          {['pending', 'running'].includes(j.status) && <Button size='sm' variant='ghost' className='h-6 px-2' onClick={() => cancel(j.id)}>Cancel</Button>}
+        </p>
+      ))}
+      <p className='text-xs text-muted-foreground'>It opens Fansly&apos;s own page in a tab of the browser on this page and scrolls the list at a calm pace (a minute or two), like a person would; nothing is sent to Fansly.</p>
     </div>
   );
 }

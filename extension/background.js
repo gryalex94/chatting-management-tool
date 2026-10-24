@@ -131,10 +131,54 @@ async function heartbeat() {
     if (!tabs.length) return;
     const out = await api('/api/fansly/presence', { action: 'heartbeat' });
     if (out.account && out.account.username && !state.accountUsername) state.accountUsername = out.account.username;
+    state.jobs = Array.isArray(out.jobs) ? out.jobs : []; state.staff = !!out.staff;
     state.assigned = out.assigned !== false;
     state.lastError = null; await saveState();
   } catch (e) { if (!e.noSession) { state.lastError = e.message; await saveState(); } }
 }
+
+// ---- "Read from Fansly": open Fansly's own page in a tab and let it scroll its list to the end ----
+// Fansly's app makes every request itself, as when a person scrolls; the extension only records,
+// as always. Started by a click (a manager's button, or the chatter's Start on a manager's request).
+const FETCH_URL = { ledger: 'https://fansly.com/earnings', subscribers: 'https://fansly.com/subscribers', statistics: 'https://fansly.com/statistics' };
+let activeJob = null;                       // { id, kind, tabId, originTabId, progress }
+let lastProgressPost = 0;
+async function startFetch({ jobId, kind }) {
+  if (activeJob) return { error: 'Already reading from Fansly in this browser' };
+  let job;
+  if (jobId) {
+    job = (state.jobs || []).find(j => j.id === jobId);
+    if (!job) return { error: 'That request is gone' };
+  } else {
+    const out = await api('/api/fansly/fetch', { kind });
+    job = out.job;
+  }
+  const [origin] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await chrome.tabs.create({ url: FETCH_URL[job.kind], active: true });
+  activeJob = { id: job.id, kind: job.kind, tabId: tab.id, originTabId: origin ? origin.id : null, progress: { rows: 0, total: null, note: 'opening Fansly' } };
+  state.activeJob = activeJob; await saveState();
+  const { deviceId } = await settings();
+  api(`/api/fansly/fetch/${job.id}`, { status: 'running', deviceId, progress: activeJob.progress }).catch(() => {});
+  return { ok: true, job: activeJob };
+}
+async function fetchProgress(progress) {
+  if (!activeJob) return;
+  activeJob.progress = progress; state.activeJob = activeJob; saveState();
+  if (Date.now() - lastProgressPost > 5000) { lastProgressPost = Date.now(); api(`/api/fansly/fetch/${activeJob.id}`, { status: 'running', progress }).catch(() => {}); }
+}
+async function finishFetch({ status, progress, error }) {
+  if (!activeJob) return;
+  const job = activeJob; activeJob = null; state.activeJob = null;
+  state.lastFetch = { kind: job.kind, status, progress, error: error || null, at: Date.now() };
+  state.jobs = (state.jobs || []).filter(j => j.id !== job.id);
+  await saveState();
+  flush();                                                     // what the page loaded goes to the tool now
+  api(`/api/fansly/fetch/${job.id}`, { status, progress, error: error || null }).catch(() => {});
+  try { await chrome.tabs.remove(job.tabId); } catch { /* closed already */ }
+  if (job.originTabId) { try { await chrome.tabs.update(job.originTabId, { active: true }); } catch { /* gone */ } }
+}
+// the reading tab was closed by hand: the read ends there
+chrome.tabs.onRemoved.addListener((tabId) => { if (activeJob && activeJob.tabId === tabId) finishFetch({ status: 'cancelled', progress: activeJob.progress, error: 'The Fansly tab was closed' }); });
 
 // ---- wiring ----
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
@@ -168,11 +212,17 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     })();
     return true;
   }
+  if (msg && msg.type === 'fetch-start') { startFetch(msg).then(respond).catch(e => respond({ error: e.message })); return true; }
+  if (msg && msg.type === 'fetch-stop') { if (activeJob) chrome.tabs.sendMessage(activeJob.tabId, { type: 'cmt-fetch-stop' }, () => void chrome.runtime.lastError); respond({ ok: true }); return false; }
+  if (msg && msg.type === 'fetch-tab-ready') { respond(activeJob && sender.tab && sender.tab.id === activeJob.tabId ? { job: { id: activeJob.id, kind: activeJob.kind } } : {}); return false; }
+  if (msg && msg.type === 'fetch-progress') { if (activeJob && sender.tab && sender.tab.id === activeJob.tabId) fetchProgress(msg.progress); return false; }
+  if (msg && msg.type === 'fetch-done') { if (activeJob && sender.tab && sender.tab.id === activeJob.tabId) finishFetch(msg); return false; }
   if (msg && msg.type === 'panel-status') {
     (async () => {
       await ready;
       const s = await settings();
-      respond({ signedIn: !!(s.session && s.session.token), user: s.session ? s.session.user : null, accountId: state.accountId, accountUsername: state.accountUsername, version: VERSION });
+      respond({ signedIn: !!(s.session && s.session.token), user: s.session ? s.session.user : null, accountId: state.accountId, accountUsername: state.accountUsername, version: VERSION,
+        jobs: state.jobs || [], staff: !!state.staff, activeJob, lastFetch: state.lastFetch || null });
     })();
     return true;
   }
@@ -194,5 +244,6 @@ const ready = (async () => {
   const s = await get(['queue', 'state']);
   if (Array.isArray(s.queue)) queue = s.queue;
   if (s.state) state = { ...state, ...s.state };
+  if (state.activeJob) activeJob = state.activeJob;           // a read was running when the worker went to sleep
   if (queue.length) scheduleFlush();
 })();

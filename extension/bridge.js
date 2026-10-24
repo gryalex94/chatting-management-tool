@@ -36,8 +36,75 @@
     }
     return ok;
   }
+  // ---- "Read from Fansly": in a tab the extension opened for it, scroll the page's list to its end ----
+  // Fansly's own app loads each next page as the list scrolls (as for a person); page.js records it.
+  let stopped = false;
+  // the list's total ("755 sales") can arrive before a read starts: noted from the first moment
+  let ledgerTotal = null;
+  window.addEventListener('message', (ev) => { if (ev.source === window && ev.data && ev.data[TAG] === 1 && ev.data.kind === 'ledger' && Number(ev.data.data && ev.data.data.total) > 0) ledgerTotal = Number(ev.data.data.total); });
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const humanPause = () => sleep(2200 + Math.random() * 1800);              // 2–4 s between scrolls
+  const visible = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const clickText = (re) => {
+    const el = [...document.querySelectorAll('a, button, [role="button"], .tab, li, span, div')]
+      .find(x => x.childElementCount <= 2 && re.test((x.textContent || '').trim()) && visible(x) && !(document.getElementById('cmt-panel-host') || { contains: () => false }).contains(x));
+    if (el) { el.click(); return true; }
+    return false;
+  };
+  function scrollEverything() {
+    const boxes = [...document.querySelectorAll('*')].filter(el => el.scrollHeight > el.clientHeight + 40 && /(auto|scroll)/.test(getComputedStyle(el).overflowY));
+    for (const el of boxes) { el.scrollTop = el.scrollHeight; el.dispatchEvent(new Event('scroll', { bubbles: true })); }
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    window.dispatchEvent(new Event('scroll'));
+  }
+  async function runFetch(job) {
+    const p = { rows: 0, total: ledgerTotal, pages: 0, note: 'starting' };
+    let lastSize = null, lastLimit = null, seenStats = 0;
+    const want = job.kind === 'ledger' ? 'ledger' : job.kind === 'subscribers' ? 'subscribers' : 'stats';
+    window.addEventListener('message', (ev) => {
+      if (ev.source !== window || !ev.data || ev.data[TAG] !== 1 || ev.data.kind !== want) return;
+      const d = ev.data.data || {};
+      if (want === 'stats') { seenStats += 1; return; }
+      const rows = (want === 'ledger' ? d.data : d.subscriptions) || [];
+      const limit = Number(d.limit) || null;
+      if (want === 'ledger' && Number(d.total) > 0) p.total = Number(d.total);
+      if (want === 'ledger' && !p.total && ledgerTotal) p.total = ledgerTotal;
+      if (limit && limit <= 5) return;                                      // the small "recent purchases" box, not the list
+      p.rows += rows.length; p.pages += 1; lastSize = rows.length; lastLimit = limit;
+    });
+    const report = (note) => { p.note = note; try { chrome.runtime.sendMessage({ type: 'fetch-progress', progress: { ...p } }); } catch { /* worker restarting */ } };
+    const done = (status, note, error) => { p.note = note; try { chrome.runtime.sendMessage({ type: 'fetch-done', status, progress: { ...p }, error }); } catch { /* ignore */ } };
+    report('waiting for Fansly to load');
+    await sleep(5000);
+    if (job.kind === 'statistics') {
+      // the page loads its summary and top fans by itself; the 90-day view gives a second, longer snapshot
+      for (let i = 0; i < 10 && !seenStats; i++) await sleep(1000);
+      if (clickText(/^90 days$/i)) { report('reading the 90-day view'); await sleep(5000); }
+      return done(seenStats ? 'done' : 'failed', seenStats ? 'statistics read' : 'the statistics did not load', seenStats ? null : 'Fansly\'s statistics did not load in this tab');
+    }
+    const end = Date.now() + 10 * 60_000;
+    let still = 0, before = -1, viewAllTried = false;
+    while (!stopped && Date.now() < end) {
+      // the whole list sits behind "View all" on the statistics page; elsewhere it is on the page itself
+      if (!viewAllTried && p.pages === 0) { viewAllTried = true; if (clickText(/^view all\b/i)) { report('opening the full list'); await sleep(4000); } }
+      scrollEverything();
+      clickText(/^(show|load) more$/i);
+      await humanPause();
+      if (lastLimit && lastSize != null && lastSize < lastLimit) return done('done', 'reached the end of the list');
+      if (p.total && p.rows >= p.total) return done('done', 'every sale read');
+      still = p.rows === before ? still + 1 : 0;
+      before = p.rows;
+      report(p.pages ? 'scrolling' : 'looking for the list');
+      if (still >= 6) return done(p.pages ? 'done' : 'failed', p.pages ? 'nothing more loaded' : 'no list found', p.pages ? null : 'No list loaded on this page. Open it by hand and scroll it to the end.');
+    }
+    done(stopped ? 'cancelled' : 'done', stopped ? 'stopped' : 'time limit (10 min) reached');
+  }
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     if (msg && msg.type === 'cmt-insert' && typeof msg.text === 'string') { respond({ ok: insert(msg.text) }); return false; }
+    if (msg && msg.type === 'cmt-fetch-stop') { stopped = true; respond({ ok: true }); return false; }
     return false;
   });
+  // is this the tab the extension opened for a read? then do it
+  const askJob = () => { try { chrome.runtime.sendMessage({ type: 'fetch-tab-ready' }, (r) => { void chrome.runtime.lastError; if (r && r.job) runFetch(r.job); }); } catch { /* ignore */ } };
+  if (document.readyState === 'complete') askJob(); else window.addEventListener('load', askJob, { once: true });
 })();

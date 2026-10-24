@@ -51,6 +51,19 @@ Inside the page: drag its left edge to resize, `›` collapses it to a strip, `�
 switches between making room for it and laying it over the page.
 Notes and the summary stay in the tool; nothing is written to Fansly.
 
+## Read from Fansly (owners and managers)
+
+On the tool's Fansly dashboard (Pages), "Read from Fansly" asks the browser on that
+page to read a whole list: Earnings (every sale), Subscribers or Statistics. The
+chatter there gets a Start button in the side panel; an owner or manager signed into
+the extension has the same three buttons in the panel and starts it straight away.
+
+It opens Fansly's own page in a new tab, opens the full list ("View all") and scrolls
+it to the end at a calm pace (2–4 s per scroll, at most 10 minutes), then closes the
+tab and goes back to the chat. Fansly's app loads every page itself, as when a person
+scrolls; the extension records it as always. The dashboard shows "Sales list: 121 of
+755 read" until the list is complete.
+
 ## Files
 
 - `page.js`: runs inside the Fansly page and copies the answers Fansly sends the page.

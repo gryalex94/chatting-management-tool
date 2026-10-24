@@ -57,7 +57,7 @@
       if (p === '/message' && r && r.messages) return { kind: 'messages', data: { groupId: q.groupId || null, before: q.before || null, limit: q.limit || null, messages: r.messages.map(slimMessage), accountMedia: (r.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.accountMediaBundles || []).map(slimBundle), tips: r.tips || [], accountMediaOrders: r.accountMediaOrders || [] } };
       if (/^\/message\/broadcast\/stats(\/deleted)?$/.test(p) && r) return { kind: 'broadcasts', data: { deleted: /deleted$/.test(p), items: firstList(r) } };
       if (p === '/message/unread' && r) return { kind: 'unread', data: { messageInteractions: r.messageInteractions || [] } };
-      if (p === '/subscribers' && r) return { kind: 'subscribers', data: { stats: r.stats, subscriptions: r.subscriptions || [] } };
+      if (p === '/subscribers' && r) return { kind: 'subscribers', data: { stats: r.stats, subscriptions: r.subscriptions || [], limit: q.limit || null } };
       // Fansly's own notes on fans, the fan lists, followers, notifications, statistics: mirrored as shown
       if (/^\/notes\/?$/.test(p) && r) return { kind: 'fnotes', data: { notes: listOf(r, 'notes', 'data'), query: q } };
       if (p === '/lists/account' && r) return { kind: 'lists', data: { lists: listOf(r, 'lists', 'data') } };
@@ -66,7 +66,7 @@
       if (p === '/notifications' && r) return { kind: 'notifications', data: { notifications: listOf(r, 'notifications', 'data'), accounts: listOf(r && r.aggregationData || {}, 'accounts').map(slimAccount) } };
       if (p === '/account/stats/summary' && r) return { kind: 'stats', data: { kind: 'summary', after: q.after || null, before: q.before || null, stats: r } };
       if (p === '/account/stats/fans/top' && r) return { kind: 'stats', data: { kind: 'top_fans', after: q.after || null, before: q.before || null, stats: r } };
-      if (p === '/account/wallets/earnings/transactions' && r) return { kind: 'ledger', data: { total: r.total, data: r.data || [], aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), accountMedia: (r.aggregationData && r.aggregationData.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.aggregationData && r.aggregationData.accountMediaBundles || []).map(slimBundle), subscriptionHistory: r.aggregationData && r.aggregationData.subscriptionHistory || [] } } };
+      if (p === '/account/wallets/earnings/transactions' && r) return { kind: 'ledger', data: { total: r.total, limit: q.limit || null, data: r.data || [], aggregationData: { accounts: (r.aggregationData && r.aggregationData.accounts || []).map(slimAccount), accountMedia: (r.aggregationData && r.aggregationData.accountMedia || []).map(slimAccountMedia), accountMediaBundles: (r.aggregationData && r.aggregationData.accountMediaBundles || []).map(slimBundle), subscriptionHistory: r.aggregationData && r.aggregationData.subscriptionHistory || [] } } };
       return null;
     }
     if (method === 'POST') {
