@@ -87,10 +87,28 @@
     if (Array.isArray(r)) out.response = r.length; else if (r && typeof r === 'object') { add(r, ''); if (r.aggregationData) add(r.aggregationData, 'aggregationData.'); if (r.total != null) out.total = r.total; }
     return out;
   };
+  // the outline of a request or answer, for building from Fansly's real data (logged only while switched on):
+  // field names and kinds of value; numbers only for settings and money (price, limit, type…), never texts, names or ids
+  const KEEP_NUM = /^(price|amount|.*price|.*amount|limit|offset|type|.*type|status|permission.*|flags?|count|total|duration|.*count|width|height|mimetype|access|visibility|.*permissions?)$/i;
+  function shapeOf(v, key = '', depth = 0) {
+    if (v == null) return null;
+    if (Array.isArray(v)) return v.length ? [shapeOf(v[0], key, depth + 1), `×${v.length}`] : [];
+    if (typeof v === 'object') {
+      if (depth > 5) return '{…}';
+      const o = {};
+      for (const [k, x] of Object.entries(v).slice(0, 60)) o[k] = shapeOf(x, k, depth + 1);
+      return o;
+    }
+    if (typeof v === 'number') return KEEP_NUM.test(key) ? v : 'number';
+    if (typeof v === 'boolean') return v;
+    if (typeof v === 'string') return /^\d{10,25}$/.test(v) ? 'id' : `text(${v.length})`;
+    return typeof v;
+  }
   const handle = (method, url, text, sent, status) => {
     if (!API.test(url)) return;
     let body; try { body = JSON.parse(text); } catch { return; }
-    post('net', url, { method: String(method || 'GET').toUpperCase(), path: path(url), query: query(url), status: status || null, page: location.pathname, rows: lists(body && body.response) });
+    post('net', url, { method: String(method || 'GET').toUpperCase(), path: path(url), query: query(url), status: status || null, page: location.pathname, rows: lists(body && body.response),
+      shape: { sent: shapeOf(parseBody(sent)), got: shapeOf(body && body.response) } });
     const got = pick(String(method || 'GET').toUpperCase(), url, body, sent);
     if (got) post(got.kind, url, got.data);
     // purchases riding along on any other answer (the app caches them from aggregationData too)

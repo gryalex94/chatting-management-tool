@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Chatting Manager for Fansly",
   "description": "Records the Fansly chats a chatter works in, shows the fan's notes, numbers and scripts beside the chat. Never sends anything to Fansly.",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "permissions": [
     "alarms",
     "clipboardWrite",

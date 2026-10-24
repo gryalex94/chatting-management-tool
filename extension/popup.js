@@ -33,7 +33,7 @@ async function render() {
   const logging = s.netLogUntil > Date.now();
   $('netlog').textContent = logging ? 'Stop logging requests' : 'Log Fansly\'s requests (15 min)';
   $('netlogState').hidden = !logging;
-  $('netlogState').textContent = logging ? `Logging what Fansly's page requests (addresses and counts only) for ${Math.ceil((s.netLogUntil - Date.now()) / 60000)} more min.` : '';
+  $('netlogState').textContent = logging ? `Logging what Fansly's page requests and which buttons are clicked (outlines only: no texts or names) for ${Math.ceil((s.netLogUntil - Date.now()) / 60000)} more min.` : '';
   $('statusError').textContent = s.lastError || (s.needAccount ? 'Open the Messages page once so the account is known.' : '')
     || (s.assigned === false ? 'You are not on the roster for this page. Your messages are still recorded under your name, but the side panel stays closed. Ask a manager to add you on the Shifts page.' : '');
 }

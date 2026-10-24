@@ -186,6 +186,24 @@
     }
     done(stopped ? 'cancelled' : 'done', stopped ? 'stopped' : 'time limit (10 min) reached');
   }
+  // ---- the request log (popup switch) also notes which controls are clicked: their label, never what is typed ----
+  // (the worker keeps these only while logging is on, like the requests)
+  document.addEventListener('click', (ev) => {
+    const host = document.getElementById('cmt-panel-host');
+    const el = ev.target && ev.target.closest && ev.target.closest('button, a, input, label, select, [role="button"], [role="menuitem"], [role="tab"], [tabindex]');
+    if (!el || (host && host.contains(el))) return;
+    const label = (x) => String(x || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const ui = {
+      tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || null, type: el.getAttribute('type') || null,
+      aria: label(el.getAttribute('aria-label')), title: label(el.getAttribute('title')), placeholder: label(el.getAttribute('placeholder')),
+      classes: String(el.className && el.className.baseVal != null ? el.className.baseVal : el.className || '').split(/\s+/).filter(Boolean).slice(0, 4).join(' '),
+      // a control's own words (Vault, Add, Price…); a long text is something else (a message): left out
+      text: el.matches('input, select') ? null : (label(el.innerText).length <= 30 ? label(el.innerText) : null),
+      icon: (el.querySelector('i[class], svg use, mat-icon') && label(el.querySelector('i[class], svg use, mat-icon').getAttribute('class') || el.querySelector('svg use')?.getAttribute('href') || el.querySelector('mat-icon')?.textContent)) || null,
+    };
+    try { chrome.runtime.sendMessage({ type: 'fansly-event', kind: 'net', url: location.href, data: { method: 'UI', path: 'click', query: {}, status: null, page: location.pathname, rows: {}, ui }, at: Date.now() }); } catch { /* ignore */ }
+  }, true);
+
   // ---- the translator: his message's English, shown under it in Fansly's own chat ----
   // The panel sends [{ text, en }] for the open chat. Each of his bubbles whose text is exactly one of
   // those gets a small "EN: …" line under its text (his text itself is left as it is). Only bubbles in

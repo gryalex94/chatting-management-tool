@@ -418,7 +418,8 @@ async function applyEvents(ctx, events) {
         }
         case 'net': {                                      // the request log (popup switch): addresses and counts only
           netRows.push({ organisation_id: ctx.user.organisationId, account_id: ctx.account.id, user_id: ctx.user.id, at: new Date(e.at || Date.now()).toISOString(),
-            page: String(d.page || '').slice(0, 200), method: String(d.method || '').slice(0, 10), path: String(d.path || '').slice(0, 300), query: d.query || {}, status: d.status ?? null, rows: d.rows || {} });
+            page: String(d.page || '').slice(0, 200), method: String(d.method || '').slice(0, 10), path: String(d.path || '').slice(0, 300), query: d.query || {}, status: d.status ?? null, rows: d.rows || {},
+            ...(d.shape ? { shape: d.shape } : {}), ...(d.ui ? { ui: d.ui } : {}) });
           break;
         }
         case 'tiers': { for (const t of d.tiers || []) takeTier(t.id, t.name, t.color, t.price); bump('tiers', (d.tiers || []).length); break; }
