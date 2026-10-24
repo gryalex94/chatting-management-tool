@@ -147,11 +147,19 @@
   function applyLayout() {
     if (SIDE) return;
     const w = st.signedIn ? (st.collapsed ? STRIP_W : st.width) : STRIP_W;
-    pushStyle.textContent = st.push && !st.collapsed && st.signedIn
-      ? `html { margin-right: ${w}px !important; } body { width: auto !important; }`
-      : '';
+    const room = st.push && !st.collapsed && st.signedIn;
+    // Fansly pins its top bar and chat window to the screen's edges, so a margin on the page moved nothing.
+    // In the chats the whole app gets a box that stops where the panel starts (its pinned parts then stay
+    // inside it); elsewhere (the feed scrolls the page itself) the margin as before
+    pushStyle.textContent = !room ? ''
+      : /^\/messages(\/|$)/.test(location.pathname)
+        ? `app-root { position: fixed !important; top: 0 !important; left: 0 !important; bottom: 0 !important; right: ${w}px !important; width: auto !important; height: auto !important; overflow: auto !important; transform: translateZ(0); }`
+        : `html { margin-right: ${w}px !important; } body { width: auto !important; }`;
     if (!pushStyle.isConnected) (document.head || document.documentElement).append(pushStyle);
   }
+  // Fansly changes page without loading one: the room follows
+  let layoutPath = location.pathname;
+  setInterval(() => { if (location.pathname !== layoutPath) { layoutPath = location.pathname; applyLayout(); } }, 500);
 
   // ---------- typing a script into Fansly's message box (the chatter sends it) ----------
   function messageBox() {
