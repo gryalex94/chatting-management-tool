@@ -6,7 +6,7 @@ const ago = (t) => { if (!t) return 'never'; const s = Math.round((Date.now() - 
 async function render() {
   const st = await send({ type: 'popup-status' });
   if (!st) return;
-  $('version').textContent = `Extension ${st.version} · browser ${st.deviceId.slice(0, 8)}`;
+  $('version').textContent = $('loginVersion').textContent = `Extension ${st.version} · browser ${st.deviceId.slice(0, 8)}`;
   if (!st.session) {
     $('login').hidden = false; $('status').hidden = true;
     return;

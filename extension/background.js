@@ -195,6 +195,7 @@ chrome.tabs.onRemoved.addListener((tabId) => { if (activeJob && activeJob.tabId 
 const STAFF = new Set(['manager', 'head_manager', 'admin', 'owner']);
 const OPEN_SITES = ['fansly.com', new URL(DEFAULT_API).hostname, 'adspower.net', 'adspower.com'];
 async function lockedNow() {
+  await ready;                                   // the saved manager/chatter answer, after the worker wakes
   const { session } = await settings();
   return !(session && session.token && state.staff === true);
 }
@@ -206,6 +207,16 @@ async function applyLock() {
       addRules: locked ? [{ id: 1, priority: 1, action: { type: 'block' }, condition: { resourceTypes: ['main_frame'], excludedRequestDomains: OPEN_SITES } }] : [],
     });
   } catch (e) { console.warn('[cmt] site lock:', e.message); }
+  // the block stops new pages only: a website already open goes to the chats
+  if (locked) chrome.tabs.query({}, (tabs) => {
+    void chrome.runtime.lastError;
+    for (const t of tabs || []) {
+      let host = ''; try { host = new URL(t.url || t.pendingUrl || '').hostname; } catch { continue; }
+      if (!/^https?:/.test(t.url || t.pendingUrl || '')) continue;   // Chrome's own pages and ours
+      if (OPEN_SITES.some(d => host === d || host.endsWith(`.${d}`))) continue;
+      chrome.tabs.update(t.id, { url: 'https://fansly.com/messages' }, () => void chrome.runtime.lastError);
+    }
+  });
   chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => {
     void chrome.runtime.lastError;
     for (const t of tabs || []) try { chrome.tabs.sendMessage(t.id, { type: 'cmt-secure', chatOnly: locked }, () => void chrome.runtime.lastError); } catch { /* ignore */ }
@@ -308,3 +319,4 @@ const ready = (async () => {
   if (state.activeJob) activeJob = state.activeJob;           // a read was running when the worker went to sleep
   if (queue.length) scheduleFlush();
 })();
+ready.then(() => applyLock());                     // every time the worker starts, not only when Chrome does
