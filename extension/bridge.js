@@ -91,6 +91,14 @@
       // the page loads its summary and top fans by itself; the 90-day view gives a second, longer snapshot
       for (let i = 0; i < 10 && !seenStats; i++) await sleep(1000);
       if (clickText(/^90 days$/i)) { report('reading the 90-day view'); await sleep(5000); }
+      // Overview first, then the Earnings tab (its own summary and top fans)
+      if (seenStats && !/\/creator\/stats\/earnings/.test(location.pathname) && !sessionStorage.getItem('cmtStatsEarnings')) {
+        sessionStorage.setItem('cmtStatsEarnings', '1');
+        report('reading the Earnings tab');
+        location.href = 'https://fansly.com/creator/stats/earnings';
+        return;                                                                // this tab reloads and the read goes on there
+      }
+      sessionStorage.removeItem('cmtStatsEarnings');
       return done(seenStats ? 'done' : 'failed', seenStats ? 'statistics read' : 'the statistics did not load', seenStats ? null : 'Fansly\'s statistics did not load in this tab');
     }
     const end = Date.now() + 10 * 60_000;
