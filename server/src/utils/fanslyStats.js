@@ -9,6 +9,41 @@
  * Nothing here talks to Fansly.
  */
 const { supabaseAdmin } = require('./supabase');
+const R = require('./roster');
+const infloww = require('../integrations/infloww');
+
+// ---------- who was on shift (the Fansly roster) ----------
+// The roster's clock is Amsterdam's; a tip's real time is turned into it (as payroll does).
+const amsClock = (iso) => infloww.toStoreTime(new Date(iso)).getTime();
+const clockDay = (t) => new Date(t).toISOString().slice(0, 10);
+const toMin = (t) => { const [h, m] = String(t).split(':').map(Number); return h * 60 + (m || 0); };
+const onRosterOn = (a, date) => (!a.created_at || clockDay(amsClock(a.created_at)) <= date) && (a.is_active !== false || (!!a.updated_at && clockDay(amsClock(a.updated_at)) > date));
+const rosterCache = new Map();
+async function fanslyRoster(orgId) {
+  const hit = rosterCache.get(orgId);
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.r;
+  const today = clockDay(amsClock(new Date().toISOString()));
+  const r = await R.loadRoster(orgId, '2024-01-01', today, 'fansly', { removed: true }).catch(() => ({ ready: false, slots: [], assignments: [], changes: [] }));
+  rosterCache.set(orgId, { at: Date.now(), r });
+  return r;
+}
+/** The chatters rostered on this page's Fansly shift at that moment (none before anyone was put on the roster). */
+function onShiftAt(roster, creatorId, iso) {
+  if (!roster?.ready || !creatorId || !iso) return [];
+  const t = amsClock(iso), date = clockDay(t);
+  const slotById = Object.fromEntries((roster.slots || []).map(x => [x.id, x]));
+  const out = new Set();
+  for (const d of [addDays(date, -1), date]) {
+    for (const e of R.effectiveDay(d, roster.assignments.filter(a => onRosterOn(a, d)), roster.changes).entries) {
+      const slot = slotById[e.shift_id];
+      if (!slot || !(e.creator_ids || []).includes(creatorId)) continue;
+      const [a, z] = R.windowIn(slot, e.from, e.to);
+      const start = Date.parse(`${d}T00:00:00Z`) + toMin(slot.start) * 60000;
+      if (t >= start + a * 60000 && t < start + z * 60000) out.add(e.chatter_id);
+    }
+  }
+  return [...out];
+}
 
 const TZ = 'Europe/Amsterdam';
 const DAY_MS = 86400000;
@@ -40,10 +75,12 @@ const addDays = (day, n) => new Date(Date.parse(`${day}T12:00:00Z`) + n * DAY_MS
  *  mass_ppv   'sender' (default): a PPV bought from a mass message is credited to whoever sent it; 'nobody': page revenue only
  *  late_days  null (default): a chat PPV bought any time later is credited to its sender, on the day of purchase;
  *             a number: bought more than that many days after it was sent → credited to nobody
- *  tip_hours  12 (default): a tip goes to the last chatter who wrote to him within this many hours
- * Refunds always come off the chatter the refunded sale was credited to.
+ *  tip_hours  1 (default): a tip goes to the last chatter who wrote to him through the extension within this many
+ *             hours; with nobody, to whoever is rostered on that page's Fansly shift at that moment (shared if several)
+ * Only what went through the extension is credited: a PPV whose message has no chatter (sent from a browser
+ * without the extension, or recorded from history) is credited to nobody. Refunds come off whoever got the sale.
  */
-const DEFAULT_RULES = { mass_ppv: 'sender', late_days: null, tip_hours: 12 };
+const DEFAULT_RULES = { mass_ppv: 'sender', late_days: null, tip_hours: 1 };
 function rulesOf(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const late = Number(r.late_days);
@@ -51,7 +88,7 @@ function rulesOf(raw) {
   return {
     mass_ppv: r.mass_ppv === 'nobody' ? 'nobody' : 'sender',
     late_days: Number.isFinite(late) && late > 0 ? Math.round(late) : null,
-    tip_hours: Number.isFinite(tip) && tip > 0 && tip <= 72 ? tip : 12,
+    tip_hours: Number.isFinite(tip) && tip > 0 && tip <= 72 ? tip : 1,
   };
 }
 async function rulesFor(accountId) {
@@ -68,6 +105,8 @@ async function rulesFor(accountId) {
  */
 async function matchSales(accountId) {
   const rules = await rulesFor(accountId);
+  const { data: acct } = await supabaseAdmin.from('fansly_accounts').select('organisation_id, creator_id').eq('id', accountId).maybeSingle();
+  const roster = acct ? await fanslyRoster(acct.organisation_id) : null;
   const open = await all(() => supabaseAdmin.from('fansly_transactions')
     .select('transaction_id, type, fan_account_id, item_id, net, created_at_fansly, category, credited_message_id')
     .eq('account_id', accountId).is('credited_message_id', null).or('category.is.null,category.not.in.(subscription,refund)').order('transaction_id'));
@@ -112,8 +151,11 @@ async function matchSales(accountId) {
       // the chatter who last wrote to him (with a known sender) before the tip, within 12 hours
       const before = (creatorByFan.get(t.fan_account_id) || []).filter(m => m.sent_at <= t.created_at_fansly && Date.parse(t.created_at_fansly) - Date.parse(m.sent_at) < rules.tip_hours * 3600000);
       const last = [...before].reverse().find(m => m.chatter_id) || null;
-      if (onMsg || last) patch = { category: 'chat_tip', credited_message_id: (onMsg || last).message_id, credited_chatter_id: last?.chatter_id || null, credited_rule: last ? 'last_writer_before_tip' : 'tip_without_chatter', message_id: onMsg?.message_id || null };
-      else if (t.category !== 'chat_tip') patch = { category: 'chat_tip', credited_rule: 'tip_chat_not_recorded' };
+      // nobody wrote to him through the extension within the window: whoever is rostered on the page's shift then
+      const shift = last ? [] : onShiftAt(roster, acct?.creator_id, t.created_at_fansly);
+      const ids = last ? [last.chatter_id] : shift;
+      patch = { category: 'chat_tip', credited_message_id: (onMsg || last)?.message_id || null, credited_chatter_id: ids[0] || null, credited_chatter_ids: ids.length ? ids : null,
+        credited_rule: last ? 'last_writer_within_window' : ids.length ? (ids.length > 1 ? 'on_shift_shared' : 'on_shift') : 'nobody_writing_or_on_shift', message_id: onMsg?.message_id || null };
     }
     if (patch) txUpdates.push({ transaction_id: t.transaction_id, ...patch });
   }
@@ -155,7 +197,7 @@ async function creditRefunds(accountId) {
  * recount every day that has messages or sales.
  */
 async function reapplyRules(accountId) {
-  await supabaseAdmin.from('fansly_transactions').update({ category: null, credited_chatter_id: null, credited_message_id: null, credited_rule: null, message_id: null })
+  await supabaseAdmin.from('fansly_transactions').update({ category: null, credited_chatter_id: null, credited_chatter_ids: null, credited_message_id: null, credited_rule: null, message_id: null })
     .eq('account_id', accountId).in('category', ['chat_ppv', 'chat_tip', 'wall']);
   await supabaseAdmin.from('fansly_transactions').update({ credited_chatter_id: null, credited_message_id: null, credited_rule: null }).eq('account_id', accountId).eq('category', 'refund');
   const res = await matchSales(accountId);
@@ -179,7 +221,7 @@ async function rebuildDaily(accountId, days) {
       .select('message_id, group_id, fan_account_id, from_fan, type, price, chatter_id, attribution, sent_at, sold_at')
       .eq('account_id', accountId).gte('sent_at', new Date(start.getTime() - DAY_MS).toISOString()).lt('sent_at', end.toISOString()).order('sent_at').order('message_id'));
     const tx = await all(() => supabaseAdmin.from('fansly_transactions')
-      .select('transaction_id, category, net, credited_chatter_id, credited_rule, created_at_fansly')
+      .select('transaction_id, category, net, credited_chatter_id, credited_chatter_ids, credited_rule, created_at_fansly')
       .eq('account_id', accountId).gte('created_at_fansly', start.toISOString()).lt('created_at_fansly', end.toISOString()).order('transaction_id'));
 
     const rows = new Map();
@@ -204,6 +246,12 @@ async function rebuildDaily(accountId, days) {
       if (since) r.replies.push((Date.parse(m.sent_at) - Date.parse(since)) / 1000);
     }
     for (const t of tx) {
+      // a tip shared by several chatters on shift: each gets an equal part
+      if (t.category === 'chat_tip' && Array.isArray(t.credited_chatter_ids) && t.credited_chatter_ids.length > 1) {
+        const part = Math.abs(Number(t.net) || 0) / t.credited_chatter_ids.length;
+        for (const cid of t.credited_chatter_ids) row(cid).tips_net += part;
+        continue;
+      }
       const r = row(t.credited_chatter_id);
       const net = Math.abs(Number(t.net) || 0);
       if (t.category === 'chat_ppv') { r.ppv_net += net; if (t.credited_rule === 'sender_of_mass_message') r.mass_ppv_net += net; }
@@ -263,4 +311,4 @@ async function refreshAll(orgId = null, back = 3) {
   return (data || []).length;
 }
 
-module.exports = { matchSales, rebuildDaily, reapplyRules, rulesOf, DEFAULT_RULES, schedule, refreshAll, amsDay, dayStartUtc, addDays };
+module.exports = { onShiftAt, matchSales, rebuildDaily, reapplyRules, rulesOf, DEFAULT_RULES, schedule, refreshAll, amsDay, dayStartUtc, addDays };

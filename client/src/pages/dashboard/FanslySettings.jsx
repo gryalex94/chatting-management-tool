@@ -71,8 +71,9 @@ export default function FanslySettings({ account, onClose, canEdit }) {
                 <Input className='w-20' type='number' min='1' max='72' value={s.credit_rules.tip_hours} disabled={!canEdit} onChange={e => rule('tip_hours', e.target.value)} />
                 <span>hours</span>
               </div>
+              <p className='text-xs text-muted-foreground'>Only messages sent through the extension with a chatter signed in count. Nobody wrote to him in that time: it is shared between the chatters on shift on this page then; nobody on shift: nobody gets it.</p>
             </div>
-            <p className='text-xs text-muted-foreground'>Wall purchases, subscriptions, renewals, stream tickets and referrals are never credited to a chatter. A refund comes off whoever the sale was credited to.</p>
+            <p className='text-xs text-muted-foreground'>A PPV is credited only when it went out through the extension with a chatter signed in, so sales of PPVs sent before that go to nobody. Wall purchases, subscriptions, renewals, stream tickets and referrals are never credited to a chatter. A refund comes off whoever the sale was credited to.</p>
             <div className='grid gap-1.5 rounded-md border px-3 py-2 text-sm'>
               <Label>Creator profile for suggested replies</Label>
               {s.profile?.has

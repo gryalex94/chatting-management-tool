@@ -383,6 +383,21 @@ panel.post('/scripts/:id/use', async (req, res) => {
   } catch (e) { fail(res, e, 'record the script'); }
 });
 
+// ---------- "open this chat" from the Messages dashboard, for this person's own browser ----------
+
+// GET /api/fansly/panel/commands?account=<fansly id> → chats to open here (asked from the dashboard by this person)
+panel.get('/commands', async (req, res) => {
+  try {
+    const account = await accountOf(req, req.query.account);
+    if (!account) return res.json({ open: [] });
+    const { data } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, progress, requested_at').eq('account_id', account.id).eq('kind', 'open_chat')
+      .eq('target_user', req.user.id).eq('status', 'pending').gte('requested_at', new Date(Date.now() - 5 * 60_000).toISOString()).order('requested_at').limit(3);
+    const ids = (data || []).map(j => j.id);
+    if (ids.length) await supabaseAdmin.from('fansly_fetch_jobs').update({ status: 'done', finished_at: new Date().toISOString() }).in('id', ids);
+    res.json({ open: (data || []).map(j => ({ id: j.id, group_id: j.progress?.group_id })).filter(x => /^\d{5,25}$/.test(String(x.group_id || ''))) });
+  } catch (e) { fail(res, e, 'read the requests'); }
+});
+
 // ---------- one fan across the agency: links to his OnlyFans and Fanvue accounts ----------
 
 // GET /api/fansly/panel/link-search?account=&q= → fans on OnlyFans and Fanvue to link him to

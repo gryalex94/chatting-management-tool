@@ -8,7 +8,7 @@ import { num } from '@/utils/numbers';
 const money = (n) => (n == null ? '·' : `$${Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const date = (iso) => (iso ? new Date(iso).toLocaleDateString([], { day: 'numeric', month: 'short' }) : '·');
 const TYPE = [
-  ['chat_ppv', 'Chat PPVs'], ['mass_ppv', 'Mass message PPVs'], ['chat_tip', 'Tips in chat'], ['wall', 'Wall and posts'],
+  ['chat_ppv', 'Chat PPVs'], ['mass_ppv', 'Mass message PPVs'], ['chat_tip', 'Tips in chat'], ['wall', 'Wall, posts and other sales'],
   ['subscription', 'Subscriptions'], ['other', 'Other'], ['unsorted', 'Not sorted yet'], ['refund', 'Refunds'],
 ];
 

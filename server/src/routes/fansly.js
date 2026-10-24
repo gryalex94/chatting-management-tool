@@ -136,7 +136,7 @@ const isStaff = (u) => ['manager', 'head_manager', 'admin', 'owner'].includes(u?
 async function jobsFor(orgId, accountId) {
   if (!accountId) return [];
   const { data } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, kind, status, requested_at, progress, device_id, users:requested_by(name)')
-    .eq('organisation_id', orgId).eq('account_id', accountId).in('status', ['pending', 'running']).order('requested_at').limit(5);
+    .eq('organisation_id', orgId).eq('account_id', accountId).in('kind', FETCH_KINDS).in('status', ['pending', 'running']).order('requested_at').limit(5);
   return (data || []).map(j => ({ id: j.id, kind: j.kind, status: j.status, requested_at: j.requested_at, progress: j.progress, device_id: j.device_id, by: j.users?.name || null }));
 }
 
@@ -269,7 +269,7 @@ router.get('/', async (req, res) => {
       const { data: lastLedger } = await supabaseAdmin.from('fansly_transactions').select('updated_at').eq('account_id', a.id).eq('source', 'ledger').order('updated_at', { ascending: false }).limit(1);
       const ledger_read_at = lastLedger?.[0]?.updated_at || null;
       const { count: ledgerRows } = await supabaseAdmin.from('fansly_transactions').select('*', { count: 'exact', head: true }).eq('account_id', a.id).eq('source', 'ledger');
-      const { data: lastJobs } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, kind, status, requested_at, finished_at, progress, error').eq('account_id', a.id).order('requested_at', { ascending: false }).limit(6);
+      const { data: lastJobs } = await supabaseAdmin.from('fansly_fetch_jobs').select('id, kind, status, requested_at, finished_at, progress, error').eq('account_id', a.id).in('kind', FETCH_KINDS).order('requested_at', { ascending: false }).limit(6);
       const { count: msgTotal } = await supabaseAdmin.from('fansly_messages').select('*', { count: 'exact', head: true }).eq('account_id', a.id);
       out.push({
         id: a.id, fansly_account_id: a.fansly_account_id, username: a.username, display_name: a.display_name, page: a.creators?.name || null, creator_id: a.creator_id,
@@ -312,6 +312,29 @@ function messageFilters(req) {
   };
 }
 
+/** The Messages dashboard's filters (second version, like Infloww's). Days are Amsterdam days. */
+function messageFiltersV2(req) {
+  const q = req.query || {};
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+  const from = day(q.from), to = day(q.to);
+  const uuid = (v) => (/^[0-9a-f-]{36}$/i.test(String(v || '')) ? String(v) : null);
+  const money = (v) => (v === '' || v == null || isNaN(Number(v)) ? null : Number(v));
+  const pick = (v, list, dflt) => (list.includes(v) ? v : dflt);
+  return {
+    p_org: req.user.organisationId,
+    p_account: uuid(q.account),
+    p_chatter: q.chatter === 'none' ? 'none' : uuid(q.chatter),
+    p_from: from ? Stats.dayStartUtc(from).toISOString() : null,
+    p_to: to ? Stats.dayStartUtc(Stats.addDays(to, 1)).toISOString() : null,
+    p_q: String(q.q || '').trim().slice(0, 100) || null,
+    p_fan: /^\d{5,25}$/.test(String(q.fan || '')) ? String(q.fan) : null,
+    p_price_min: money(q.price_min), p_price_max: money(q.price_max),
+    p_purchased: pick(q.purchased, ['all', 'yes', 'no', 'ppv'], 'all'),
+    p_status: pick(q.status, ['all', 'sent', 'unsent'], 'all'),
+    p_replied: pick(q.replied, ['all', 'no'], 'all'),
+  };
+}
+
 /** Page names, chatter names and fan names for a list of message rows. */
 async function decorate(orgId, rows) {
   const accIds = [...new Set(rows.map(r => r.account_id))];
@@ -338,6 +361,8 @@ async function decorate(orgId, rows) {
       delivered_at: r.delivered_at, read_at: r.read_at, replied_at: r.replied_at, waited_s: r.waited_s,
       chatter_id: r.chatter_id, chatter: r.chatter_id ? chatter.get(r.chatter_id) || 'Unknown' : null, attribution: r.attribution,
       unsent_at: r.deleted_at || null,
+      prev_fan_text: r.prev_fan_text ?? null, prev_fan_at: r.prev_fan_at ?? null, reply_s: r.reply_s ?? null,
+      chat_url: r.group_id ? `https://fansly.com/messages/${r.group_id}` : null,
     };
   });
 }
@@ -355,19 +380,62 @@ router.get('/messages/filters', async (req, res) => {
   } catch (e) { fail(res, e, 'load the filters'); }
 });
 
-// GET /api/fansly/messages?account&chatter&from&to&ppv&sold&unreplied&kind&q&before&beforeId&limit
+/** Where this person's extension is open now: the Fansly accounts with a live browser of theirs. */
+async function myBrowsers(user) {
+  const { data } = await supabaseAdmin.from('fansly_presence').select('account_id, last_seen_at').eq('user_id', user.id).is('ended_at', null)
+    .gte('last_seen_at', new Date(Date.now() - F.ONLINE_MS).toISOString());
+  return [...new Set((data || []).map(p => p.account_id).filter(Boolean))];
+}
+
+// GET /api/fansly/messages?account&chatter&from&to&q&fan&price_min&price_max&purchased&status&replied&page&size
+// → one page of chat messages the team sent, newest first, with the count for the pages and the totals
 router.get('/messages', async (req, res) => {
   try {
-    const f = messageFilters(req);
-    const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
-    const before = req.query.before && req.query.beforeId ? { p_before: String(req.query.before), p_before_id: String(req.query.beforeId) } : {};
-    const { data, error } = await supabaseAdmin.rpc('fansly_sent_messages', { ...f, ...before, p_limit: limit + 1 });
+    const f = messageFiltersV2(req);
+    const size = [25, 50, 100].includes(Number(req.query.size)) ? Number(req.query.size) : 50;
+    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const [{ data, error }, { data: tot, error: e2 }] = await Promise.all([
+      supabaseAdmin.rpc('fansly_sent_messages_v2', { ...f, p_limit: size, p_offset: (page - 1) * size }),
+      supabaseAdmin.rpc('fansly_sent_totals_v2', f),
+    ]);
     if (error) throw error;
-    const more = (data || []).length > limit;
-    const rows = await decorate(req.user.organisationId, (data || []).slice(0, limit));
-    const last = rows[rows.length - 1];
-    res.json({ rows, next: more && last ? { before: last.sent_at, beforeId: last.message_id } : null });
+    if (e2) throw e2;
+    const t = (tot || [])[0] || {};
+    const rows = await decorate(req.user.organisationId, data || []);
+    res.json({ rows, page, size, total: Number(t.messages || 0),
+      totals: { messages: Number(t.messages || 0), fans: Number(t.fans || 0), ppv_sent: Number(t.ppv_sent || 0), ppv_sold: Number(t.ppv_sold || 0),
+        sold_net: Math.trunc(Number(t.sold_net || 0) * 100) / 100, unsent: Number(t.unsent || 0), median_reply_s: t.median_reply_s ?? null },
+      my_browsers: await myBrowsers(req.user).catch(() => []) });
   } catch (e) { fail(res, e, 'load the messages'); }
+});
+
+// GET /api/fansly/messages/recipients?q= → fans to filter by ("Sent to")
+router.get('/messages/recipients', async (req, res) => {
+  try {
+    const term = String(req.query.q || '').trim().replace(/[%_,()]/g, '').slice(0, 40);
+    const { data: accs } = await supabaseAdmin.from('fansly_accounts').select('id').eq('organisation_id', req.user.organisationId);
+    const ids = (accs || []).map(a => a.id);
+    if (!ids.length || term.length < 2) return res.json({ fans: [] });
+    const { data } = await supabaseAdmin.from('fansly_fans').select('account_id, fansly_account_id, username, display_name, nickname').in('account_id', ids)
+      .or(`username.ilike.%${term}%,display_name.ilike.%${term}%,nickname.ilike.%${term}%`).limit(20);
+    res.json({ fans: (data || []).map(f => ({ fan_account_id: f.fansly_account_id, account_id: f.account_id, name: f.nickname || f.display_name || f.username, username: f.username })) });
+  } catch (e) { fail(res, e, 'find the fan'); }
+});
+
+// POST /api/fansly/messages/open { account_id, group_id } — open this chat in my own extension's browser
+// (where my side panel is on that page); without one, the page opens it from its link
+router.post('/messages/open', async (req, res) => {
+  try {
+    const accountId = String(req.body?.account_id || ''), groupId = String(req.body?.group_id || '');
+    if (!/^\d{5,25}$/.test(groupId)) return res.status(400).json({ error: 'No such chat' });
+    const { data: acc } = await supabaseAdmin.from('fansly_accounts').select('id').eq('id', accountId).eq('organisation_id', req.user.organisationId).maybeSingle();
+    if (!acc) return res.status(404).json({ error: 'No such Fansly page' });
+    if (!(await myBrowsers(req.user)).includes(acc.id)) return res.json({ sent: false, url: `https://fansly.com/messages/${groupId}` });
+    const { error } = await supabaseAdmin.from('fansly_fetch_jobs').insert({ organisation_id: req.user.organisationId, account_id: acc.id, kind: 'open_chat',
+      requested_by: req.user.id, target_user: req.user.id, progress: { group_id: groupId } });
+    if (error) throw error;
+    res.json({ sent: true });
+  } catch (e) { fail(res, e, 'open the chat'); }
 });
 
 // GET /api/fansly/messages/mass?account&chatter&from&to&q&unsent → mass messages, one row each, with totals
@@ -394,11 +462,11 @@ router.get('/messages/mass', async (req, res) => {
 // GET /api/fansly/messages/totals → the same filters, counted
 router.get('/messages/totals', async (req, res) => {
   try {
-    const { data, error } = await supabaseAdmin.rpc('fansly_sent_totals', messageFilters(req));
+    const { data, error } = await supabaseAdmin.rpc('fansly_sent_totals_v2', messageFiltersV2(req));
     if (error) throw error;
     const t = (data || [])[0] || {};
     res.json({ messages: Number(t.messages || 0), fans: Number(t.fans || 0), ppv_sent: Number(t.ppv_sent || 0), ppv_sold: Number(t.ppv_sold || 0),
-      sold_net: Number(t.sold_net || 0), replied: Number(t.replied || 0), median_waited_s: t.median_waited_s ?? null, unsent: Number(t.unsent || 0) });
+      sold_net: Math.trunc(Number(t.sold_net || 0) * 100) / 100, median_reply_s: t.median_reply_s ?? null, unsent: Number(t.unsent || 0) });
   } catch (e) { fail(res, e, 'count the messages'); }
 });
 
@@ -433,11 +501,11 @@ router.get('/messages/conversation', async (req, res) => {
 router.get('/messages.csv', async (req, res) => {
   if (req.get('X-Demo-Mode') === '1') return res.status(409).json({ error: 'Turn demo mode off to export real messages.' });
   try {
-    const { data, error } = await supabaseAdmin.rpc('fansly_sent_messages', { ...messageFilters(req), p_limit: 20000 });
+    const { data, error } = await supabaseAdmin.rpc('fansly_sent_messages_v2', { ...messageFiltersV2(req), p_limit: 20000, p_offset: 0 });
     if (error) throw error;
     const rows = await decorate(req.user.organisationId, data || []);
     const cell = (v) => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
-    const cols = ['sent_at', 'page', 'chatter', 'attribution', 'kind', 'fan_username', 'fan_nickname', 'display_name', 'message', 'price', 'sold_at', 'sold_net', 'delivered_at', 'read_at', 'replied_at', 'waited_s', 'unsent_at'];
+    const cols = ['sent_at', 'page', 'chatter', 'fan_username', 'fan_nickname', 'prev_fan_text', 'message', 'reply_s', 'price', 'sold_at', 'sold_net', 'read_at', 'unsent_at', 'chat_url'];
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => cell(r[c])).join(','))].join('\r\n');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="fansly-messages-${new Date().toISOString().slice(0, 10)}.csv"`);

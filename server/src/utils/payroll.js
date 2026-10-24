@@ -356,7 +356,7 @@ async function fanslyLines(orgId, period, paidByChatter) {
   let earned = []; const sentAt = {};
   if (accIds.length) {
     const from = Date.parse(`${period.start}T00:00:00Z`), to = Date.parse(`${R.addDays(period.end, 1)}T00:00:00Z`);
-    const tx = await all(() => supabaseAdmin.from('fansly_transactions').select('account_id, transaction_id, category, created_at_fansly, gross, net, credited_message_id, credited_chatter_id, credited_rule')
+    const tx = await all(() => supabaseAdmin.from('fansly_transactions').select('account_id, transaction_id, category, created_at_fansly, gross, net, credited_message_id, credited_chatter_id, credited_chatter_ids, credited_rule')
       .in('account_id', accIds).in('category', ['chat_ppv', 'chat_tip', 'refund']).gte('created_at_fansly', new Date(from - 3 * H).toISOString()).lt('created_at_fansly', new Date(to + 3 * H).toISOString())
       .order('created_at_fansly').order('transaction_id'));
     // the owner's rules can leave a sale to nobody on purpose (a mass message's PPV, one bought long after): page revenue only
@@ -366,6 +366,9 @@ async function fanslyLines(orgId, period, paidByChatter) {
       source: x.category === 'chat_ppv' ? 'message' : x.category === 'chat_tip' ? 'tip' : 'refund',
       gross_cents: Math.round(Number(x.gross || x.net || 0) * 100), net_cents: Math.round(Number(x.net || 0) * 100),
       message_uuid: x.credited_message_id || null, seller_id: x.credited_chatter_id || null,
+      // Fansly credits only what the extension saw (the sender, the last writer, or the shift for a tip, decided when
+      // sales are matched): no "whoever was on shift" guess here. A shared tip lists everyone.
+      seller_ids: x.credited_chatter_ids?.length ? x.credited_chatter_ids : null, no_fallback: true,
     }));
     const ids = [...new Set(earned.filter(x => x.message_uuid).map(x => x.message_uuid))];
     for (let i = 0; i < ids.length; i += 200) {
@@ -433,9 +436,9 @@ function fanvueCore({ period, pages, roster, accPage, earned, sentAt, paidByChat
     const sent = x.message_uuid && sentAt[x.message_uuid] ? amsClock(sentAt[x.message_uuid]) : null;
     const when = sent != null && sent >= covered[0] && sent < covered[1] ? sent : amsClock(x.paid_at);
     // Fansly knows who sent the PPV (the browser that sent it); otherwise whoever was on the page's shift then
-    const who = x.seller_id ? [x.seller_id] : [...new Set(entries.filter(e => e.pages.includes(page) && when >= e.start && when < e.end).map(e => e.chatter_id))];
+    const who = x.seller_ids?.length ? x.seller_ids : x.seller_id ? [x.seller_id] : x.no_fallback ? [] : [...new Set(entries.filter(e => e.pages.includes(page) && when >= e.start && when < e.end).map(e => e.chatter_id))];
     const gross = Math.abs(Number(x.gross_cents) || 0) / 100, net = Math.abs(Number(x.net_cents) || 0) / 100;
-    if (!who.length) { if (sale) nobody += gross; continue; }
+    if (!who.length) { if (sale && !x.no_fallback) nobody += gross; continue; }       // Fansly: credited to nobody on purpose
     for (const cid of who) {
       const l = line(cid), share = 1 / who.length;
       if (!sale) { l.refunded += gross * share; continue; }

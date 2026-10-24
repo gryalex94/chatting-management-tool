@@ -637,6 +637,18 @@
   }
 
   // ---------- start ----------
+  // a chat asked for from the Messages dashboard ("Open" there) by the person signed in here
+  async function checkCommands() {
+    if (!st.signedIn || !st.accountId || (!SIDE && document.hidden) || (SIDE && !st.tabId)) return;
+    try {
+      const r = await call('GET', `/api/fansly/panel/commands?account=${encodeURIComponent(st.accountId)}`);
+      const g = (r.open || []).map(o => String(o.group_id)).filter(x => /^\d{5,25}$/.test(x)).pop();
+      if (!g) return;
+      const url = `https://fansly.com/messages/${g}`;
+      if (SIDE) chrome.tabs.update(st.tabId, { url, active: true }, () => void chrome.runtime.lastError);
+      else location.href = url;
+    } catch { /* try again next time */ }
+  }
   function mount() {
     if (!host.isConnected) (SIDE ? document.body : document.documentElement).append(host);
     applyLayout();
@@ -651,6 +663,7 @@
       if (!SIDE) st.groupId = groupFromUrl();
       refreshStatus();
       setInterval(refreshStatus, 3000);
+      setInterval(checkCommands, 4000);
       setInterval(() => { if (!document.hidden && host.isConnected) loadFan(true); }, REFRESH_MS);
       setInterval(() => { if (host.isConnected && st.data) render(); }, 60000);    // the timers on the shift strip
     };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Loader2, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, ExternalLink, Loader2, Search, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '@/services/api';
 import { cn } from '@/lib/utils';
@@ -23,81 +23,89 @@ const RANGES = [
   { v: '7', label: 'Last 7 days', days: 6 },
   { v: '30', label: 'Last 30 days', days: 29 },
   { v: 'all', label: 'All time', days: null },
+  { v: 'custom', label: 'Pick dates', days: null },
 ];
+const START = { account: 'all', chatter: 'all', range: '7', from: '', to: '', view: 'chat', purchased: 'all', status: 'all', replied: 'all', price_min: '', price_max: '', q: '', fan: null };
+
+/** Page numbers to show: the first, the last, and two either side of the current one. */
+function pageList(page, pages) {
+  const out = [];
+  for (let n = 1; n <= pages; n++) if (n === 1 || n === pages || Math.abs(n - page) <= 2) out.push(n);
+  return out.flatMap((n, k) => (k && n - out[k - 1] > 1 ? ['…', n] : [n]));
+}
 
 /**
- * Every message the team sent from each Fansly page, newest first, like
- * Infloww's message dashboard. Filters above, totals for the filter, a row
- * opens the whole conversation, the same filter exports to CSV.
+ * Every chat message the team sent from each Fansly page, newest first, laid
+ * out like Infloww's message dashboard: who sent it, from which page, the
+ * fan's message it answered, how fast, the price and whether he bought it.
+ * Numbered pages; "Open" opens the chat in your own browser where the
+ * extension runs (or on fansly.com). Mass messages have their own list.
  */
 export default function FanslyMessages() {
   const [opts, setOpts] = useState({ accounts: [], chatters: [] });
-  // view: chat messages (the default) or mass messages, which have their own list
-  const [f, setF] = useState({ account: 'all', chatter: 'all', range: '7', view: 'chat', ppv: false, sold: false, unreplied: false, unsent: false, q: '' });
+  const [f, setF] = useState(START);
   const [mass, setMass] = useState(null);       // { rows, totals, truncated } in the mass view
   const [search, setSearch] = useState('');
-  const [rows, setRows] = useState(null);
-  const [next, setNext] = useState(null);
-  const [totals, setTotals] = useState(null);
+  const [price, setPrice] = useState({ min: '', max: '' });
+  const [data, setData] = useState(null);       // { rows, total, totals, my_browsers }
+  const [size, setSize] = useState(50);
+  // the page number belongs to one filter: a new filter starts at page 1
+  const fkey = JSON.stringify(f) + size;
+  const [pg, setPg] = useState({ key: fkey, n: 1 });
+  const page = pg.key === fkey ? pg.n : 1;
+  const setPage = (n) => setPg({ key: fkey, n });
   const [error, setError] = useState('');
-  const [loadingMore, setLoadingMore] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [open, setOpen] = useState(null);       // { account_id, fan_account_id, focus }
   const reqId = useRef(0);
 
   useEffect(() => { api.get('/api/fansly/messages/filters').then(r => setOpts(r.data)).catch(() => {}); }, []);
-  // typing in the search box waits a moment before asking the server
+  // typing waits a moment before asking the server
   useEffect(() => { const t = setTimeout(() => setF(x => (x.q === search ? x : { ...x, q: search })), 400); return () => clearTimeout(t); }, [search]);
+  useEffect(() => { const t = setTimeout(() => setF(x => (x.price_min === price.min && x.price_max === price.max ? x : { ...x, price_min: price.min, price_max: price.max })), 500); return () => clearTimeout(t); }, [price]);
 
   const params = useMemo(() => {
     const p = new URLSearchParams();
     if (f.account !== 'all') p.set('account', f.account);
     if (f.chatter !== 'all') p.set('chatter', f.chatter);
     const r = RANGES.find(x => x.v === f.range);
-    if (r && r.days != null) { const now = new Date(); p.set('from', ymd(new Date(now.getTime() - r.days * 86400000))); p.set('to', ymd(now)); }
-    if (f.unsent) p.set('unsent', '1');
-    if (f.ppv) p.set('ppv', '1');
-    if (f.sold) p.set('sold', '1');
-    if (f.unreplied) p.set('unreplied', '1');
+    if (f.range === 'custom') { if (f.from) p.set('from', f.from); if (f.to) p.set('to', f.to); }
+    else if (r && r.days != null) { const now = new Date(); p.set('from', ymd(new Date(now.getTime() - r.days * 86400000))); p.set('to', ymd(now)); }
     if (f.q.trim()) p.set('q', f.q.trim());
+    if (f.fan) p.set('fan', f.fan.id);
+    if (f.price_min !== '') p.set('price_min', f.price_min);
+    if (f.price_max !== '') p.set('price_max', f.price_max);
+    if (f.purchased !== 'all') p.set('purchased', f.purchased);
+    if (f.status !== 'all') p.set('status', f.status);
+    if (f.status === 'unsent') p.set('unsent', '1');       // (the mass list's filter)
+    if (f.replied !== 'all') p.set('replied', f.replied);
     return p;
   }, [f]);
 
   const load = useCallback(() => {
     const id = ++reqId.current;
-    setRows(null); setTotals(null); setMass(null); setError('');
+    setError('');
     if (f.view === 'mass') {
+      setMass(null);
       api.get(`/api/fansly/messages/mass?${params}`)
         .then(r => { if (id === reqId.current) setMass(r.data); })
         .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the mass messages'); });
       return;
     }
-    api.get(`/api/fansly/messages?${params}`)
-      .then(r => { if (id === reqId.current) { setRows(r.data.rows || []); setNext(r.data.next); } })
+    setData(d => (d ? { ...d, loading: true } : null));
+    const p = new URLSearchParams(params); p.set('page', String(page)); p.set('size', String(size));
+    api.get(`/api/fansly/messages?${p}`)
+      .then(r => { if (id === reqId.current) setData(r.data); })
       .catch(e => { if (id === reqId.current) setError(e?.response?.data?.error || 'Could not load the messages'); });
-    api.get(`/api/fansly/messages/totals?${params}`)
-      .then(r => { if (id === reqId.current) setTotals(r.data); })
-      .catch(() => {});
-  }, [params, f.view]);
+  }, [params, f.view, page, size]);
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
-
-  const more = async () => {
-    if (!next || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const p = new URLSearchParams(params); p.set('before', next.before); p.set('beforeId', next.beforeId);
-      const { data } = await api.get(`/api/fansly/messages?${p}`);
-      setRows(rs => [...(rs || []), ...(data.rows || [])]); setNext(data.next);
-    } catch (e) { toast.error(e?.response?.data?.error || 'Could not load more'); }
-    finally { setLoadingMore(false); }
-  };
 
   const exportCsv = async () => {
     setExporting(true);
     try {
-      const { data } = await api.get(`/api/fansly/messages.csv?${params}`, { responseType: 'blob' });
-      const url = URL.createObjectURL(data);
+      const { data: blob } = await api.get(`/api/fansly/messages.csv?${params}`, { responseType: 'blob' });
+      const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `fansly-messages-${ymd(new Date())}.csv`; a.click();
       setTimeout(() => URL.revokeObjectURL(url), 2000);
     } catch (e) {
@@ -107,9 +115,21 @@ export default function FanslyMessages() {
     } finally { setExporting(false); }
   };
 
+  // "Open": in my own browser when my extension is on that page right now, otherwise on fansly.com in a new tab
+  const openChat = async (r) => {
+    if (!r.group_id) return;
+    if (!(data?.my_browsers || []).includes(r.account_id)) { window.open(r.chat_url, '_blank', 'noopener'); return; }
+    try {
+      const { data: res } = await api.post('/api/fansly/messages/open', { account_id: r.account_id, group_id: r.group_id });
+      if (res.sent) toast.success('Opening the chat in your browser'); else window.open(res.url, '_blank', 'noopener');
+    } catch (e) { toast.error(e?.response?.data?.error || 'Could not open the chat'); }
+  };
+
   const set = (k) => (v) => setF(x => ({ ...x, [k]: v }));
-  const toggle = (k) => setF(x => ({ ...x, [k]: !x[k] }));
-  const showPage = opts.accounts.length > 1 && f.account === 'all';
+  const rows = data?.rows;
+  const t = data?.totals;
+  const pages = data ? Math.max(1, Math.ceil(data.total / size)) : 1;
+  const changed = JSON.stringify({ ...f, view: 'chat' }) !== JSON.stringify(START);
 
   return (
     <div className='grid gap-4'>
@@ -118,101 +138,189 @@ export default function FanslyMessages() {
           <Button size='sm' variant={f.view === 'chat' ? 'default' : 'ghost'} onClick={() => set('view')('chat')}>Chat messages</Button>
           <Button size='sm' variant={f.view === 'mass' ? 'default' : 'ghost'} onClick={() => set('view')('mass')}>Mass messages</Button>
         </div>
-        {opts.accounts.length > 1 && (
-          <Select value={f.account} onValueChange={set('account')}>
-            <SelectTrigger className='w-44'><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All pages</SelectItem>
-              {opts.accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.page}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        <Select value={f.chatter} onValueChange={set('chatter')}>
-          <SelectTrigger className='w-44'><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value='all'>All chatters</SelectItem>
-            {opts.chatters.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            <SelectItem value='none'>Not attributed</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={f.range} onValueChange={set('range')}>
-          <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
-          <SelectContent>{RANGES.map(r => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
-        </Select>
-        {f.view === 'chat' && <>
-          <Toggle on={f.ppv} onClick={() => toggle('ppv')}>Only PPVs</Toggle>
-          <Toggle on={f.sold} onClick={() => toggle('sold')}>Only sold</Toggle>
-          <Toggle on={f.unreplied} onClick={() => toggle('unreplied')}>No reply yet</Toggle>
-        </>}
-        <Toggle on={f.unsent} onClick={() => toggle('unsent')}>Unsent</Toggle>
         <div className='relative min-w-48 flex-1'>
           <Search className='absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground' />
           <Input value={search} onChange={e => setSearch(e.target.value)} placeholder='Search in the text' className='pl-8' />
         </div>
+        <Select value={f.range} onValueChange={set('range')}>
+          <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
+          <SelectContent>{RANGES.map(r => <SelectItem key={r.v} value={r.v}>{r.label}</SelectItem>)}</SelectContent>
+        </Select>
+        {f.range === 'custom' && <>
+          <Input type='date' value={f.from} max={f.to || undefined} onChange={e => set('from')(e.target.value)} className='w-36' aria-label='From' />
+          <span className='text-xs text-muted-foreground'>to</span>
+          <Input type='date' value={f.to} min={f.from || undefined} onChange={e => set('to')(e.target.value)} className='w-36' aria-label='To' />
+        </>}
         {f.view === 'chat' && <Button size='sm' variant='outline' onClick={exportCsv} disabled={exporting}>
           {exporting ? <Loader2 className='size-3.5 animate-spin' /> : <Download className='size-3.5' />} CSV
         </Button>}
       </div>
 
-      {f.view === 'mass' ? <MassList data={mass} error={error} showPage={showPage} /> : <>
-      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8'>
-        <Total label='Messages' value={totals && num(totals.messages)} />
-        <Total label='Fans' value={totals && num(totals.fans)} />
-        <Total label='PPVs sent' value={totals && num(totals.ppv_sent)} />
-        <Total label='PPVs sold' value={totals && num(totals.ppv_sold)} />
-        <Total label='Sell rate' value={totals && (totals.ppv_sent ? `${Math.round((totals.ppv_sold / totals.ppv_sent) * 100)}%` : '·')} />
-        <Total label='Net from sold' value={totals && money(totals.sold_net)} />
-        <Total label='Median wait' value={totals && (totals.median_waited_s == null ? '·' : wait(totals.median_waited_s))} />
-        <Total label='Unsent' value={totals && num(totals.unsent)} />
+      <div className='flex flex-wrap items-center gap-2'>
+        <Select value={f.chatter} onValueChange={set('chatter')}>
+          <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value='all'>Sender: everyone</SelectItem>
+            {opts.chatters.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            <SelectItem value='none'>Not attributed</SelectItem>
+          </SelectContent>
+        </Select>
+        {opts.accounts.length > 1 && (
+          <Select value={f.account} onValueChange={set('account')}>
+            <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>Creator: all pages</SelectItem>
+              {opts.accounts.map(a => <SelectItem key={a.id} value={a.id}>{a.page}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+        {f.view === 'chat' && <>
+          <FanPicker value={f.fan} onChange={set('fan')} />
+          <div className='flex items-center gap-1'>
+            <Input inputMode='decimal' value={price.min} onChange={e => setPrice(x => ({ ...x, min: e.target.value.replace(/[^\d.]/g, '') }))} placeholder='Price min' className='w-24' />
+            <span className='text-xs text-muted-foreground'>–</span>
+            <Input inputMode='decimal' value={price.max} onChange={e => setPrice(x => ({ ...x, max: e.target.value.replace(/[^\d.]/g, '') }))} placeholder='max' className='w-20' />
+          </div>
+          <Select value={f.purchased} onValueChange={set('purchased')}>
+            <SelectTrigger className='w-40'><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>Purchased: any</SelectItem>
+              <SelectItem value='ppv'>Only PPVs</SelectItem>
+              <SelectItem value='yes'>Bought</SelectItem>
+              <SelectItem value='no'>PPV not bought</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={f.replied} onValueChange={set('replied')}>
+            <SelectTrigger className='w-36'><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>Fan replied: any</SelectItem>
+              <SelectItem value='no'>No reply yet</SelectItem>
+            </SelectContent>
+          </Select>
+        </>}
+        <Select value={f.status} onValueChange={set('status')}>
+          <SelectTrigger className='w-32'><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value='all'>Status: all</SelectItem>
+            <SelectItem value='sent'>Sent</SelectItem>
+            <SelectItem value='unsent'>Unsent</SelectItem>
+          </SelectContent>
+        </Select>
+        {changed && <Button size='sm' variant='ghost' onClick={() => { setF(x => ({ ...START, view: x.view })); setSearch(''); setPrice({ min: '', max: '' }); }}>Clear filters</Button>}
+      </div>
+
+      {f.view === 'mass' ? <MassList data={mass} error={error} showPage={opts.accounts.length > 1 && f.account === 'all'} /> : <>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7'>
+        <Total label='Messages' value={t && num(t.messages)} />
+        <Total label='Fans' value={t && num(t.fans)} />
+        <Total label='PPVs sent' value={t && num(t.ppv_sent)} />
+        <Total label='PPVs bought' value={t && num(t.ppv_sold)} />
+        <Total label='Buy rate' value={t && (t.ppv_sent ? `${Math.round((t.ppv_sold / t.ppv_sent) * 100)}%` : '·')} />
+        <Total label='Net from bought' value={t && money(t.sold_net)} />
+        <Total label='Median reply time' value={t && (t.median_reply_s == null ? '·' : wait(t.median_reply_s))} />
       </div>
 
       {error ? <p className='text-sm text-muted-foreground'>{error}</p> : !rows ? <Skeleton className='h-80 w-full' /> : !rows.length ? (
         <p className='rounded-lg border bg-card px-4 py-8 text-center text-sm text-muted-foreground'>No messages for this filter.</p>
       ) : (
-        <div className='rounded-lg border bg-card'>
+        <div className={cn('rounded-lg border bg-card', data.loading && 'opacity-60')}>
           <Table>
             <TableHeader><TableRow>
-              <TableHead className='w-28'>Sent</TableHead>
-              {showPage && <TableHead>Page</TableHead>}
-              <TableHead>Chatter</TableHead><TableHead>Fan</TableHead><TableHead>Message</TableHead>
-              <TableHead className='text-right'>PPV</TableHead><TableHead>Sold</TableHead><TableHead>Read</TableHead><TableHead className='text-right'>He waited</TableHead>
+              <TableHead>Sender</TableHead><TableHead>Creator</TableHead><TableHead className='min-w-72'>Message</TableHead>
+              <TableHead>Sent time</TableHead><TableHead className='text-right'>Reply time</TableHead>
+              <TableHead className='text-right'>Price</TableHead><TableHead>Purchased</TableHead><TableHead>Status</TableHead>
+              <TableHead>Sent to</TableHead><TableHead className='text-right'>Actions</TableHead>
             </TableRow></TableHeader>
             <TableBody>
               {rows.map(r => (
-                <TableRow key={`${r.account_id}:${r.message_id}`} className={cn(r.fan_account_id && 'cursor-pointer')}
-                  onClick={() => r.fan_account_id && setOpen({ account_id: r.account_id, fan_account_id: r.fan_account_id, focus: r.message_id })}>
-                  <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{when(r.sent_at)}</TableCell>
-                  {showPage && <TableCell className='text-xs'>{r.page}</TableCell>}
-                  <TableCell className='whitespace-nowrap text-xs'>{r.chatter || <span className='text-amber-600'>Not attributed</span>}</TableCell>
-                  <TableCell className='max-w-40 truncate text-xs'>
-                    {fanName(r)}
-                    {r.kind === 'mass' && <Badge variant='outline' className='ml-1 px-1 py-0 text-[10px]'>mass</Badge>}
-                  </TableCell>
+                <TableRow key={`${r.account_id}:${r.message_id}`}>
+                  <TableCell className='whitespace-nowrap text-xs'>{r.chatter || <span className='text-muted-foreground'>Not attributed</span>}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs'>{r.page}</TableCell>
                   <TableCell className='max-w-md'>
-                    <p className={cn('line-clamp-2 text-sm', r.unsent_at && 'line-through opacity-60')}>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p>
-                    {r.unsent_at && <Badge variant='outline' className='mt-0.5 px-1 py-0 text-[10px] text-red-600'>unsent {when(r.unsent_at)}</Badge>}
+                    {r.prev_fan_text && <p className='line-clamp-2 text-xs text-muted-foreground'>{r.prev_fan_text}</p>}
+                    <p className={cn('line-clamp-3 text-sm', r.unsent_at && 'line-through opacity-60')}>{r.message || <span className='text-muted-foreground'>(media only)</span>}</p>
                   </TableCell>
-                  <TableCell className='text-right text-sm tabular-nums'>{money(r.price)}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{when(r.sent_at)}</TableCell>
+                  <TableCell className='whitespace-nowrap text-right text-xs tabular-nums'>{r.reply_s != null && r.reply_s <= 259200 ? wait(r.reply_s) : <span className='text-muted-foreground' title={r.reply_s != null ? `The fan's last message was ${wait(r.reply_s)} before: a new start, not a reply` : 'Not a reply to a fan message'}>·</span>}</TableCell>
+                  <TableCell className='text-right text-sm tabular-nums'>{r.price > 0 ? money(r.price) : <span className='text-muted-foreground'>Free</span>}</TableCell>
                   <TableCell className='whitespace-nowrap text-xs'>
-                    {r.sold_at ? <span className='text-emerald-600'>{r.sold_net != null ? money(r.sold_net) : 'bought'} · {when(r.sold_at)}</span> : r.price > 0 ? <span className='text-muted-foreground'>not yet</span> : ''}
+                    {r.sold_at ? <span className='text-emerald-600' title={`Bought ${when(r.sold_at)}`}>Yes{r.sold_net != null ? ` · ${money(r.sold_net)}` : ''}</span> : r.price > 0 ? <span className='text-muted-foreground'>No</span> : ''}
                   </TableCell>
-                  <TableCell className='whitespace-nowrap text-xs text-muted-foreground'>{r.read_at ? when(r.read_at) : r.kind === 'mass' ? '' : 'unread'}</TableCell>
-                  <TableCell className='text-right text-xs tabular-nums'>{wait(r.waited_s)}</TableCell>
+                  <TableCell className='whitespace-nowrap text-xs'>
+                    {r.unsent_at ? <Badge variant='outline' className='text-red-600' title={`Unsent ${when(r.unsent_at)}`}>Unsent</Badge> : <Badge variant='outline'>Sent</Badge>}
+                  </TableCell>
+                  <TableCell className='max-w-40 truncate text-xs'>
+                    <button type='button' className='hover:underline' title='Show only messages to this fan' onClick={() => set('fan')({ id: r.fan_account_id, name: fanName(r) })}>{fanName(r)}</button>
+                  </TableCell>
+                  <TableCell className='whitespace-nowrap text-right'>
+                    <Button size='sm' variant='ghost' className='h-7 px-2 text-xs' onClick={() => setOpen({ account_id: r.account_id, fan_account_id: r.fan_account_id, focus: r.message_id })}>Chat here</Button>
+                    <Button size='sm' variant='outline' className='h-7 px-2 text-xs' disabled={!r.group_id} onClick={() => openChat(r)}
+                      title={(data.my_browsers || []).includes(r.account_id) ? 'Opens this chat in your browser where the extension is on this page' : 'Opens this chat on fansly.com in a new tab'}>
+                      <ExternalLink className='size-3' /> Open
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-          {next && (
-            <div className='flex justify-center border-t py-3'>
-              <Button size='sm' variant='outline' onClick={more} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Show more'}</Button>
+          <div className='flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2'>
+            <p className='text-xs text-muted-foreground'>{num((page - 1) * size + 1)}–{num(Math.min(page * size, data.total))} of {num(data.total)}</p>
+            <div className='flex items-center gap-1'>
+              <Button size='sm' variant='ghost' className='h-7 px-2' disabled={page <= 1} onClick={() => setPage(page - 1)}><ChevronLeft className='size-4' /></Button>
+              {pageList(page, pages).map((n, k) => n === '…' ? <span key={`e${k}`} className='px-1 text-xs text-muted-foreground'>…</span> : (
+                <Button key={n} size='sm' variant={n === page ? 'default' : 'ghost'} className='h-7 min-w-7 px-2 text-xs' onClick={() => setPage(n)}>{n}</Button>
+              ))}
+              <Button size='sm' variant='ghost' className='h-7 px-2' disabled={page >= pages} onClick={() => setPage(page + 1)}><ChevronRight className='size-4' /></Button>
+              <Select value={String(size)} onValueChange={v => setSize(Number(v))}>
+                <SelectTrigger className='h-7 w-28 text-xs'><SelectValue /></SelectTrigger>
+                <SelectContent>{[25, 50, 100].map(n => <SelectItem key={n} value={String(n)}>{n} per page</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-          )}
+          </div>
         </div>
       )}
-
+      <p className='text-xs text-muted-foreground'>
+        A message shows who sent it only when it went out through the extension with a chatter signed in; older ones say Not attributed. Reply time is how long after the fan&apos;s message the reply went out (more than 3 days counts as a new start, not a reply).
+        Open goes to your own browser when your extension is on that page now; otherwise fansly.com opens in a new tab.
+      </p>
       </>}
 
       {open && <Conversation open={open} onClose={() => setOpen(null)} />}
+    </div>
+  );
+}
+
+/** "Sent to": find a fan by name and show only the messages to him. */
+function FanPicker({ value, onChange }) {
+  const [q, setQ] = useState('');
+  const [list, setList] = useState([]);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (q.trim().length < 2) setList([]);
+      else api.get(`/api/fansly/messages/recipients?q=${encodeURIComponent(q.trim())}`).then(r => setList(r.data.fans || [])).catch(() => {});
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+  if (value) return (
+    <Badge variant='secondary' className='h-8 gap-1 px-2 text-xs'>Sent to: {value.name}
+      <button type='button' aria-label='Clear' onClick={() => onChange(null)}><X className='size-3' /></button>
+    </Badge>
+  );
+  return (
+    <div className='relative'>
+      <Input value={q} onChange={e => { setQ(e.target.value); setShow(true); }} onFocus={() => setShow(true)} onBlur={() => setTimeout(() => setShow(false), 150)}
+        placeholder='Sent to (fan)' className='w-40' />
+      {show && list.length > 0 && (
+        <div className='absolute z-20 mt-1 max-h-64 w-60 overflow-y-auto rounded-md border bg-popover p-1 shadow-md'>
+          {list.map(x => (
+            <button key={`${x.account_id}:${x.fan_account_id}`} type='button' className='block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-muted'
+              onMouseDown={e => e.preventDefault()} onClick={() => { onChange({ id: x.fan_account_id, name: x.name || `@${x.username}` }); setQ(''); setShow(false); }}>
+              {x.name}{x.username && x.name !== x.username ? <span className='text-muted-foreground'> @{x.username}</span> : null}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -266,10 +374,6 @@ function MassList({ data, error, showPage }) {
       <p className='text-xs text-muted-foreground'>A mass message counts once here, however many fans got it. Unsent marks come from the browser that unsent it, or from Fansly&apos;s mass message history (Messages, mass message history, Deleted) opened with the extension on.</p>
     </>
   );
-}
-
-function Toggle({ on, onClick, children }) {
-  return <Button size='sm' variant={on ? 'default' : 'outline'} onClick={onClick}>{children}</Button>;
 }
 
 function Total({ label, value }) {
