@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Chatting Manager for Fansly",
-  "description": "Records the Fansly chats a chatter works in, shows the fan's notes, numbers and scripts beside the chat. Never sends anything to Fansly.",
-  "version": "0.7.15",
+  "description": "Records the Fansly chats a chatter works in, shows the fan's notes, numbers and scripts beside the chat. Never sends anything to Fansly. For chatters: Fansly's chat side only, and no other websites.",
+  "version": "0.8.0",
   "permissions": [
     "alarms",
     "clipboardWrite",
     "sidePanel",
     "storage",
-    "scripting"
+    "scripting",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "https://fansly.com/*"

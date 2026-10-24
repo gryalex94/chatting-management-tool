@@ -119,12 +119,29 @@
     if (Array.isArray(extra) && extra.length) post('orders', url, { accountMediaOrders: extra });
   };
 
+  // ---- secure mode (a chatter's browser): Fansly's money, statistics, account and logout requests are stopped ----
+  // The state comes from the extension (bridge.js). Until it arrives (a moment after the page starts) a
+  // sensitive request waits for it, at most 2 s, then counts as locked: nothing opens by default.
+  const SENSITIVE = /^\/(account\/)?(wallets?|payouts?|payments?|billing|tax|taxes|stats|earnings|banking)(\/|$)|\/(password|email|twofa|2fa|totp|security|logout|management|managementsessions?|managementsession)(\/|$)|^\/account\/delete/i;
+  let chatOnly = null, chatOnlyKnown;
+  const known = new Promise((res) => { chatOnlyKnown = res; });
+  setTimeout(() => { if (chatOnly === null) { chatOnly = true; chatOnlyKnown(); } }, 2000);
+  window.addEventListener('message', (ev) => {
+    if (ev.source === window && ev.data && ev.data['cmt-secure'] === 1) { chatOnly = !!ev.data.chatOnly; chatOnlyKnown(); }
+  });
+  const sensitive = (url) => API.test(url) && SENSITIVE.test(path(url));
+  const blockedBody = () => JSON.stringify({ success: false, error: { code: 403, details: 'Not available while chatting (Chatting Manager)' } });
+
   // ---- fetch ----
   const realFetch = window.fetch;
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const method = (init && init.method) || (input && input.method) || 'GET';
     const sent = init && typeof init.body === 'string' ? init.body : null;
+    if (sensitive(url)) {
+      const self = this, args = arguments;
+      return known.then(() => (chatOnly ? new Response(blockedBody(), { status: 403, headers: { 'Content-Type': 'application/json' } }) : realFetch.apply(self, args)));
+    }
     const result = realFetch.apply(this, arguments);
     if (API.test(url)) result.then(res => { try { res.clone().text().then(t => handle(method, url, t, sent, res.status)).catch(() => {}); } catch { /* ignore */ } }).catch(() => {});
     return result;
@@ -135,6 +152,15 @@
   XMLHttpRequest.prototype.open = function (method, url) { this.__cmt = { method, url: String(url) }; return XO.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (reqBody) {
     const info = this.__cmt;
+    if (info && sensitive(info.url)) {
+      // wait for the state; a chatter's request fails like a refused one, an owner's goes out as normal
+      const xhr = this, args = arguments;
+      known.then(() => {
+        if (!chatOnly) return XS.apply(xhr, args);
+        for (const t of ['error', 'loadend']) try { xhr.dispatchEvent(new ProgressEvent(t)); } catch { /* ignore */ }
+      });
+      return undefined;
+    }
     if (info && API.test(info.url)) {
       const sent = typeof reqBody === 'string' ? reqBody : null;
       this.addEventListener('load', () => {

@@ -29,12 +29,13 @@
       <p class="muted">Sign in with your account from the tool. Everything you do in the Fansly chats is recorded under your name.</p>
       <label>Email</label><input id="email" type="email" autocomplete="username">
       <label>Password</label><input id="password" type="password" autocomplete="current-password">
-      <details><summary>Tool address</summary><label>API address</label><input id="apiUrl" type="url" placeholder="https://…"></details>
+
       <button id="signin">Sign in</button>
       <div id="loginError" class="err"></div>
     </div>
     <div id="status" hidden>
       <div class="row"><span class="k">Signed in as</span><span id="who"></span></div>
+      <p class="muted" id="mode"></p>
       <div class="row"><span class="k">Fansly account</span><span id="account"></span></div>
       <div class="row"><span class="k">Recording</span><span id="recording"></span></div>
       <div class="row"><span class="k">Waiting to send</span><span id="queue"></span></div>

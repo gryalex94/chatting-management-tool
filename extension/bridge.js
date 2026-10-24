@@ -189,6 +189,71 @@
     }
     done(stopped ? 'cancelled' : 'done', stopped ? 'stopped' : 'time limit (10 min) reached');
   }
+  // ---- secure mode: a chatter's browser sees the chat side of Fansly only ----
+  // Who is a chatter comes from the extension (background.js asks our server). Until it answers, the page
+  // counts as a chatter's: nothing opens by default. page.js stops the money/account requests themselves.
+  let chatOnly = true;
+  const OPEN_PATHS = /^\/messages(\/|$)/;                       // the chats (the vault picker opens inside them)
+  // Fansly's menu and buttons a chatter never needs: money, statistics, settings, the account, logging out
+  const HIDE = new Set(['profile', 'subscriptions', 'media vault', 'media collection', 'lists', 'bookmarks', 'notifications', 'creator',
+    'creator dashboard', 'co-performers', 'earning statistics', 'earnings', 'profile statistics', 'statistics', 'tracking links', 'scheduled post queue',
+    'tax documentation', 'payments', 'payouts', 'wallet', 'settings', 'creator hub (fansly guide)', 'creator hub', 'contact support', 'help center',
+    'merch store', 'logout', 'log out', 'sign out', 'switch account', 'add account', 'switch accounts', 'management sessions']);
+  const secureStyle = document.createElement('style');
+  secureStyle.textContent = '.cmt-hidden{display:none!important}.cmt-masked{visibility:hidden!important}';
+  let lastOpen = OPEN_PATHS.test(location.pathname) ? location.pathname : '/messages';
+  const route = () => {
+    if (OPEN_PATHS.test(location.pathname)) { lastOpen = location.pathname; return; }
+    if (chatOnly) location.replace(lastOpen);            // back to the chat they were in
+  };
+  function hideForChatters() {
+    if (!chatOnly) {
+      document.querySelectorAll('.cmt-hidden, .cmt-masked').forEach(el => el.classList.remove('cmt-hidden', 'cmt-masked'));
+      return;
+    }
+    if (!secureStyle.isConnected) (document.head || document.documentElement).append(secureStyle);
+    const host = document.getElementById('cmt-panel-host');
+    // menu items by their words (the item, not the whole menu)
+    for (const el of document.querySelectorAll('a, button, [role="menuitem"], [role="button"], li, span, div')) {
+      if (el.children.length > 3 || (host && host.contains(el))) continue;
+      const t = String(el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      if (!t || t.length > 30 || !HIDE.has(t)) continue;
+      const item = el.closest('a, button, [role="menuitem"], [role="button"], li') || el;
+      item.classList.add('cmt-hidden');
+    }
+    // the wallet balance at the top of the page ("$49.84")
+    for (const el of document.querySelectorAll('div, span, a')) {
+      if (el.children.length || (host && host.contains(el))) continue;
+      if (!/^\$\s?[\d,]+(\.\d{1,2})?$/.test(String(el.textContent || '').trim())) continue;
+      if (el.getBoundingClientRect().top < 90) (el.closest('a, button, [role="button"]') || el).classList.add('cmt-masked');
+    }
+    for (const v of document.querySelectorAll('video:not([controlslist~="nodownload"])')) v.setAttribute('controlslist', 'nodownload noplaybackrate');
+  }
+  let hideTimer = null;
+  const hideSoon = () => { clearTimeout(hideTimer); hideTimer = setTimeout(hideForChatters, 120); };
+  new MutationObserver(() => { if (chatOnly) hideSoon(); }).observe(document.documentElement, { childList: true, subtree: true });
+  setInterval(route, 400);
+  // a link to anything but the chats does nothing for a chatter
+  document.addEventListener('click', (ev) => {
+    if (!chatOnly) return;
+    const a = ev.target && ev.target.closest && ev.target.closest('a[href]');
+    if (!a) return;
+    let u; try { u = new URL(a.getAttribute('href'), location.href); } catch { return; }
+    if (u.origin === location.origin && !OPEN_PATHS.test(u.pathname)) { ev.preventDefault(); ev.stopPropagation(); }
+    else if (u.origin !== location.origin) { ev.preventDefault(); ev.stopPropagation(); }
+  }, true);
+  // saving photos and videos: no right-click menu and no dragging them out
+  const onMedia = (t) => t && t.closest && t.closest('img, video, picture, canvas, [style*="background-image"]');
+  document.addEventListener('contextmenu', (ev) => { if (chatOnly && onMedia(ev.target)) ev.preventDefault(); }, true);
+  document.addEventListener('dragstart', (ev) => { if (chatOnly && onMedia(ev.target)) ev.preventDefault(); }, true);
+  function setSecure(on) {
+    chatOnly = !!on;
+    window.postMessage({ 'cmt-secure': 1, chatOnly }, '*');
+    hideForChatters(); route();
+  }
+  try { chrome.runtime.sendMessage({ type: 'cmt-secure-get' }, (r) => { void chrome.runtime.lastError; setSecure(r ? r.chatOnly : true); }); } catch { setSecure(true); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', hideForChatters, { once: true }); else hideForChatters();
+
   // ---- the request log (popup switch) also notes which controls are clicked: their label, never what is typed ----
   // (the worker keeps these only while logging is on, like the requests)
   document.addEventListener('click', (ev) => {
@@ -259,6 +324,7 @@
 
   chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     if (msg && msg.type === 'cmt-ping') { respond({ ok: true }); return false; }
+    if (msg && msg.type === 'cmt-secure') { setSecure(msg.chatOnly); respond({ ok: true }); return false; }
     if (msg && msg.type === 'cmt-translations') { setTranslations(msg); respond({ ok: true }); return false; }
     // a sequence's media step: the item's name into the search box of Fansly's open vault window
     if (msg && msg.type === 'cmt-search' && typeof msg.text === 'string') {

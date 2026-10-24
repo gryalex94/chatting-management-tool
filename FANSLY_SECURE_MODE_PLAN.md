@@ -104,6 +104,24 @@ Extension:
 Test: sign out → fansly.com cookies/localStorage gone, reload shows logged out. Rotate → next
 sign-in works, the old copy on a VA's disk does not.
 
+## Done so far (24 Oct, extension 0.8.0)
+
+Check 0b answered: Fansly's own manager login (Management Session) shows everything (earnings,
+payments, settings, tax, logout), so the extension does the blocking. Built ahead of steps 1–3:
+
+- **Chatter mode** for any browser not signed in as a manager or higher (signed out counts too).
+  Who is a manager comes from our server (sign-in and every heartbeat), never from the browser.
+- **Site lock:** only fansly.com, our server and AdsPower's start page open as pages
+  (`declarativeNetRequest` blocks every other main-frame navigation). Fansly's own loading is untouched.
+- **Chat-only Fansly** (step 4, first cut): only `/messages…` opens (anything else goes back to the
+  last chat); menu items for money, statistics, settings, account and logout are hidden; the wallet
+  balance at the top is hidden; links out of Fansly do nothing; right-click and drag on photos and
+  videos are off, videos get `nodownload`. `page.js` refuses Fansly's wallet, payout, payment, tax,
+  statistics, password, email, 2FA, management-session and logout requests (403).
+- **Fixed server address** (part of step 1): the popup no longer lets anyone change it.
+
+Still open from step 1: memory-only session, shift-only sign-in. Steps 2, 3, 5–7 unchanged.
+
 ## Step 4: chat-only Fansly
 
 - `page.js` allow-list: the chat, vault-read and fan-notes calls the plan already names; block the

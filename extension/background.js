@@ -23,7 +23,8 @@ const set = (obj) => new Promise(r => chrome.storage.local.set(obj, r));
 async function settings() {
   const s = await get(['session', 'apiUrl', 'deviceId']);
   if (!s.deviceId) { s.deviceId = 'd_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36); await set({ deviceId: s.deviceId }); }
-  return { session: s.session || null, apiUrl: (s.apiUrl || DEFAULT_API).replace(/\/+$/, ''), deviceId: s.deviceId };
+  // the server address is fixed in the build: a changed one could hand out a fake "manager" and unlock everything
+  return { session: s.session || null, apiUrl: DEFAULT_API, deviceId: s.deviceId };
 }
 async function saveState() { await set({ state }); }
 
@@ -133,7 +134,7 @@ async function heartbeat() {
     if (!tabs.length) return;
     const out = await api('/api/fansly/presence', { action: 'heartbeat' });
     if (out.account && out.account.username && !state.accountUsername) state.accountUsername = out.account.username;
-    state.jobs = Array.isArray(out.jobs) ? out.jobs : []; state.staff = !!out.staff;
+    state.jobs = Array.isArray(out.jobs) ? out.jobs : []; { const was = state.staff; state.staff = !!out.staff; if (was !== state.staff) applyLock(); }
     state.assigned = out.assigned !== false;
     state.lastError = null; await saveState();
   } catch (e) { if (!e.noSession) { state.lastError = e.message; await saveState(); } }
@@ -185,6 +186,34 @@ async function finishFetch({ status, progress, error }) {
 chrome.tabs.onRemoved.addListener((tabId) => { if (activeJob && activeJob.tabId === tabId) finishFetch({ status: 'cancelled', progress: activeJob.progress, error: 'The Fansly tab was closed' }); });
 
 // ---- wiring ----
+// ---- secure mode: a browser not signed in as a manager or higher is a chatter's browser ----
+// (signed out counts too, so switching the sign-in off unlocks nothing):
+//  - only fansly.com and our own server open as pages; any other website is blocked
+//  - on Fansly only the chats; money, statistics, settings, logout and saving media are blocked
+//    (bridge.js hides and redirects, page.js stops the requests)
+// Who is a manager comes from our server (the sign-in and every heartbeat), never from the browser.
+const STAFF = new Set(['manager', 'head_manager', 'admin', 'owner']);
+const OPEN_SITES = ['fansly.com', new URL(DEFAULT_API).hostname, 'adspower.net', 'adspower.com'];
+async function lockedNow() {
+  const { session } = await settings();
+  return !(session && session.token && state.staff === true);
+}
+async function applyLock() {
+  const locked = await lockedNow();
+  try {
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: [1],
+      addRules: locked ? [{ id: 1, priority: 1, action: { type: 'block' }, condition: { resourceTypes: ['main_frame'], excludedRequestDomains: OPEN_SITES } }] : [],
+    });
+  } catch (e) { console.warn('[cmt] site lock:', e.message); }
+  chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => {
+    void chrome.runtime.lastError;
+    for (const t of tabs || []) try { chrome.tabs.sendMessage(t.id, { type: 'cmt-secure', chatOnly: locked }, () => void chrome.runtime.lastError); } catch { /* ignore */ }
+  });
+  return locked;
+}
+chrome.runtime.onStartup.addListener(() => { applyLock(); });
+
 // An open Fansly tab keeps the old copy of the in-page script after the extension is updated or
 // reloaded, and that copy can no longer hear the panel (no English under his messages, no "put in the
 // box"). Put the current one into every open Fansly tab that doesn't answer, without reloading the tab.
@@ -194,12 +223,14 @@ async function ensureBridge(tabId) {
   try { await chrome.scripting.executeScript({ target: { tabId }, files: ['bridge.js'] }); return true; } catch { return false; }
 }
 chrome.runtime.onInstalled.addListener(() => {
+  applyLock();
   chrome.tabs.query({ url: 'https://fansly.com/*' }, (tabs) => { void chrome.runtime.lastError; for (const t of tabs || []) ensureBridge(t.id); });
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'fansly-event') { enqueue(msg); return false; }
   if (msg && msg.type === 'fansly-tab') { heartbeat(); return false; }
+  if (msg && msg.type === 'cmt-secure-get') { lockedNow().then(locked => respond({ chatOnly: locked })); return true; }
   if (msg && msg.type === 'cmt-ensure-bridge' && msg.tabId != null) { ensureBridge(msg.tabId).then(ok => respond({ ok })); return true; }
   // "Open" on the Messages dashboard: the chat's own tab if it is open already, otherwise a new tab beside this one
   if (msg && msg.type === 'open-chat' && /^\d{5,25}$/.test(String(msg.group || ''))) {
@@ -221,11 +252,12 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'popup-login') {
     (async () => {
       try {
-        const apiUrl = (msg.apiUrl || DEFAULT_API).replace(/\/+$/, '');
+        const apiUrl = DEFAULT_API;
         const res = await fetch(apiUrl + '/api/fansly/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: msg.email, password: msg.password }) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return respond({ error: data.error || ('Could not sign in (HTTP ' + res.status + ')') });
         await set({ session: data, apiUrl });
+        state.staff = STAFF.has(data.user && data.user.role); await saveState(); applyLock();
         state.lastError = null; await saveState();
         heartbeat(); scheduleFlush();
         respond({ ok: true, user: data.user });
@@ -236,7 +268,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg && msg.type === 'popup-logout') {
     (async () => {
       try { await api('/api/fansly/presence', { action: 'logout' }); } catch { /* already out */ }
-      await set({ session: null }); respond({ ok: true });
+      await set({ session: null }); state.staff = false; await saveState(); applyLock(); respond({ ok: true });
     })();
     return true;
   }

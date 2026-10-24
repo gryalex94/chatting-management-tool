@@ -9,12 +9,12 @@ async function render() {
   $('version').textContent = `Extension ${st.version} · browser ${st.deviceId.slice(0, 8)}`;
   if (!st.session) {
     $('login').hidden = false; $('status').hidden = true;
-    $('apiUrl').value = st.apiUrl;
     return;
   }
   $('login').hidden = true; $('status').hidden = false;
   const u = st.session.user || {};
   $('who').textContent = `${u.name || u.email || '?'} (${u.role || '?'})`;
+  $('mode').textContent = (st.state || {}).staff ? 'Manager mode: all of Fansly and other websites open.' : 'Chatter mode: only Fansly\'s chats; money, statistics, settings and other websites are blocked.';
   const s = st.state || {};
   $('account').textContent = s.accountUsername ? `@${s.accountUsername}` : s.accountId ? `#${String(s.accountId).slice(-6)}` : 'not seen yet — open Messages';
   const tabs = await chrome.tabs.query({ url: 'https://fansly.com/*' });
@@ -41,7 +41,7 @@ async function render() {
 $('signin').addEventListener('click', async () => {
   $('loginError').textContent = '';
   $('signin').disabled = true;
-  const out = await send({ type: 'popup-login', email: $('email').value.trim(), password: $('password').value, apiUrl: $('apiUrl').value.trim() });
+  const out = await send({ type: 'popup-login', email: $('email').value.trim(), password: $('password').value });
   $('signin').disabled = false;
   if (!out || out.error) { $('loginError').textContent = (out && out.error) || 'Could not sign in'; return; }
   $('password').value = '';
